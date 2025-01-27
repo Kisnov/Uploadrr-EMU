@@ -8,9 +8,8 @@ from pymediainfo import MediaInfo
 from collections import OrderedDict
 import json
 
-from src.console import console
-    
-    
+from src.console import console, log
+
 class DiscParse():
     def __init__(self):
         pass
@@ -22,34 +21,26 @@ class DiscParse():
         save_dir = f"{base_dir}/tmp/{folder_id}"
         if not os.path.exists(save_dir):
             os.mkdir(save_dir)
+        
         for i in range(len(discs)):
             bdinfo_text = None
             path = os.path.abspath(discs[i]['path'])
+
+            # Check if BD summary or BD full files already exist before proceeding
             for file in os.listdir(save_dir):
                 if file == f"BD_SUMMARY_{str(i).zfill(2)}.txt":
                     bdinfo_text = save_dir + "/" + file
             if bdinfo_text == None or meta_discs == []:
                 if os.path.exists(f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt"):
                     bdinfo_text = os.path.abspath(f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt")
-                else:
-                    bdinfo_text = ""
-                    if sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
-                        try:
-                            # await asyncio.subprocess.Process(['mono', "bin/BDInfo/BDInfo.exe", "-w", path, save_dir])
-                            console.print(f"[bold green]Scanning {path}")
-                            proc = await asyncio.create_subprocess_exec('mono', f"{base_dir}/bin/BDInfo/BDInfo.exe", '-w', path, save_dir)
-                            await proc.wait()
-                        except:
-                            console.print('[bold red]mono not found, please install mono')
 
-                    elif sys.platform.startswith('win32'):
-                        # await asyncio.subprocess.Process(["bin/BDInfo/BDInfo.exe", "-w", path, save_dir])
-                        console.print(f"[bold green]Scanning {path}")
-                        proc = await asyncio.create_subprocess_exec(f"{base_dir}/bin/BDInfo/BDInfo.exe", "-w", path, save_dir)
-                        await proc.wait()
-                        await asyncio.sleep(1)
-                    else:
-                        console.print("[red]Not sure how to run bdinfo on your platform, get support please thanks.")
+                else:
+                    bdinfo_text = ""                
+                    if sys.platform.startswith('darwin'):
+                        await self.remove_system_files(path)
+
+                    await self.run_bdinfo(path, save_dir, base_dir)
+
                 while True:
                     try:
                         if bdinfo_text == "":
@@ -97,8 +88,40 @@ class DiscParse():
                 discs = meta_discs
         
         return discs, discs[0]['bdinfo']
-        
-            
+
+    async def remove_system_files(self, path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                if filename.startswith('._'):
+                    system_file_path = os.path.join(dirpath, filename)
+                    try:
+                        os.remove(system_file_path)  # Remove system file
+                        log.debug(f"Removed system file: {system_file_path}")
+                    except Exception as e:
+                        log.error(f"Error removing {system_file_path}: {e}")
+
+    async def run_bdinfo(self, path, save_dir, base_dir):
+        if sys.platform.startswith('linux') or sys.platform.startswith('darwin'): #Linux / MacOS
+            try:
+                log.info(f"Scanning {path}")
+                proc = await asyncio.create_subprocess_exec(
+                    'mono', f"{base_dir}/bin/BDInfo/BDInfo.exe", '-w', path, save_dir
+                )
+                await proc.wait()
+            except Exception as e:
+                log.error(f"[bold red]Error running Mono: {e}")
+                return None
+        elif sys.platform.startswith('win32'):  # Windows
+            try:
+                console.print(f"[bold green]Scanning {path} for BDInfo.")
+                proc = await asyncio.create_subprocess_exec(
+                    f"{base_dir}/bin/BDInfo/BDInfo.exe", "-w", path, save_dir
+                )
+                await proc.wait()
+            except Exception as e:
+                log.error(f"[bold red ]Error running BDInfo: {e}")
+                return None   
+ 
 
     def parse_bdinfo(self, bdinfo_input, files, path):
         bdinfo = dict()

@@ -2,9 +2,10 @@ import argparse
 import urllib.parse
 import os
 import datetime
+import re
 import traceback
 
-from src.console import console
+from src.console import console, set_log_level
 
 class Args():
     """
@@ -12,6 +13,14 @@ class Args():
     """
     def __init__(self, config):
         self.config = config
+
+    UUID_PATTERN = r'^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
+
+    @staticmethod
+    def validate_mbid(mbid):
+        if not re.match(Args.UUID_PATTERN, mbid):
+            raise argparse.ArgumentTypeError("Invalid MBID format. Please provide a valid release MBID without quote or removal of -")
+        return mbid
 
     def parse(self, args, meta):
         oldArgs = args
@@ -27,10 +36,13 @@ class Args():
         parser.add_argument('-c', '--category', nargs='*', required=False, help="Category [MOVIE, TV, FANRES]", choices=['movie', 'tv', 'fanres'])
         parser.add_argument('-t', '--type', nargs='*', required=False, help="Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]", choices=['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv'])
         parser.add_argument('--source', nargs='*', required=False, help="Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]", choices=['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV'], dest="manual_source")
+        parser.add_argument('-format' '--format', nargs='*', required=False, help="Audio Source [WEB, CD, VINYL]")
         parser.add_argument('-res', '--resolution', nargs='*', required=False, help="Resolution [2160p, 1080p, 1080i, 720p, 576p, 576i, 480p, 480i, 8640p, 4320p, OTHER]", choices=['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other'])
         parser.add_argument('-tmdb', '--tmdb', nargs='*', required=False, help="TMDb ID", type=str, dest='tmdb_manual')
         parser.add_argument('-imdb', '--imdb', nargs='*', required=False, help="IMDb ID", type=str)
         parser.add_argument('-mal', '--mal', nargs='*', required=False, help="MAL ID", type=str)
+        parser.add_argument('-mbid', '--mbid', nargs='?', help="MusicBrainz Release ID", type=self.validate_mbid, dest='mbid_manual')
+        parser.add_argument('-discogs', '--discogs', nargs='*', required=False, help="Discogs Release ID", type=str, dest='discogs_id')
         parser.add_argument('-g', '--tag', nargs='*', required=False, help="Group Tag", type=str)
         parser.add_argument('-serv', '--service', nargs='*', required=False, help="Streaming Service", type=str)
         parser.add_argument('-dist', '--distributor', nargs='*', required=False, help="Disc Distributor e.g.(Criterion, BFI, etc.)", type=str)
@@ -51,7 +63,7 @@ class Args():
         parser.add_argument('-d', '--desc', nargs='*', required=False, help=r'\"[b]Custom Description[/b]\"')
         parser.add_argument('-pb', '--desclink', nargs='*', required=False, help=r'\"https://pastebin.com/URL\"')
         parser.add_argument('-df', '--descfile', nargs='*', required=False, help=r'\"\path\to\description.txt\"')
-        parser.add_argument('-aid', '--auto-insert-desc', dest='auto_desc', action='store_true', help='Uses (file or season folder).txt or decription.txt existing in upload path')        
+        parser.add_argument('-aid', '--auto-insert-desc', dest='auto_desc', action='store_true', help='Uses (file or season folder).txt or description.txt existing in upload path')        
         parser.add_argument('-ih', '--imghost', nargs='*', required=False, help="Image Host", choices=['imgbb', 'ptpimg', 'imgbox', 'pixhost', 'lensdump', 'ptscreens', 'oeimg'])
         parser.add_argument('-siu', '--skip-imagehost-upload', dest='skip_imghost_upload', action='store_true', required=False, help="Skip Uploading to an image host")
         parser.add_argument('-th', '--torrenthash', nargs='*', required=False, help="Torrent Hash to re-use from your client's session directory")
@@ -82,7 +94,7 @@ class Args():
         parser.add_argument('-aq', '--auto-queue', dest='auto_queue', help="Automatically queue files in a directory")
         parser.add_argument('-sq', '--show-queue', dest='show_queue', action='store_true', required=False, help="Show the list of queued files")
         parser.add_argument('-delay', '--delay', dest='delay', type=int, help='Delay between queued torrents in seconds')
-        parser.add_argument('-random', '--random', action='store_true', required=False, help="Randomize queue order")        
+        parser.add_argument('-random', '--random', action='store_true', required=False, help="Randomize queue order")     
         parser.add_argument('-fa', '--full-auto', dest='full_auto', nargs='?', const=True, default=False, type=str, help=argparse.SUPPRESS)
         parser.add_argument('-ua', '--unattended', action='store_true', required=False, help=argparse.SUPPRESS)
         parser.add_argument('-vs', '--vapoursynth', action='store_true', required=False, help="Use vapoursynth for screens (requires vs install)")
@@ -178,6 +190,7 @@ class Args():
                 meta[key] = meta.get(key, None)
             if key in ('trackers'):
                 meta[key] = value
+
 
         return meta, parser, before_args
 

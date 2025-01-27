@@ -4,9 +4,10 @@ import traceback
 import requests
 import re
 import json
-
+import aiofiles
+from tinytag import TinyTag
 from src.bbcode import BBCODE
-from src.console import console
+from src.console import console, log
 from rich import print
 
 class COMMON():
@@ -33,74 +34,186 @@ class COMMON():
             new_torrent.metainfo['info']['source'] = source_flag
             Torrent.copy(new_torrent).write(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]{meta['clean_name']}.torrent", overwrite=True)
     
-    
+
+    async def read_log_file(self, log_file):
+        try:
+            async with aiofiles.open(log_file, 'rb') as log:
+                raw_data = await log.read() 
+                try:
+                    log_contents = raw_data.decode('utf-16')
+                except UnicodeDecodeError:
+                    try:
+                        log_contents = raw_data.decode('utf-8')
+                    except UnicodeDecodeError:
+                        log_contents = raw_data.decode('latin-1', errors='ignore')
+                
+                return log_contents
+        except Exception as e:
+            return f"Error reading log file: {str(e)}"
+
     async def unit3d_edit_desc(self, meta, tracker, comparison=False, desc_header=""):
-        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8').read()
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
+        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8') as basefile:
+            base = await basefile.read() 
+
+        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
             if desc_header != "":
-                descfile.write(desc_header)
-            
+                await descfile.write(desc_header)
+
             bbcode = BBCODE()
-            if meta.get('discs', []) != []:
+            if meta.get('discs', []):
                 discs = meta['discs']
                 if discs[0]['type'] == "DVD":
-                    descfile.write(f"[spoiler=VOB MediaInfo][code]{discs[0]['vob_mi']}[/code][/spoiler]\n")
-                    descfile.write("\n")
+                    await descfile.write(f"[spoiler=VOB MediaInfo][code]{discs[0]['vob_mi']}[/code][/spoiler]\n")
+                    await descfile.write("\n")
                 if len(discs) >= 2:
                     for each in discs[1:]:
                         if each['type'] == "BDMV":
-                            descfile.write(f"[spoiler={each.get('name', 'BDINFO')}][code]{each['summary']}[/code][/spoiler]\n")
-                            descfile.write("\n")
+                            await descfile.write(f"[spoiler={each.get('name', 'BDINFO')}][code]{each['summary']}[/code][/spoiler]\n")
+                            await descfile.write("\n")
                         elif each['type'] == "DVD":
-                            descfile.write(f"{each['name']}:\n")
-                            descfile.write(f"[spoiler={os.path.basename(each['vob'])}][code][{each['vob_mi']}[/code][/spoiler] [spoiler={os.path.basename(each['ifo'])}][code][{each['ifo_mi']}[/code][/spoiler]\n")
-                            descfile.write("\n")
+                            await descfile.write(f"{each['name']}:\n")
+                            await descfile.write(f"[spoiler={os.path.basename(each['vob'])}][code][{each['vob_mi']}[/code][/spoiler] [spoiler={os.path.basename(each['ifo'])}][code][{each['ifo_mi']}[/code][/spoiler]\n")
+                            await descfile.write("\n")
                         elif each['type'] == "HDDVD":
-                            descfile.write(f"{each['name']}:\n")
-                            descfile.write(f"[spoiler={os.path.basename(each['largest_evo'])}][code][{each['evo_mi']}[/code][/spoiler]\n")
-                            descfile.write("\n")
-            desc = base
-            desc = bbcode.convert_pre_to_code(desc)
+                            await descfile.write(f"{each['name']}:\n")
+                            await descfile.write(f"[spoiler={os.path.basename(each['largest_evo'])}][code][{each['evo_mi']}[/code][/spoiler]\n")
+                            await descfile.write("\n")
+            
+            # Process BBCode
+            desc = bbcode.convert_pre_to_code(base)
             desc = bbcode.convert_hide_to_spoiler(desc)
-            if comparison is False:
+            if tracker in ('LDU', 'DEV'):
+                comparison = True
+
+            if not comparison:
                 desc = bbcode.convert_comparison_to_collapse(desc, 1000)
 
+            # Handle music-related content
+            if meta.get('is_music', False):
+                album_cover = meta.get('album_cover', None)
+                album_back = meta.get('album_back', None)
+                display_cover = self.config["DEFAULT"].get('album_covers', 2)
+
+                if display_cover == 1:
+                    if album_cover:
+                        await descfile.write(f"[center][img]{album_cover}[/img][/center]\n\n")
+                elif display_cover >= 2:
+                    if album_cover:
+                        await descfile.write(f"[center][img]{album_cover}[/img]")
+                        if album_back:  
+                            await descfile.write(f" [img]{album_back}[/img]")
+                        await descfile.write("[/center]\n\n")
+                    elif album_back:  
+                        await descfile.write(f"[center][img]{album_back}[/img][/center]\n\n")
+                proof = meta.get('album_proof')
+                if proof:
+                    await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
+
+
+                mbid = meta.get('mbid', False)
+                if mbid:
+                    await descfile.write(f"[center][url=https://musicbrainz.org/release/{mbid}][img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img][/url][/center]")
+                discogs_id = meta.get('discogs_id', False)
+                discogs_url = meta.get('discogs_url', False)
+                if discogs_id:
+                    discogs = f'https://www.discogs.com/release/{discogs_id}'
+                elif discogs_url:
+                    discogs = discogs_url
+                else:
+                    discogs = None                
+                if discogs:
+                    await descfile.write(f"[center][url={discogs}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png[/img][/url][/center]") 
+                allmusic = meta.get('allmusic', False)
+                if allmusic:
+                    await descfile.write(f"[center][url={allmusic}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png[/img][/url][/center]")
+                wikidata = meta.get('wikidata', False)
+                if wikidata:
+                    await descfile.write(f"[center][url={wikidata}][img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url][/center]") 
+                genius = meta.get('genius', False)
+                if genius:
+                    await descfile.write(f"[center][url={genius}][img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url][/center]")    
+
+                tracks = meta.get('tracklist', {})
+                log_file = meta.get('log_files')
+
+                if tracks:
+                    await descfile.write("\n[code][h5]TRACKLIST[/h5]\n")
+                    if len(tracks) > 1:
+                        for disc, disc_tracks in tracks.items():
+                            await descfile.write(f"[u]{disc}[/u]\n")
+
+                            max_track_length = max(len(track) for track in disc_tracks)
+
+                            for track, time in disc_tracks.items():
+                                track_length = len(track)
+                                padding_length = max(0, max_track_length - track_length + 2)
+
+                                # Write the track name with appropriate padding
+                                await descfile.write(f"{track}")
+                                await descfile.write(" " * padding_length)
+                                await descfile.write(f"[{time}]\n")
+
+                            if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
+                                log_contents = await self.read_log_file(log_file[list(tracks.keys()).index(disc)])
+                                if log_contents:
+                                    await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
+
+                            await descfile.write("\n")  # Add a newline for separation between discs
+                    else:
+                        for track, time in next(iter(tracks.values())).items():
+                            track_length = len(track)
+                            length = max(0, 52 - track_length)
+                            await descfile.write(f"{track}")
+                            await descfile.write(" " * length)
+                            await descfile.write(f"[{time}]\n")
+
+                        if log_file:
+                            log_contents = await self.read_log_file(log_file[0])
+                            if log_contents:
+                                await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
+
+                    await descfile.write("[/code]\n")
+
+                if album_cover:
+                    await descfile.write(f"[url=torrent-cover={album_cover} ][/url]")    
+
+            # Handle video trailers and logos
             if tracker not in ('AITHER', 'CBR', 'OE'):
                 add_trailer_enabled = self.config["DEFAULT"].get("add_trailer", False)    
                 if add_trailer_enabled and meta.get("category") == "MOVIE":
                     key = meta.get("youtube")
                     if key:
-                        descfile.write(f"[center][youtube]{key}[/youtube][/center]")
+                        await descfile.write(f"[center][youtube]{key}[/youtube][/center]")
 
             add_logo_enabled = self.config["DEFAULT"].get("add_logo", False)
             if add_logo_enabled:
                 logo = meta.get('logo')
                 logo_size = self.config["DEFAULT"].get("logo_size", 420)
                 if logo:
-                    descfile.write(f"[center][img={logo_size}]{logo}[/img][/center]")  
+                    await descfile.write(f"[center][img={logo_size}]{logo}[/img][/center]")  
 
             img_size = self.config["DEFAULT"].get("img_size", 500)
             if tracker == "CBR":
                 img_size = 350
             inline_imgs = self.config["DEFAULT"].get("inline_imgs", 0)
-            descfile.write(desc)
+            await descfile.write(desc)
             images = meta['image_list']
-            if len(images) > 0: 
-                descfile.write(f"\n[center]")
+            if images: 
+                await descfile.write(f"\n[center]")
                 for each in range(len(images[:int(meta['screens'])])):
                     web_url = images[each]['web_url']
                     raw_url = images[each]['raw_url']
-                    descfile.write(f"[url={web_url}][img={img_size}]{raw_url}[/img][/url] ")
+                    await descfile.write(f"[url={web_url}][img={img_size}]{raw_url}[/img][/url] ")
                     if img_size and inline_imgs:
                         try:
                             inline_imgs = int(inline_imgs) 
                             if each % inline_imgs == inline_imgs - 1:
-                                descfile.write("\n")
+                                await descfile.write("\n")
                         except ValueError:
                             print("[bold][red]WARN[/red]: Invalid value given for inline_imgs in config.[/bold]")
-                descfile.write("[/center]")
+                await descfile.write("[/center]")
 
-
+            # Global signature handling
             use_global_sigs = self.config["DEFAULT"].get("use_global_sigs", False)
             if use_global_sigs:
                 signature = self.config["DEFAULT"].get("global_sig")
@@ -117,20 +230,19 @@ class COMMON():
                 if signature is None or anon_signature is None or pr_signature is None or anon_pr_sig is None:
                     print("[bold][red]WARN[/red]: Global Signatures are turned off, but no signature is provided for selected tracker.[/bold]")
 
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'a', encoding='utf-8') as descfile:
+        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'a', encoding='utf-8') as descfile:
             if meta["personalrelease"]:
                 if meta["anon"] != 0 or self.config["TRACKERS"][tracker].get("anon", False):
-                    descfile.write("\n" + anon_pr_sig)
+                    await descfile.write("\n" + anon_pr_sig)
                 elif meta["anon"] == 0:
-                    descfile.write("\n" + pr_signature)
+                    await descfile.write("\n" + pr_signature)
             else:
                 if meta["anon"] != 0 or self.config["TRACKERS"][tracker].get("anon", False):
-                    descfile.write("\n" + anon_signature)
+                    await descfile.write("\n" + anon_signature)
                 elif meta["anon"] == 0:
-                    descfile.write("\n" + signature)
-             
-        return
+                    await descfile.write("\n" + signature)
 
+        return
     
     
     async def unit3d_region_ids(self, region):
@@ -286,31 +398,6 @@ class COMMON():
             console.print("[bold red]There was an error getting the ptgen \nUploading without ptgen")
             return ""
         return ptgen
-
-
-
-    # async def ptgen(self, meta):
-    #     ptgen = ""
-    #     url = "https://api.iyuu.cn/App.Movie.Ptgen"
-    #     params = {}
-    #     if int(meta.get('imdb_id', '0')) != 0:
-    #         params['url'] = f"tt{meta['imdb_id']}"
-    #     else:
-    #         console.print("[red]No IMDb id was found.")
-    #         params['url'] = console.input(f"[red]Please enter [yellow]Douban[/yellow] link: ")
-    #     try:
-    #         ptgen = requests.get(url, params=params)
-    #         ptgen = ptgen.json()
-    #         ptgen = ptgen['data']['format']
-    #         if "[/img]" in ptgen:
-    #             ptgen = ptgen.split("[/img]")[1]
-    #         ptgen = f"[img]{meta.get('imdb_info', {}).get('cover', meta.get('cover', ''))}[/img]{ptgen}"
-    #     except:
-    #         console.print_exception()
-    #         console.print("[bold red]There was an error getting the ptgen")
-    #         console.print(ptgen)
-    #     return ptgen
-
 
 
     async def filter_dupes(self, dupes, meta):

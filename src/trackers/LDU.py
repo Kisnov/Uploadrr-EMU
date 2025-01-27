@@ -2,8 +2,6 @@
 # import discord
 import asyncio
 import requests
-from difflib import SequenceMatcher
-import os
 import re
 import langcodes
 import platform
@@ -11,7 +9,7 @@ from datetime import datetime
 from rich.pretty import Pretty
 
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class LDU():
@@ -51,6 +49,7 @@ class LDU():
             'TV': '2', 
             'Anime': '8',
             'FANRES': '12',
+            'MUSIC' : '3', 
         }.get(category_name, '0')
 
         keyword_list = [k.strip() for k in keywords.lower().split(',')]
@@ -111,6 +110,14 @@ class LDU():
             'HDTV': '6',
             'ENCODE': '3',
             'UPSCALE': '27',
+            'AAC': '10',
+            'FLAC': '7',
+            'MP3': '11',
+            'ALAC': '8',
+            'AC3': '9',
+            'WAVE': '14',
+            'OGG': '14',
+            'MPEG4': '14',            
             }.get(type, '0')
         if type == 'ENCODE':
             if 'upscale' in edition.lower() or 'ai' in edition.lower():
@@ -140,6 +147,7 @@ class LDU():
     ###############################################################
 
     async def upload(self, meta):
+        is_music = meta.get('is_music', False)
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
         cat_id = await self.get_cat_id(meta['category'], meta.get('genres', ''), meta.get('keywords', ''), meta.get('service', ''), meta.get('edition', ''), meta)
@@ -171,8 +179,7 @@ class LDU():
                 url_string += f"[url=torrent-cover={poster} ] [/url] \n"
             if backdrop:
                 url_string += f"[url=torrent-banner={backdrop} ] [/url]"
-            desc += url_string
-
+            desc += url_string        
         open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
         nfo_file = meta.get('nfo_file', None)
         files = {'torrent': open_torrent}
@@ -180,29 +187,33 @@ class LDU():
             open_nfo = open(nfo_file, 'rb') 
             files['nfo'] = open_nfo
         data = {
-            'name' : manual_name or ldu_name,
-            'description' : desc,
-            'mediainfo' : mi_dump,
-            'bdinfo' : bd_dump, 
-            'category_id' : cat_id,
-            'type_id' : type_id,
-            'resolution_id' : resolution_id,
-            'tmdb' : meta['tmdb'],
-            'imdb' : meta['imdb_id'].replace('tt', ''),
-            'tvdb' : meta['tvdb_id'],
-            'mal' : meta['mal_id'],
-            'igdb' : 0,
-            'anonymous' : anon,
-            'stream' : meta['stream'],
-            'sd' : meta['sd'],
-            'keywords' : meta['keywords'],
-            'personal_release' : int(meta.get('personalrelease', False)),
-            'internal' : 0,
-            'featured' : 0,
-            'free' : 0,
-            'doubleup' : 0,
-            'sticky' : 0,
+            'name': manual_name or ldu_name,
+            'description': desc,
+            'mediainfo': mi_dump,
+            'category_id': cat_id,
+            'type_id': type_id,
+            'tmdb': meta.get('tmdb', 0),
+            'imdb': meta.get('imdb_id', 0).replace('tt', '') if not is_music else 0,
+            'tvdb': meta.get('tvdb_id', 0),
+            'mal': meta.get('mal_id', 0),
+            'igdb': 0,
+            'anonymous': anon,
+            'stream': int(meta.get('stream', False)),
+            'sd': meta['sd'],
+            'keywords': meta['keywords'],
+            'personal_release': int(meta.get('personalrelease', False)),
+            'internal': 0,
+            'featured': 0,
+            'free': 0,
+            'doubleup': 0,
+            'sticky': 0,
         }
+
+        if not is_music:
+            data.update({
+                'resolution_id': resolution_id,
+                'bdinfo': bd_dump,
+            })
         # Internal
         if self.config['TRACKERS'][self.tracker].get('internal', False):
             if meta['tag'] != "" and (meta['tag'][1:] in self.config['TRACKERS'][self.tracker].get('internal_groups', [])):
@@ -221,7 +232,7 @@ class LDU():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip()
         }
-        
+
         if meta['debug']:
             console.print(f"[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
@@ -230,7 +241,6 @@ class LDU():
             success = 'Unknown'
             try:
                 response = requests.post(url=self.upload_url, files=files, data=data, headers=headers, params=params)
-                
                 if response.status_code >= 200 and response.status_code < 300:
                     response_json = response.json()
                     success = response_json.get('success', False)
@@ -379,17 +389,13 @@ class LDU():
         return lang_tag + " " + sub_lang_tag
 
 
-
-    def get_basename(self, meta):
-        path = next(iter(meta['filelist']), meta['path'])
-        return os.path.basename(path)
    
     async def get_name(self, meta):
-        # Have to agree with whoever made HUNO's script
-        # was easier to rebuild name with Prep.get_name() and mofidy 
-        # than to attempt to edit the name thereafter - thanks for the tip
-
-        basename = self.get_basename(meta)
+        """
+        Have to agree with whoever made HUNO's script
+        was easier to rebuild name with Prep.get_name() and mofidy 
+        than to attempt to edit the name thereafter - thanks for the tip!
+        """
         type = meta.get('type', "")
         title = meta.get('title',"")
         alt_title = meta.get('aka', "")
@@ -525,28 +531,42 @@ class LDU():
         console.print("[yellow]Searching for existing torrents on site...")
         params = {
             'api_token': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
-            'tmdbId': meta['tmdb'],
-            'categories[]': await self.get_cat_id(meta['category'], meta.get('genres', ''), meta.get('keywords', ''), meta.get('service', ''), meta.get('edition', ''), meta),
+            'categories[]': await self.get_cat_id(
+                meta['category'], meta.get('genres', ''), meta.get('keywords', ''), 
+                meta.get('service', ''), meta.get('edition', ''), meta
+            ),
             'types[]': await self.get_type_id(meta['type'], meta['edition']),
-            'resolutions[]': await self.get_res_id(meta['resolution']),
-            'name': ""
+            'name': meta.get('album', '') if meta.get('is_music', False) else ""
         }
-        if meta.get('edition', "") != "":
-            params['name'] = params['name'] + f" {meta['edition']}"
+
+        if not meta.get('is_music', False):
+            params.update({
+                'tmdbId': meta['tmdb'],
+                'resolutions[]': await self.get_res_id(meta['resolution'])
+            })
+
+            if meta.get('edition'):
+                params['name'] = f"{meta['edition']}".strip()
+
         try:
-            response = requests.get(url=self.search_url, params=params)
-            response = response.json()
-            for each in response['data']:
+            response = requests.get(url=self.search_url, params=params).json()
+            for each in response.get('data', []):
                 result = each['attributes']['name']
-                split_result = re.split(r'(-\w*\])', result)
-                if len(split_result) > 1:
-                    result = split_result[0] + split_result[1]
                 size = each['attributes']['size']
+
+                # Extract the main part of the name using regex
+                match = re.split(r'(-\w*\])', result)
+                if len(match) > 1:
+                    result = match[0] + match[1]
+                
+                # Filter results and populate dupes
                 if "🔥Eternal" not in result:
                     dupes[result] = size
+        except requests.exceptions.RequestException as req_err:
+            log.error(f'[bold red]Request error while searching for torrents: {req_err}')
         except Exception as e:
-            console.print(f'[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect. Error: {e}')
+            log.error(f'[bold red]Unexpected error during search: {e}')
             await asyncio.sleep(5)
 
+        log.debug(f'[blue]Dupe List[/blue]:\n {dupes}')
         return dupes
-
