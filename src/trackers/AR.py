@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from torf import Torrent
 from src.console import console
 from src.trackers.COMMON import COMMON
+from src.bbcode import BBCODE
  
 class AR():
     def __init__(self, config):
@@ -97,184 +98,186 @@ class AR():
         session_file = os.path.abspath(f"{meta['base_dir']}/data/cookies/{self.tracker}.pkl")
         retry_count = 0
         max_retries = 2
- 
+
         while retry_count < max_retries:
             try:
                 with open(session_file, 'rb') as f:
                     cookie_dict = pickle.load(f)
- 
+
                     # Update the cookie jar with the loaded cookies
                     for name, value in cookie_dict.items():
                         self.session.cookie_jar.update_cookies({name: value})
- 
+
                     if meta.get('debug', False):
                         print("Loaded cookies:", cookie_dict)
                     
-                # Validate the session by making a request after loading cookies
-                try:
-                    await self.session.get('https://alpharatio.cc/torrents.php')
-                    return True  # Session is valid
-                except Exception:
-                    console.print("[yellow]Session might be invalid, retrying...")
- 
-            except (FileNotFoundError, EOFError) as e:
+                    # Validate the session by making a request after loading cookies
+                    try:
+                        response = await self.session.get('https://alpharatio.cc/torrents.php')
+                        if response.status == 200:  # Check for successful response
+                            return True  # Session is valid
+                        else:
+                            console.print(f"[yellow]Session might be invalid, status code: {response.status}. Retrying...")
+                    except aiohttp.ClientError as e:  # Be specific about the exceptions we expect
+                        console.print(f"[yellow]Session might be invalid, network error: {e}. Retrying...")
+            
+            except (FileNotFoundError, EOFError, pickle.UnpicklingError) as e:
                 console.print(f"Session loading error: {e}. Closing session and retrying.")
                 await self.close_session()  # Close the session if there's an error
                 await self.start_session()  # Reinitialize the session
-                retry_count += 1
+            retry_count += 1
+
+        # If we've exhausted our retries, attempt to log in anew
+        console.print("Failed to reuse session after retries. Attempting to log in again...")
+        await self.close_session()
+        await self.start_session()  # Make sure we start with a fresh session
+        if await self.login(meta):
+            console.print("Login successful, new session created.")
+            await self.save_session(meta)
+            return True
+        else:
+            console.print('[red]Failed to validate credentials. Please confirm that the site is up and your credentials are valid.')
+            return False
  
-        console.print("Failed to reuse session after retries. Either try again or delete the cookie.")
-        return False
- 
-    def convert_bbcode(self, desc):
-        desc = desc.replace("[spoiler", "[hide").replace("[/spoiler]", "[/hide]")
-        desc = desc.replace("[center]", "[align=center]").replace("[/center]", "[/align]")
-        desc = desc.replace("[left]", "[align=left]").replace("[/left]", "[/align]")
-        desc = desc.replace("[right]", "[align=right]").replace("[/right]", "[/align]")
-        desc = desc.replace("[code]", "[pre]").replace("[/code]", "[/pre]")
-        desc = desc.replace("[note]", "[quote]").replace("[/note]", "[/quote]")
-        return desc
  
     async def edit_desc(self, meta):
-        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8').read()
-        base = self.convert_bbcode(base)
- 
+        bbcode = BBCODE()
         desc_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt"
-        with open(desc_path, 'w') as desc:
- 
-            # Extracting required media info
-            media_info = meta['mediainfo']['media']['track']
-            filename = next((track['FileNameExtension'] for track in media_info if track["@type"] == "General"), "N/A")
-            duration = next((track['Duration_String3'] for track in media_info if track["@type"] == "General"), "N/A")
-            video_info = next((track for track in media_info if track["@type"] == "Video"), {})
-            video_encode = meta.get('video_encode', '')
-            audio_info = next((track for track in media_info if track["@type"] == "Audio"), {})
-            subtitles_list = next((track.get('Text_Language_List', "N/A") for track in media_info if track["@type"] == "General"), "N/A")
-            if subtitles_list != "N/A":
-                subtitles = ', '.join(sorted(set(subtitles_list.split(' / '))))  # Remove duplicates and sort
-            else:
-                subtitles = "N/A"
-            
-            resolution = f"{video_info.get('Width', 'N/A')} x {video_info.get('Height', 'N/A')}"
-            video_details = []
-            if video_info:
-                bitrate = video_info.get('BitRate_String', 'N/A')
-                framerate = video_info.get('FrameRate_String', 'N/A')
-                video_details.append(resolution)
-                if bitrate != "N/A":
-                    video_details.append(bitrate)
-                if framerate != "N/A":
-                    video_details.append(framerate)
-                video_details.append(video_encode)
-            video_details_str = ' / '.join(video_details) if video_details else "N/A"
+        if meta.get('is_music', False):
+            common = COMMON(config=self.config)
+            desc = await common.create_music_description(meta, self.tracker)            
+            with open(desc_path, 'r', encoding='utf-8') as file:
+                desc = file.read()
+                        
+            desc = bbcode.clean_for_ar(desc)
+            with open(desc_path, 'w', encoding='utf-8') as file:
+                file.write(desc)
 
-            audio_details = []
-            if audio_info:
-                audio = meta.get('audio', "N/A")
-                bitrate = audio_info.get('BitRate_String', 'N/A')
-                audio_details.append(audio)
-                if bitrate != "N/A":
-                    audio_details.append(bitrate)
-            audio_details_str = ' @ '.join(audio_details) if audio_details else "N/A"
- 
-            # Convert size from bytes to MB or GB
-            size_bytes = int(media_info[0].get('FileSize', 0)) if media_info else 0
-            if size_bytes < 1024 * 1024:  # Less than 1 MB (smol pdf?)
-                size = f"{size_bytes} Bytes"
-            elif size_bytes < 1024 * 1024 * 1024:  # Less than 1 GB
-                size = f"{size_bytes / (1024 * 1024):.2f} MB"
-            else:  # 1 GB or more
-                size = f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
- 
-            imdb_id = meta.get('imdb_id')
-            category = meta['category'].lower()
-            tmdb_id = meta.get('tmdb')
- 
-            plot = meta.get('overview', '') or meta['imdb_info'].get('plot', '')
-            add_logo_enabled = self.config["DEFAULT"].get("add_logo", False)
-            if add_logo_enabled:
-                logo = meta.get('logo')
-                if logo:
-                    desc.write(f"[align=center][img]{logo}[/img][/align]\n")  
-            # Writing media details
-            desc.write(f"[code]Filename........: {filename}\n")
-            desc.write(f"Duration........: {duration}\n")
-            desc.write(f"Video...........: {video_details_str}\n")
-            desc.write(f"Audio...........: {audio_details_str}\n")
-            desc.write(f"Subtitles.......: {subtitles}\n")
-            desc.write(f"Size............: {size}\n")
-            desc.write(f"IMDB............:[/code] [url]https://www.imdb.com/title/tt{imdb_id}/[/url]\n")
-            desc.write(f"[code]TMDB............:[/code] [url]https://www.themoviedb.org/{category}/{tmdb_id}[/url]\n")
-            desc.write(f"[code]Plot............: {plot}[/code]\n\n")
- 
-            if meta.get('bdinfo') is not None:
-                bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
-                desc.write("[hide=BD iNFO]" + bd_dump + "[/hide]\n\n")
-            else:
-                mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", 'r', encoding='utf-8').read()[:-65].strip()
-                desc.write("[hide=Mediainfo]" + mi_dump + "[/hide]\n\n")
- 
-            images = meta.get('image_list', [])
-            if images:
-                desc.write("[hide=Screenshots][align=center]\n")
-                for each in images:
-                    raw_url = each['raw_url']
-                    desc.write(f"[img]{raw_url}[/img] ")
-                desc.write("[/align][/hide]\n")
- 
-            desc.write("\n\n" + base)
+        else:
+            base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8').read()
+            base = bbcode.clean_for_ar(base)
+    
+            with open(desc_path, 'w') as desc:
+    
+                # Extracting required media info
+                media_info = meta['mediainfo']['media']['track']
+                filename = next((track['FileNameExtension'] for track in media_info if track["@type"] == "General"), "N/A")
+                duration = next((track['Duration_String3'] for track in media_info if track["@type"] == "General"), "N/A")
+                video_info = next((track for track in media_info if track["@type"] == "Video"), {})
+                video_encode = meta.get('video_encode', '')
+                audio_info = next((track for track in media_info if track["@type"] == "Audio"), {})
+                subtitles_list = next((track.get('Text_Language_List', "N/A") for track in media_info if track["@type"] == "General"), "N/A")
+                if subtitles_list != "N/A":
+                    subtitles = ', '.join(sorted(set(subtitles_list.split(' / '))))  # Remove duplicates and sort
+                else:
+                    subtitles = "N/A"
+                
+                resolution = f"{video_info.get('Width', 'N/A')} x {video_info.get('Height', 'N/A')}"
+                video_details = []
+                if video_info:
+                    bitrate = video_info.get('BitRate_String', 'N/A')
+                    framerate = video_info.get('FrameRate_String', 'N/A')
+                    video_details.append(resolution)
+                    if bitrate != "N/A":
+                        video_details.append(bitrate)
+                    if framerate != "N/A":
+                        video_details.append(framerate)
+                    video_details.append(video_encode)
+                video_details_str = ' / '.join(video_details) if video_details else "N/A"
+
+                audio_details = []
+                if audio_info:
+                    audio = meta.get('audio', "N/A")
+                    bitrate = audio_info.get('BitRate_String', 'N/A')
+                    audio_details.append(audio)
+                    if bitrate != "N/A":
+                        audio_details.append(bitrate)
+                audio_details_str = ' @ '.join(audio_details) if audio_details else "N/A"
+    
+                # Convert size from bytes to MB or GB
+                size_bytes = int(media_info[0].get('FileSize', 0)) if media_info else 0
+                if size_bytes < 1024 * 1024:  # Less than 1 MB (smol pdf?)
+                    size = f"{size_bytes} Bytes"
+                elif size_bytes < 1024 * 1024 * 1024:  # Less than 1 GB
+                    size = f"{size_bytes / (1024 * 1024):.2f} MB"
+                else:  # 1 GB or more
+                    size = f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+    
+                imdb_id = meta.get('imdb_id')
+                category = meta['category'].lower()
+                tmdb_id = meta.get('tmdb')
+    
+                plot = meta.get('overview', '') or meta['imdb_info'].get('plot', '')
+                add_logo_enabled = self.config["DEFAULT"].get("add_logo", False)
+                if add_logo_enabled:
+                    logo = meta.get('logo')
+                    if logo:
+                        desc.write(f"[align=center][img]{logo}[/img][/align]\n")  
+                # Writing media details
+                desc.write(f"[code]Filename........: {filename}\n")
+                desc.write(f"Duration........: {duration}\n")
+                desc.write(f"Video...........: {video_details_str}\n")
+                desc.write(f"Audio...........: {audio_details_str}\n")
+                desc.write(f"Subtitles.......: {subtitles}\n")
+                desc.write(f"Size............: {size}\n")
+                desc.write(f"IMDB............:[/code] [url]https://www.imdb.com/title/tt{imdb_id}/[/url]\n")
+                desc.write(f"[code]TMDB............:[/code] [url]https://www.themoviedb.org/{category}/{tmdb_id}[/url]\n")
+                desc.write(f"[code]Plot............: {plot}[/code]\n\n")
+    
+                if meta.get('bdinfo') is not None:
+                    bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
+                    desc.write("[hide=BD iNFO]" + bd_dump + "[/hide]\n\n")
+                else:
+                    mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", 'r', encoding='utf-8').read()[:-65].strip()
+                    desc.write("[hide=Mediainfo]" + mi_dump + "[/hide]\n\n")
+    
+                images = meta.get('image_list', [])
+                if images:
+                    desc.write("[hide=Screenshots][align=center]\n")
+                    for each in images:
+                        raw_url = each['raw_url']
+                        desc.write(f"[img]{raw_url}[/img] ")
+                    desc.write("[/align][/hide]\n")
+    
+                desc.write("\n\n" + base)
  
     async def get_cat_id(self, meta, for_search=False):
         category_name = meta.get('category')
         resolution = meta.get('resolution', '')
-        category_id = {
-            'MOVIE': '8',
-            'TV': '1',
-        }.get(category_name, '0')
- 
-        if for_search:  # Why not same for search!?
-            if category_name == 'MOVIE':
-                if meta.get('sd'):
-                    category_id = '8'
-                elif meta.get('is_disc'):
-                    category_id = '15'  
-                elif resolution in ('8640p', '4320p', '2160p'):
-                    category_id = '10'                                      
-                else:
-                    category_id = '9'
-            elif category_name == 'TV':
-                if meta.get('sd'):
-                    category_id = '5' if meta.get('tv_pack') else '1'
-                elif meta.get('is_disc'):
-                    category_id = '15'
-                elif resolution in ('8640p', '4320p', '2160p'):
-                    category_id = '7' if meta.get('tv_pack') else '3'
-                elif meta.get('tv_pack'):
-                    category_id = '6'
-                else:
-                    category_id = '2'
-        else:  
-            if category_name == 'MOVIE':
-                if meta.get('sd'):
-                    category_id = '7'
-                elif meta.get('is_disc'):
-                    category_id = '14'
-                elif resolution in ('8640p', '4320p', '2160p'):
-                    category_id = '9'
-                else:
-                    category_id = '8'
-            elif category_name == 'TV':
-                if meta.get('sd'):
-                    category_id = '4' if meta.get('tv_pack') else '0'
-                elif meta.get('is_disc'):
-                    category_id = '14'
-                elif resolution in ('8640p', '4320p', '2160p'):
-                    category_id = '6' if meta.get('tv_pack') else '2'
-                elif meta.get('tv_pack'):
-                    category_id = '5'
-                else:
-                    category_id = '1'
- 
+        anime = meta.get('anime', False)
+        sd = meta.get('sd', False)
+        is_disc = meta.get('is_disc', False)
+        tv_pack = meta.get('tv_pack', False)
+
+        categories = {
+            'MOVIE': '8' if for_search else '7',
+            'TV': '1' if for_search else '0',
+            'ANIME': '16',
+            'MUSIC': '28',
+        }
+        category_id = categories.get(category_name, '0')
+
+        if category_name in ('MOVIE', 'TV'):
+            if anime:
+                category_id = '16' if sd else '17' if for_search else '16' if sd else '15'
+            elif sd:
+                if category_name == 'MOVIE':
+                    category_id = '8' if for_search else '7'
+                else:  # TV
+                    category_id = '5' if tv_pack and for_search else '1'
+            elif is_disc:
+                category_id = '15' if for_search else '14'
+            elif resolution in ('8640p', '4320p', '2160p'):
+                if category_name == 'MOVIE':
+                    category_id = '10' if for_search else '9'
+                else:  # TV
+                    category_id = '7' if tv_pack and for_search else '6' if not for_search and tv_pack else '3' if for_search else '2'
+            else:
+                if category_name == 'TV':
+                    category_id = '6' if tv_pack and for_search else '2'
+                else:  # MOVIE
+                    category_id = '9' if for_search else '8'
+
         return category_id
  
     def get_language_tag(self, meta):
@@ -308,14 +311,18 @@ class AR():
         return os.path.basename(path)
  
     async def get_name(self, meta):
-        basename = self.get_basename(meta)
+        manual_name = meta.get('manual_name')
         type = meta.get('type', "")
         title = meta.get('title',"")
+        artist = meta.get('artist', "")
+        album = meta.get('album', "")
         year = meta.get('year', "")
         resolution = meta.get('resolution', "")
         if resolution == "OTHER":
             resolution = ""
         audio = meta.get('audio', "")
+        bit_depth = meta.get('bit_depth', "")
+        bitrate = meta.get('bitrate', "")        
         lang_tag = self.get_language_tag(meta)
         service = meta.get('service', "")
         season = meta.get('season', "")
@@ -425,7 +432,20 @@ class AR():
             elif type == "HDTV": #HDTV
                 name = f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}"
                 potential_missing = []
- 
+        elif meta['category'] == "MUSIC": #MUSIC SPECIFIC
+            source = f'{source} ' if source else ''
+            tag = '' if tag == "-NOGRP" else tag
+            manual_edition = meta.get('manual_edition')
+            edition = manual_edition if manual_edition else edition
+            ed = f"[{edition}]" if edition else ''
+            bd = f"{bit_depth}bit" if bit_depth else ''  
+            potential_missing = []
+
+            if type in ['ALAC', 'FLAC', 'WAV']:
+                name = f"{artist} {album} {year} {ed} {source}{type} {bd} {tag}"
+            else:
+                name =  f"{artist} {album} {year} {ed} {source}{type} {bitrate} {tag}"
+
         name = name.replace(':', '').replace("'", '').replace('DD+', 'DDP')
         name = '.'.join(part for part in name.split() if part)
         return name
@@ -492,7 +512,8 @@ class AR():
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
         await self.edit_desc(meta)
- 
+        is_music = meta.get("is_music", False)
+
         # Read the description
         desc_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt"
         try:
@@ -502,7 +523,7 @@ class AR():
             raise Exception(f"Description file not found at {desc_path} ")
  
         # Handle cover image input
-        cover = meta.get('poster') or meta["imdb_info"].get("cover")
+        cover = (meta.get('poster') or meta["imdb_info"].get("cover")) if not is_music else meta.get("album_cover")
         while cover is None and not meta.get("unattended", False):
             cover = Prompt.ask("No Poster was found. Please input a link to a poster:", default="")
             if not re.match(r'https?://.*\.(jpg|png|gif)$', cover):
@@ -517,6 +538,8 @@ class AR():
  
         imdb_id = meta.get('imdb_id', '')
         tags = f"tt{imdb_id}, {genres}" if imdb_id else genres
+        if tags == None:
+            tags = ''
  
         # Get initial response and extract auth key
         initial_response = await self.get_initial_response()
@@ -530,13 +553,13 @@ class AR():
             raise Exception("Session cookie not found.")
 
         manual_name = meta.get('manual_name')
-        ar_name = await self.get_name(meta) if not manual_name else manual_name
+        ar_name = manual_name or await self.get_name(meta)
 
         data = {
             "submit": "true",
             "auth": auth_key, 
-            "type": ar_name,
-            "title": await self.get_name(meta),
+            "type": await self.get_cat_id(meta),
+            "title": ar_name,
             "tags": tags,
             "image": cover,
             "desc": desc,
