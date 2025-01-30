@@ -14,8 +14,8 @@ class ACM():
         self.config = config
         self.tracker = 'ACM'
         self.source_flag = 'AsianCinema'
-        self.upload_url = 'https://asiancinema.me/api/torrents/upload'
-        self.search_url = 'https://asiancinema.me/api/torrents/filter'
+        self.upload_url = 'https://eiga.moi/api/torrents/upload'
+        self.search_url = 'https://eiga.moi/api/torrents/filter'
         self.banned_groups = [""]
         self.signature = None
         pass
@@ -54,12 +54,6 @@ class ACM():
                     type_string = "UHD REMUX"
             else:
                 type_string = meta['type']
-            # else:
-            #     acceptable_res = ["2160p", "1080p", "1080i", "720p", "576p", "576i", "540p", "480p", "Other"]
-            #     if meta['resolution'] in acceptable_res:
-            #         type_id = meta['resolution']
-            #     else:   
-            #         type_id = "Other"
         return type_string
 
     async def get_type_id(self, type):
@@ -199,7 +193,6 @@ class ACM():
             anon = 0
 
         if meta['bdinfo'] != None:
-            # bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
             mi_dump = None
             bd_dump = ""
             for each in meta['discs']:
@@ -313,7 +306,48 @@ class ACM():
                 console.print(f"[red]Failed to close torrent file: {e}[/red]")
 
             return success
-    
+
+    async def edit_desc(self, meta):
+        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8').read()
+        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
+            from src.bbcode import BBCODE
+            # Add This line for all web-dls
+            if meta['type'] == 'WEBDL' and meta.get('service_longname', '') != '':
+                descfile.write(f"[center][b][color=#ff00ff][size=18]This release is sourced from {meta['service_longname']} and is not transcoded, just remuxed from the direct {meta['service_longname']} stream[/size][/color][/b][/center]")
+            bbcode = BBCODE()
+            if meta.get('discs', []) != []:
+                discs = meta['discs']
+                if discs[0]['type'] == "DVD":
+                    descfile.write(f"[spoiler=VOB MediaInfo][code]{discs[0]['vob_mi']}[/code][/spoiler]\n")
+                    descfile.write("\n")
+                if len(discs) >= 2:
+                    for each in discs[1:]:
+                        if each['type'] == "BDMV":
+                            pass
+                        if each['type'] == "DVD":
+                            descfile.write(f"{each['name']}:\n")
+                            descfile.write(f"[spoiler={os.path.basename(each['vob'])}][code][{each['vob_mi']}[/code][/spoiler] [spoiler={os.path.basename(each['ifo'])}][code][{each['ifo_mi']}[/code][/spoiler]\n")
+                            descfile.write("\n")
+            desc = base
+            desc = bbcode.convert_pre_to_code(desc)
+            desc = bbcode.convert_hide_to_spoiler(desc)
+            desc = bbcode.convert_comparison_to_collapse(desc, 1000)
+            desc = desc.replace('[img]', '[img=300]')
+            descfile.write(desc)
+            images = meta['image_list']
+            if len(images) > 0:
+                descfile.write("[center]")
+                for each in range(len(images[:int(meta['screens'])])):
+                    web_url = images[each]['web_url']
+                    img_url = images[each]['img_url']
+                    descfile.write(f"[url={web_url}][img=350]{img_url}[/img][/url]")
+                descfile.write("[/center]")
+            if self.signature is not None:
+                descfile.write(self.signature)
+            descfile.close()
+        return
+
+
     async def search_existing(self, meta):
         dupes = {}
         console.print("[yellow]Searching for existing torrents on site...")
