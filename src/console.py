@@ -5,7 +5,8 @@ from rich.logging import RichHandler
 
 # Define log colors and theme
 log_colors = Theme({
-    'logging.level.debug': 'bold blue',
+    'logging.level.debug': 'bold magenta',
+    'logging.level.dinfo': 'bold blue',
     'logging.level.info': 'green',
     'logging.level.warning': 'bold yellow',
     'logging.level.error': 'bold red',
@@ -23,12 +24,26 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True, show_time=False, markup=True, console=console)]
 )
 
+logging.DINFO = logging.INFO + 5  # Between INFO and DEBUG (avoids connections prints)
+logging.addLevelName(logging.DINFO, 'DINFO')
+
+def dinfo(self, message, *args, **kws):
+    if self.isEnabledFor(logging.DINFO):
+        self._log(logging.DINFO, message, args, **kws)
+
+logging.Logger.dinfo = dinfo
+
 # Get a logger instance
 log = logging.getLogger(__name__)
 
 
-def set_log_level(debug=False):
-    level = logging.DEBUG if debug else logging.INFO
+def set_log_level(debug=False, ddebug=False):
+    if ddebug:
+        level = logging.DEBUG
+    elif debug:
+        level = logging.DINFO
+    else:
+        level = logging.INFO
 
     # Update the root logger level
     root_logger = logging.getLogger()

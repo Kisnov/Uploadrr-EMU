@@ -30,7 +30,7 @@ class MusicBrainzAPI:
                 return None
 
         full_url = f"{self.BASE_URL}{endpoint}?{urlencode(params)}"
-        log.debug(f"Querying URL: {full_url}")
+        log.dinfo(f"Querying URL: {full_url}")
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, sync_request)
@@ -69,10 +69,10 @@ class MusicBrainzAPI:
     async def search_musicbrainz_by_barcode(self, barcode: str, meta: Dict[str, Any]) -> None:
         """Asynchronously search MusicBrainz by barcode and populate meta dictionary."""
         releases = await self.search_by_barcode(barcode)
-        log.debug("Search by barcode response: %s", releases)  # Debug
+        log.dinfo("Search by barcode response: %s", releases)  # Debug
         if releases and 'releases' in releases and releases['releases']:
             best_release = releases['releases'][0]
-            log.debug("Best release found: %s", best_release)  # Debug
+            log.dinfo("Best release found: %s", best_release)  # Debug
             meta['mbid'] = best_release.get('id', '')
             meta['artist'] = best_release['artist-credit'][0]['name']
             meta['album'] = best_release.get('title', '')
@@ -151,7 +151,7 @@ class MusicBrainzAPI:
             # Choose the best match from filtered results
             if exact_matches:
                 correct_release = exact_matches[0]
-                log.debug(f"Correct release: {correct_release}")
+                log.dinfo(f"Correct release: {correct_release}")
                 meta['mbid'] = correct_release.get('id', '')
                 await self.fetch_musicbrainz_mbid(meta['mbid'], meta)
             else:
@@ -163,7 +163,6 @@ class MusicBrainzAPI:
     async def fetch_musicbrainz_mbid(self, mbid: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         """Asynchronously fetch detailed release information by MBID and populate meta dictionary."""
         release = await self.get_release_by_id(mbid, includes=["recordings", "work-level-rels", "genres", "labels", "url-rels", "release-groups"])
-        log.debug("Fetched release:", release)  # Debug
         if release:
             # Fill meta with basic album info
             meta['album'] = release.get('title', meta.get('album'))
@@ -295,7 +294,7 @@ class MusicBrainzAPI:
     async def get_image_list(self, mbid: str) -> Dict[str, Any]:
         cover_aa = "http://coverartarchive.org/release/"
         url = f"{cover_aa}{mbid}"
-        log.debug(f"[DEBUG] Querying Cover Art Archive: {url}") 
+        log.dinfo(f"Querying Cover Art Archive: {url}") 
 
         def sync_request():
             try:

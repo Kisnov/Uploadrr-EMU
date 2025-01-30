@@ -82,100 +82,15 @@ class COMMON():
             # Process BBCode
             desc = bbcode.convert_pre_to_code(base)
             desc = bbcode.convert_hide_to_spoiler(desc)
-            if tracker in ('LDU', 'DEV'):
+            if tracker in ('LDU', 'BLU', 'LST', 'RHD', 'RF', 'AITHER'):
                 comparison = True
 
             if not comparison:
                 desc = bbcode.convert_comparison_to_collapse(desc, 1000)
 
-            # Handle music-related content
+            # # Handle music-related content
             if meta.get('is_music', False):
-                album_cover = meta.get('album_cover', None)
-                album_back = meta.get('album_back', None)
-                display_cover = self.config["DEFAULT"].get('album_covers', 2)
-
-                if display_cover == 1:
-                    if album_cover:
-                        await descfile.write(f"[center][img]{album_cover}[/img][/center]\n\n")
-                elif display_cover >= 2:
-                    if album_cover:
-                        await descfile.write(f"[center][img]{album_cover}[/img]")
-                        if album_back:  
-                            await descfile.write(f" [img]{album_back}[/img]")
-                        await descfile.write("[/center]\n\n")
-                    elif album_back:  
-                        await descfile.write(f"[center][img]{album_back}[/img][/center]\n\n")
-                proof = meta.get('album_proof')
-                if proof:
-                    await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
-
-
-                mbid = meta.get('mbid', False)
-                if mbid:
-                    await descfile.write(f"[center][url=https://musicbrainz.org/release/{mbid}][img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img][/url][/center]")
-                discogs_id = meta.get('discogs_id', False)
-                discogs_url = meta.get('discogs_url', False)
-                if discogs_id:
-                    discogs = f'https://www.discogs.com/release/{discogs_id}'
-                elif discogs_url:
-                    discogs = discogs_url
-                else:
-                    discogs = None                
-                if discogs:
-                    await descfile.write(f"[center][url={discogs}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png[/img][/url][/center]") 
-                allmusic = meta.get('allmusic', False)
-                if allmusic:
-                    await descfile.write(f"[center][url={allmusic}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png[/img][/url][/center]")
-                wikidata = meta.get('wikidata', False)
-                if wikidata:
-                    await descfile.write(f"[center][url={wikidata}][img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url][/center]") 
-                genius = meta.get('genius', False)
-                if genius:
-                    await descfile.write(f"[center][url={genius}][img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url][/center]")    
-
-                tracks = meta.get('tracklist', {})
-                log_file = meta.get('log_files')
-
-                if tracks:
-                    await descfile.write("\n[code][h5]TRACKLIST[/h5]\n")
-                    if len(tracks) > 1:
-                        for disc, disc_tracks in tracks.items():
-                            await descfile.write(f"[u]{disc}[/u]\n")
-
-                            max_track_length = max(len(track) for track in disc_tracks)
-
-                            for track, time in disc_tracks.items():
-                                track_length = len(track)
-                                padding_length = max(0, max_track_length - track_length + 2)
-
-                                # Write the track name with appropriate padding
-                                await descfile.write(f"{track}")
-                                await descfile.write(" " * padding_length)
-                                await descfile.write(f"[{time}]\n")
-
-                            if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
-                                log_contents = await self.read_log_file(log_file[list(tracks.keys()).index(disc)])
-                                if log_contents:
-                                    await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
-
-                            await descfile.write("\n")  # Add a newline for separation between discs
-                    else:
-                        for track, time in next(iter(tracks.values())).items():
-                            track_length = len(track)
-                            length = max(0, 52 - track_length)
-                            await descfile.write(f"{track}")
-                            await descfile.write(" " * length)
-                            await descfile.write(f"[{time}]\n")
-
-                        if log_file:
-                            log_contents = await self.read_log_file(log_file[0])
-                            if log_contents:
-                                await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
-
-                    await descfile.write("[/code]\n")
-
-                if album_cover:
-                    await descfile.write(f"[url=torrent-cover={album_cover} ][/url]")    
+                await self.create_music_description(meta, tracker)
 
             # Handle video trailers and logos
             if tracker not in ('AITHER', 'CBR', 'OE'):
@@ -243,7 +158,93 @@ class COMMON():
                     await descfile.write("\n" + signature)
 
         return
-    
+
+    async def create_music_description(self, meta, tracker):
+        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
+            album_cover = meta.get('album_cover', None)
+            album_back = meta.get('album_back', None)
+            display_cover = self.config["DEFAULT"].get('album_covers', 2)
+            if display_cover >= 1:
+                if album_cover:
+                    await descfile.write(f"[center][img]{album_cover}[/img]")
+                    if display_cover >= 2 and album_back:
+                        await descfile.write(f" [img]{album_back}[/img]")
+                    await descfile.write("[/center]\n\n")
+                elif album_back:
+                    await descfile.write(f"[center][img]{album_back}[/img][/center]\n\n")
+            proof = meta.get('album_proof')
+            if proof:
+                await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
+            mbid = meta.get('mbid', False)
+            if mbid:
+                await descfile.write(f"[center][url=https://musicbrainz.org/release/{mbid}][img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img][/url][/center]")
+            discogs_id = meta.get('discogs_id', False)
+            discogs_url = meta.get('discogs_url', False)
+            if discogs_id:
+                discogs = f'https://www.discogs.com/release/{discogs_id}'
+            elif discogs_url:
+                discogs = discogs_url
+            else:
+                discogs = None
+            if discogs:
+                await descfile.write(f"[center][url={discogs}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png[/img][/url][/center]")
+            allmusic = meta.get('allmusic', False)
+            if allmusic:
+                await descfile.write(f"[center][url={allmusic}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png[/img][/url][/center]")
+            wikidata = meta.get('wikidata', False)
+            if wikidata:
+                await descfile.write(f"[center][url={wikidata}][img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url][/center]") 
+            genius = meta.get('genius', False)
+            if genius:
+                await descfile.write(f"[center][url={genius}][img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url][/center]")    
+
+            tracks = meta.get('tracklist', {})
+            if tracks:
+                await descfile.write("\n[code][h5]TRACKLIST[/h5]\n")
+                if len(tracks) > 1:
+                    for disc, disc_tracks in tracks.items():
+                        await descfile.write(f"[u]{disc}[/u]\n")
+
+                        max_track_length = max(len(track) for track in disc_tracks)
+
+                        for track, time in disc_tracks.items():
+                            track_length = len(track)
+                            padding_length = max(0, max_track_length - track_length + 2)
+
+                            # Write the track name with appropriate padding
+                            await descfile.write(f"{track}")
+                            await descfile.write(" " * padding_length)
+                            await descfile.write(f"[{time}]\n")
+
+                        log_file = meta.get('log_files', [])
+                        if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
+                            log_contents = self.read_log_file(log_file[list(tracks.keys()).index(disc)])
+                            if log_contents:
+                                await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
+
+                        await descfile.write("\n")  # Add a newline for separation between discs
+                else:
+                    for track, time in next(iter(tracks.values())).items():
+                        track_length = len(track)
+                        length = max(0, 52 - track_length)
+                        await descfile.write(f"{track}")
+                        await descfile.write(" " * length)
+                        await descfile.write(f"[{time}]\n")
+
+                    log_file = meta.get('log_files', [])
+                    if log_file:
+                        log_contents = self.read_log_file(log_file[0])
+                        if log_contents:
+                            await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
+
+                await descfile.write("[/code]\n")
+
+            if album_cover and tracker in ("LDU"):
+                await descfile.write(f"[url=torrent-cover={album_cover} ][/url]")  
+
+            # return "\n".join(desc)
+            return
+
     
     async def unit3d_region_ids(self, region):
         region_id = {
@@ -407,50 +408,24 @@ class COMMON():
             
         new_dupes = {}
         for each in dupes:
-            if meta.get('sd', 0) == 1:
-                remove_set = set()
-            else:
-                remove_set = set({meta['resolution']})
+            remove_set = set({meta.get('resolution')}) if meta.get('sd', 0) != 1 else set()
             search_combos = [
-                {
-                    'search' : meta['hdr'],
-                    'search_for' : {'HDR', 'PQ10'},
-                    'update' : {'HDR|PQ10'}
-                },
-                {
-                    'search' : meta['hdr'],
-                    'search_for' : {'DV'},
-                    'update' : {'DV|DoVi'}
-                },
-                {
-                    'search' : meta['hdr'],
-                    'search_not' : {'DV', 'DoVi', 'HDR', 'PQ10'},
-                    'update' : {'!(DV)|(DoVi)|(HDR)|(PQ10)'}
-                },
-                {
-                    'search' : str(meta.get('tv_pack', 0)),
-                    'search_for' : '1',
-                    'update' : {fr"{meta['season']}(?!E\d+)"}
-                },
-                {
-                    'search' : meta['episode'],
-                    'search_for' : meta['episode'],
-                    'update' : {meta['season'], meta['episode']}
-                }
+                {'search' : meta.get('hdr', ''), 'search_for' : {'HDR', 'PQ10'}, 'update' : {'HDR|PQ10'}},
+                {'search' : meta.get('hdr', ''), 'search_for' : {'DV'}, 'update' : {'DV|DoVi'}},
+                {'search' : meta.get('hdr', ''), 'search_not' : {'DV', 'DoVi', 'HDR', 'PQ10'}, 'update' : {'!(DV)|(DoVi)|(HDR)|(PQ10)'}},
+                {'search' : str(meta.get('tv_pack', 0)), 'search_for' : '1', 'update' : {fr"{meta.get('season')}(?!E\d+)"}},
+                {'search' : meta.get('episode', ''), 'search_for' : meta.get('episode', ''), 'update' : {meta.get('season', ''), meta.get('episode', '')}}
             ]
-            search_matches = [
-                {
-                    'if' : {'REMUX', 'WEBDL', 'WEBRip', 'HDTV'},
-                    'in' : meta['type']
-                }
-            ]
+            search_matches = [{'if' : {'REMUX', 'WEBDL', 'WEBRip', 'HDTV'}, 'in' : meta.get('type', '')}]
+            
             for s in search_combos:
-                if s.get('search_for') not in (None, ''):
+                if isinstance(s.get('search'), str) and s.get('search_for'):
                     if any(re.search(x, s['search'], flags=re.IGNORECASE) for x in s['search_for']):
                         remove_set.update(s['update'])
-                if s.get('search_not') not in (None, ''):
+                if isinstance(s.get('search_not'), str) and s.get('search_not'):
                     if not any(re.search(x, s['search'], flags=re.IGNORECASE) for x in s['search_not']):
                         remove_set.update(s['update'])
+                        
             for sm in search_matches:
                 for a in sm['if']:
                     if a in sm['in']:
@@ -458,23 +433,24 @@ class COMMON():
 
             search = each.lower().replace('-', '').replace(' ', '').replace('.', '')
             for x in remove_set.copy():
-                if "|" in x:
-                    look_for = x.split('|')
-                    for y in look_for:
-                        if y.lower() in search:
-                            if x in remove_set:
-                                remove_set.remove(x)
-                            remove_set.add(y)
+                if x:
+                    if "|" in x:
+                        look_for = x.split('|')
+                        for y in look_for:
+                            if y.lower() in search:
+                                remove_set.discard(x)
+                                remove_set.add(y)
 
             allow = True
             for x in remove_set:
-                if not x.startswith("!"):
-                    if not re.search(x, search, flags=re.I):
-                        allow = False
-                else:
-                    if re.search(x.replace("!", "", 1), search, flags=re.I) not in (None, False):
-                        allow = False
+                if x: 
+                    if not x.startswith("!"):
+                        if not re.search(x, search, flags=re.I):
+                            allow = False
+                    else:
+                        if re.search(x.replace("!", "", 1), search, flags=re.I) not in (None, False):
+                            allow = False
             if allow and each not in new_dupes:
-                #new_dupes.append(each)
                 new_dupes[each] = dupes[each]
         return new_dupes
+

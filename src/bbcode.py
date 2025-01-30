@@ -226,20 +226,56 @@ class BBCODE:
         return desc, imagelist
 
 
-    def convert_pre_to_code(self, desc):
-        desc = desc.replace('[pre]', '[code]')
-        desc = desc.replace('[/pre]', '[/code]')
+    def clean_for_ar(self, desc):
+            desc = self.convert_spoiler_to_hide(desc) 
+            desc = self.convert_to_align(desc)
+            desc = self.convert_code_to_pre(desc)
+            desc = self.convert_note_to_quote(desc)
+                # Specific image replacements for music
+            desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img]", "MusicBrainz")
+            desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png[/img]", "Discogs")
+            desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png[/img][/url]", "AllMusic")
+            desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url]", "WikiData")
+            desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url]", "Genius")
+            desc = re.sub(r'\[img=\d+\]', '[img]', desc)
+                # Clean BBCode within pre tags
+            desc = self.extrac_n_clean_pre_content(desc)
+            return desc
+
+    def extrac_n_clean_pre_content(self, desc):
+        pre_pattern = r'\[pre\](.*?)\[/pre\]'
+        def process_pre_content(match):
+            content = match.group(1)
+            cleaned_content = self.clean_pre_content(content)
+            return f'[pre]{cleaned_content}[/pre]'
+        return re.sub(pre_pattern, process_pre_content, desc, flags=re.DOTALL)
+
+    def clean_pre_content(self, content):
+        tags_to_remove = ['b', 'i', 'u', 'url', 'h1', 'h2', 'h3', 'h4', 'h5']
+        for tag in tags_to_remove:
+            content = re.sub(rf'\[/?{tag}(?:=[^\]]+)?\]', '', content)
+        return content
+
+    def convert_to_align(self, desc):
+        desc = desc.replace("[center]", "[align=center]").replace("[/center]", "[/align]")
+        desc = desc.replace("[left]", "[align=left]").replace("[/left]", "[/align]")
+        desc = desc.replace("[right]", "[align=right]").replace("[/right]", "[/align]")
         return desc
-    
+
+    def convert_pre_to_code(self, desc):
+        desc = desc.replace('[pre]', '[code]').replace('[/pre]', '[/code]')
+        return desc
+
+    def convert_code_to_pre(self, desc):
+        desc = desc.replace('[code]', '[pre]').replace('[/code]', '[/pre]')
+        return desc
 
     def convert_hide_to_spoiler(self, desc):
-        desc = desc.replace('[hide', '[spoiler')
-        desc = desc.replace('[/hide]', '[/spoiler]')
+        desc = desc.replace('[hide', '[spoiler').replace('[/hide]', '[/spoiler]')
         return desc
     
     def convert_spoiler_to_hide(self, desc):
-        desc = desc.replace('[spoiler', '[hide')
-        desc = desc.replace('[/spoiler]', '[/hide]')
+        desc = desc.replace('[spoiler', '[hide').replace('[/spoiler]', '[/hide]')
         return desc
 
     def remove_spoiler(self, desc):
@@ -247,15 +283,17 @@ class BBCODE:
         return desc
     
     def convert_spoiler_to_code(self, desc):
-        desc = desc.replace('[spoiler', '[code')
-        desc = desc.replace('[/spoiler]', '[/code]')
+        desc = desc.replace('[spoiler', '[code').replace('[/spoiler]', '[/code]')
         return desc
 
     def convert_code_to_quote(self, desc):
-        desc = desc.replace('[code', '[quote')
-        desc = desc.replace('[/code]', '[/quote]')
+        desc = desc.replace('[code', '[quote').replace('[/code]', '[/quote]')
         return desc
  
+    def convert_note_to_quote(self, desc):
+        desc = desc.replace('[note', '[quote').replace('[/note]', '[/quote]')
+        return desc
+
     def convert_comparison_to_collapse(self, desc, max_width):
         comparisons = re.findall(r"\[comparison=[\s\S]*?\[\/comparison\]", desc)
         for comp in comparisons:
