@@ -114,7 +114,8 @@ class Prep():
         if meta['isdir']:
             try:
                 all_files = collect_files_recursive(meta['path'], meta)
-
+                base_name = os.path.basename(meta['path'])
+                nfo_candidates = []
                 for file_name, full_path in all_files.items():
                     ext = os.path.splitext(file_name)[1].lower()
 
@@ -125,8 +126,16 @@ class Prep():
                     elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
                         meta['user_images'].append(full_path)   
                     elif ext == '.nfo':
-                        if not meta.get('nfo_file'):
-                            meta['nfo_file'] = full_path
+                        nfo_candidates.append((file_name, full_path))
+
+                    if nfo_candidates:
+                        for file_name, full_path in nfo_candidates:
+                            if file_name == f"{base_name}.nfo":
+                                meta['nfo_file'] = full_path
+                                break  
+                        else:                            
+                            meta['nfo_file'] = nfo_candidates[0][1]
+                        
                     elif ext == '.log':
                         meta['log_files'].append(full_path)
 
@@ -149,8 +158,15 @@ class Prep():
                 await self.process_single_music_file(meta, mode)
             elif file_extension in ['.mkv', '.mp4', '.ts']:
                 meta['is_video'] = True
-                # Handle single video file processing if needed
-
+                base_name = os.path.splitext(meta['path'])[0]
+                match_nfo = f"{base_name}.nfo"
+                if os.path.exists(match_nfo):
+                    meta['nfo_file'] = match_nfo
+                elif not os.path.exists(match_nfo) and meta.get('nfo'):
+                    directory = os.path.dirname(meta['path'])
+                    nfo_files = [f for f in os.listdir(directory) if f.endswith('.nfo')]
+                    if nfo_files:
+                        meta['nfo_file'] = os.path.join(directory, nfo_files[0])
         if meta['is_music']:
             meta = await self.gen_desc(meta)
             return meta
@@ -849,6 +865,8 @@ class Prep():
         return meta
 
     def upload_proof_covers(self, meta, image_key, file_key, file_exts=('jpg', '.jpeg')):
+        if image_key in meta and meta[image_key]:
+            return
         image_path = meta.get(file_key)
         if image_path and os.path.isfile(image_path) and image_path.lower().endswith(file_exts):
             console.print(f"[yellow]Uploading {file_key.replace('_', ' ')} image: {image_path}")
@@ -2660,6 +2678,7 @@ class Prep():
 
         cuts = {
             "director cut": "Director's Cut",
+            "international cut": "International Cut",
             "extended": "Extended",
             "special edition": "Special Edition",
             "unrated": "Unrated",
@@ -3231,10 +3250,7 @@ class Prep():
                 name = f"{artist} - {album} ({year}) {ed} [{source}{type} {bd}]"
             else:
                 name =  f"{artist} - {album} ({year}) {ed} [{source}{type} {bitrate}]"   
-
-        test = name if not manual_name else manual_name
         try:  
-            console.print(test) 
             name = ' '.join(name.split())
             name_notag = name
             name = name_notag + tag
@@ -3596,6 +3612,7 @@ class Prep():
     async def gen_desc(self, meta):
         desclink = meta.get('desclink', None)
         auto_desc = meta.get('auto_desc', False)
+        nfo_file = meta.get('nfo_file', None)
         description_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
         descfile_content = ""
         custom_desc_written = False
@@ -3635,9 +3652,8 @@ class Prep():
                         description.write("\n")
                         custom_desc_written = True
 
-            if meta['nfo'] != False:
-                nfo = glob.glob("*.nfo")[0]
-                with open(nfo, 'r', encoding="utf-8") as nfo_file:
+            if meta['nfo']:
+                with open(nfo_file, 'r', encoding="utf-8") as nfo_file:
                     nfo_content = nfo_file.read()
                 description.write("\n" + "[code]")
                 description.write(nfo_content)
