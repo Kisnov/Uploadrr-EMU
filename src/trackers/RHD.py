@@ -18,7 +18,7 @@ class RHD():
         self.source_flag = 'RocketHD'
         self.upload_url = 'https://r0k3t.li/api/torrents/upload'
         self.search_url = 'https://r0k3t.li/api/torrents/filter'
-        self.banned_groups = ["1XBET", "MEGA", "MTZ", "Whistler", "WOTT", "Taylor.D", "HELD", "FSX", "FuN", "RobertDeNiro", "ZeroTwo", "Oergel", "Jakopo", "MagicX"]
+        self.banned_groups = ["1XBET", "MEGA", "MTZ", "Whistler", "WOTT", "Taylor.D", "HELD", "FSX", "FuN", "RobertDeNiro", "Oergel", "Jakopo", "MagicX"]
 
         pass
     
