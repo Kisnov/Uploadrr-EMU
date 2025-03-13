@@ -11,6 +11,7 @@ class SN():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'api'
         self.tracker = 'SN'
         self.source_flag = 'Swarmazon'
         self.signature = None
@@ -32,11 +33,9 @@ class SN():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        #await common.unit3d_edit_desc(meta, self.tracker, self.forum_link)
         await self.edit_desc(meta)
         cat_id = ""
         sub_cat_id = ""
-        #cat_id = await self.get_cat_id(meta)
         if meta['category'] == 'MOVIE':
             cat_id = 1
             # sub cat is source so using source to get

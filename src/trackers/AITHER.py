@@ -14,12 +14,34 @@ class AITHER():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'AITHER'
         self.source_flag = 'Aither'
         self.search_url = 'https://aither.cc/api/torrents/filter'
         self.upload_url = 'https://aither.cc/api/torrents/upload'
         self.signature = None
-        self.banned_groups = ['4K4U', 'AROMA', 'EMBER', 'FGT', 'Hi10', 'ION10', 'Judas', 'LAMA', 'MeGusta', 'QxR', 'RARBG', 'SPDVD', 'STUTTERSHIT', 'SWTYBLZ', 'Sicario', 'TAoE', 'TGx', 'TSP', 'TSPxL', 'Tigole', 'Weasley[HONE]', 'Will1869', 'YIFY', 'd3g', 'nikt0', 'x0r']
+        self.banned_groups = {
+            "ALL_TYPES": [  
+                "4K4U", "afm72", "AROMA", "Bandi", "BiTOR", "Bluespots", "BOLS",
+                "d3g", "DepraveD", "EMBER", "FGT", "FreetheFish", "Garshasp", "Ghost",
+                "Grym", "HDS", "Hi10", "HiQVE", "ImE", "ION10", "iVy", "Judas", "LAMA",
+                "Langbard", "LION", "MeGusta", "MONOLITH", "Natty", "nikt0", "OEPlus",
+                "OFT", "OsC", "Panda", "PYC", "QxR", "r00t", "Ralphy", "RARBG",
+                "RetroPeeps", "RZeroX", "SAMPA", "Sicario", "SiCFoI", "Silence",
+                "SkipTT", "SM737", "SPDVD", "STUTTERSHIT", "SWTYBLZ", "t3nzin", "TAoE",
+                "TEKNO3D", "Telly", "TGx", "Tigole", "TSP", "TSPxL", "UnKn0wn", "VXT",
+                "Vyndros", "Will1869", "x0r", "YIFY", "YTS", "YTS.MX"
+            ],
+            "Chivaman": ["ENCODE"],
+            "CRUCiBLE": ["REMUX"],
+            "edge2020": ["REMUX", "ENCODE"],
+            "EVO": ["ENCODE"],
+            "HDT": ["REMUX"],
+            "noxxus": ["ENCODE"],
+            "RCVR": ["ENCODE", "WEBRIP"],
+            "Weasley[HONE]": ["WEBDL", "WEBRIP"]
+        }
+
         pass
     
     async def upload(self, meta):
@@ -187,7 +209,8 @@ class AITHER():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
+            'DVDRIP': '3'
             }.get(type, '0')
         return type_id
 

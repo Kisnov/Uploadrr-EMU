@@ -13,20 +13,31 @@ class BLU():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'BLU'
         self.source_flag = 'BLU'
         self.search_url = 'https://blutopia.cc/api/torrents/filter'
         self.torrent_url = 'https://blutopia.cc/api/torrents/'
         self.upload_url = 'https://blutopia.cc/api/torrents/upload' 
         self.signature = None
-        self.banned_groups = [
-            '[Oj]', '3LTON', '4yEo', 'ADE', 'AFG', 'AniHLS', 'AnimeRG', 'AniURL', 'AROMA', 'aXXo', 'Brrip', 'CHD', 'CM8', 'CrEwSaDe', 'd3g', 'DeadFish', 'DNL', 'ELiTE', 'eSc', 'FaNGDiNG0', 'FGT', 'Flights', 
-            'FRDS', 'FUM', 'HAiKU', 'HD2DVD', 'HDS', 'HDTime', 'Hi10', 'ION10', 'iPlanet', 'JIVE', 'KiNGDOM', 'Leffe', 'LEGi0N', 'LOAD', 'MeGusta', 'mHD', 'mSD', 'NhaNc3', 'nHD', 'nikt0', 'NOIVTC', 
-            'nSD', 'OFT', 'PiRaTeS', 'playBD', 'PlaySD', 'playXD', 'PRODJi', 'RAPiDCOWS', 'RARBG', 'RDN', 'REsuRRecTioN', 'RetroPeeps', 'RMTeam', 'SANTi', 'SicFoI', 'SPASM', 'SPDVD', 'STUTTERSHIT', 'Telly', 'TM', 'TRiToN', 'UPiNSMOKE', 
-            'URANiME', 'WAF', 'x0r', 'xRed', 'XS', 'YIFY', 'ZKBL', 'ZmN', 'ZMNT',
-            # Note: You cannot add conditional checks here for AOC, EVO, TERMiNAL & ViSION , script will ignore the lists within a list. 
-        ]
-        
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "3LTON", "4yEo", "ADE", "AFG", "AniHLS", "AnimeRG", "AniURL", "AROMA", "aXXo", "Brrip",
+                "CHD", "CM8", "CrEwSaDe", "d3g", "DeadFish", "DNL", "ELiTE", "eSc", "FaNGDiNG0", "FGT",
+                "Flights", "FRDS", "FUM", "HAiKU", "HD2DVD", "HDS", "HDTime", "Hi10", "ION10", "iPlanet",
+                "JIVE", "KiNGDOM", "Leffe", "LEGi0N", "LOAD", "MeGusta", "mHD", "mSD", "NhaNc3", "nHD",
+                "nikt0", "NOIVTC", "nSD", "PiRaTeS", "playBD", "PlaySD", "playXD", "PRODJi", "RAPiDCOWS",
+                "RARBG", "RDN", "REsuRRecTioN", "RetroPeeps", "RMTeam", "SANTi", "SicFoI", "SPASM", "SPDVD",
+                "STUTTERSHIT", "Telly", "TM", "TRiToN", "UPiNSMOKE", "URANiME", "WAF", "x0r", "xRed", "XS",
+                "YIFY", "ZKBL", "ZmN", "ZMNT"
+            ],
+            "AOC": ["ENCODE", "HDTV", "WEBDL", "WEBRIP"],
+            "CMRG": ["ENCODE", "WEBRIP"],
+            "EVO": ["ENCODE", "WEBRIP"],
+            "TERMiNAL": ["ENCODE", "WEBRIP"],
+            "ViSION": ["ENCODE", "WEBRIP"]
+        }
+      
         pass
     
     async def upload(self, meta):

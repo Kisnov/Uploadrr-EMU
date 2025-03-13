@@ -13,6 +13,7 @@ class PTT():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'PTT'
         self.source_flag = 'PTT'
         self.signature = None

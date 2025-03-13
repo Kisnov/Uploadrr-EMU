@@ -15,29 +15,34 @@ class LST():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'LST'
         self.source_flag = 'LST.GG'
         self.upload_url = 'https://lst.gg/api/torrents/upload'
         self.search_url = 'https://lst.gg/api/torrents/filter'
         self.signature = None
-        self.banned_groups = [
-    'aXXo', 'BRrip', 'CM8', 'CrEwSaDe', 'CTFOH', 'DNL', 'FaNGDiNG0', 'HD2DVD', 
-    'HDTime', 'ION10', 'iPlanet', 'KiNGDOM', 'mHD', 'mSD', 'nHD', 'nikt0', 'nSD', 
-    'NhaNc3', 'OFT', 'PRODJi', 'SANTi', 'STUTTERSHIT', 'ViSION', 'VXT', 'WAF', 
-    'x0r', 'YIFY', 'Sicario', 'RARBG', 'MeGusta', 'TSP', 'TSPxL', 'GalaxyTV', 
-    'TGALAXY', 'TORRENTGALAXY', 'TGx', 'LAMA'
-]
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "aXXo", "BONE", "BRrip", "CM8", "CrEwSaDe", "CTFOH", "DNL", "dAV1nci", "FaNGDiNG0", "GalaxyTV", 
+                "HD2DVD", "HDTime", "iHYTECH", "ION10", "iPlanet", "KiNGDOM", "LAMA", "MeGusta", "mHD", "mSD", 
+                "NaNi", "NhaNc3", "nHD", "nikt0", "nSD", "OFT", "PRODJi", "RARBG", "Rifftrax", "SANTi", 
+                "SasukeducK", "SEEDSTER", "ShAaNiG", "Sicario", "STUTTERSHIT", "TAoE", "TGALAXY", "TGx", 
+                "TORRENTGALAXY", "ToVaR", "TSP", "TSPxL", "ViSION", "VXT", "WAF", "WKS", "x0r", "YIFY", "YTS"
+            ],
+            "EVO": ["DISC", "REMUX", "WEBRIP", "HDTV", "ENCODE"],
+            "FGT": ["DISC", "REMUX", "WEBDL", "WEBRIP", "HDTV"],
+            "HDT": ["DISC", "ENCODE", "WEBDL", "WEBRIP", "HDTV"]
+        }
         pass
     
-    async def get_cat_id(self, category_name, keywords, service):
+    async def get_cat_id(self, category_name, keywords, adult, anime):
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
         category_id = {
             'MOVIE': '1', 
-            'TV': '2',
-            'Anime': '6',            
+            'TV': '2', 
+            'MUSIC': '3'          
             }.get(category_name, '0')
-        if category_name == 'TV' and 'anime' in keywords:
-            category_id = '6'
-        elif category_name == 'TV' and 'hentai' in service:
+        if (adult and anime) or 'hentai' in keyword_list or (adult and 'animation' in keyword_list):
             category_id = '8'
         return category_id
 
@@ -48,7 +53,12 @@ class LST():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
+            'FLAC': '7',
+            'ALAC': '8',
+            'AC3': '9',
+            'AAC': '10',
+            'MP3': '11'
             }.get(type, '0')
         return type_id
 
@@ -75,7 +85,7 @@ class LST():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        cat_id = await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('service', ''))
+        cat_id = await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('adult', False), meta.get('anime', False ))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -216,7 +226,7 @@ class LST():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
             'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('service', '')),
+            'categories[]' : await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('adult', False), meta.get('anime', False )),
             'types[]' : await self.get_type_id(meta['type']),
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""

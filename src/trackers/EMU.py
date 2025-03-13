@@ -12,6 +12,7 @@ from src.console import console
 class EMU():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'EMU'
         self.source_flag = 'eMuwarez'
         self.upload_url = 'https://emuwarez.it/api/torrents/upload'

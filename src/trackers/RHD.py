@@ -14,6 +14,7 @@ from src.console import console
 class RHD():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'RHD'
         self.source_flag = 'RocketHD'
         self.upload_url = 'https://r0k3t.li/api/torrents/upload'

@@ -15,6 +15,7 @@ class LCD():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'LCD'
         self.source_flag = 'LOCADORA'
         self.search_url = 'https://locadora.cc/api/torrents/filter'

@@ -13,6 +13,7 @@ class R4E():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'R4E'
         self.source_flag = 'R4E'
         self.signature = None

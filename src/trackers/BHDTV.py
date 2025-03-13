@@ -15,6 +15,7 @@ class BHDTV():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'api'
         self.tracker = 'BHDTV'
         self.source_flag = 'BIT-HDTV'
         self.signature = None

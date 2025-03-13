@@ -13,6 +13,7 @@ class CBR():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'CBR'
         self.source_flag = 'CapybaraBR'
         self.upload_url = 'https://capybarabr.com/api/torrents/upload'

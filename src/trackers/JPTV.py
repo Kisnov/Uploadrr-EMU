@@ -14,6 +14,7 @@ class JPTV():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'JPTV'
         self.source_flag = 'jptv.club'
         self.upload_url = 'https://jptv.club/api/torrents/upload'

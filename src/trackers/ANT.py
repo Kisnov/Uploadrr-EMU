@@ -15,6 +15,7 @@ class ANT():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'api'
         self.tracker = 'ANT'
         self.source_flag = 'ANT'
         self.search_url = 'https://anthelion.me/api.php'

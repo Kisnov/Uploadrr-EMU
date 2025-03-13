@@ -19,6 +19,7 @@ class PTER():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'http'
         self.tracker = 'PTER'
         self.source_flag = 'PTER'
         self.signature = None

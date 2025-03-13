@@ -8,7 +8,6 @@ from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
 from src.console import console
 
-
 class UNIT3D_TEMPLATE():
     """
     Edit for Tracker:
@@ -26,6 +25,7 @@ class UNIT3D_TEMPLATE():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'Abbreviated'
         self.source_flag = 'Source flag for .torrent'
         self.upload_url = 'https://domain.tld/api/torrents/upload'
@@ -202,6 +202,25 @@ class UNIT3D_TEMPLATE():
             return success
 
 
+        # This code block is optional. As-is gives a way to premptively block PORN. Or other content ie Unsupported Resolution or media TYPE.
+        # The return expects a tuple. True, True would immediate ban. 
+        # True, False warns the user if attended proding them a way to upload anyway.
+        # adult here would be defined by TMDB the user-overide option is prefered method as TMDB is user generated and makes mistakes. 
+        # For example use cases see RF, OTW, RTF 
+        """    
+        async def other_banned_content(self, meta, path):
+        adult = meta.get('adult', False)
+        keywords = meta.get('keywords', '')
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
+        if ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic'])) and adult:
+            console.print(f'[bold red]Porn is strictly prohibited on {self.tracker}')
+            return True, True
+        elif adult:
+            console.print(f'[bold red]Flagged as adult content. {self.tracker} bans all porn/erotica.')
+            return True, False
+
+        return False, False
+        """
 
     async def search_existing(self, meta):
         dupes = {}

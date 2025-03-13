@@ -13,6 +13,7 @@ from src.console import console
 class SP():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'SP'
         self.source_flag = 'seedpool.org'
         self.upload_url = 'https://seedpool.org/api/torrents/upload'

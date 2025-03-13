@@ -19,6 +19,7 @@ class HDT():
     
     def __init__(self, config):
         self.config = config
+        self.type = 'http'
         self.tracker = 'HDT'
         self.signature = None
         self.source_flag = 'hd-torrents.org'

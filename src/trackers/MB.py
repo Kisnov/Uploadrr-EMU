@@ -10,22 +10,9 @@ from src.console import console
 
 
 class MB():
-    """
-    Edit for Tracker:
-        Edit BASE.torrent with announce and source
-        Check for duplicates
-        Set type/category IDs
-        Upload
-    """
-
-    ###############################################################
-    ########                    EDIT ME                    ########
-    ###############################################################
-
-    # ALSO EDIT CLASS NAME ABOVE
-
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'MB'
         self.source_flag = 'MalayaBits'
         self.upload_url = 'https://malayabits.cc/api/torrents/upload'

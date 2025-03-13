@@ -16,6 +16,7 @@ class LDU():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'LDU'
         self.source_flag = 'LDU'
         self.upload_url = 'https://theldu.to/api/torrents/upload'
@@ -24,8 +25,14 @@ class LDU():
         self.banned_groups = ['']
         pass
     
-    async def get_cat_id(self, category_name, genres, keywords, service, edition, meta):
+    async def get_cat_id(self, meta):
+        category_name = meta['category']
+        anime = meta.get('anime', False)
+        genres = meta.get('genres', '')
+        keywords = meta.get('keywords', '')
+        edition = meta.get('edition', '')
         adult = meta.get('adult', False)
+        name = meta.get('name_notag')
         soundmix = meta.get('imdb_info', {}).get('soundmix', [])
         is_silent = 'silent' in soundmix if soundmix else False
         release_date = meta.get('full_date', '')
@@ -43,7 +50,6 @@ class LDU():
         tag = self.get_language_tag(meta) or ''
         tags = [t[1:] for t in tag.split(']') if t] if tag else []
 
-        anime = meta.get('anime', False)
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
@@ -80,6 +86,8 @@ class LDU():
                 category_id = '17'
             elif 'stand-up' in keyword_list:
                 category_id = '20'
+            elif self.is_sports(name):
+                category_id = '35'    
             elif 'short film' in keyword_list:
                 category_id = '19'
             else:
@@ -96,10 +104,20 @@ class LDU():
                 category_id = '29'
             elif anime or 'anime' in keyword_list:
                 category_id = '9'
+            elif self.is_sports(name):
+                category_id = '35'    
             else:
                 category_id = '2'
 
         return category_id
+
+    def is_sports(self, name):
+        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
+                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
+                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
+                        r'.*overtake.*)'
+
+        return re.search(sports_pattern, name, re.IGNORECASE) is not None
 
     async def get_type_id(self, type, edition):
         type_id = {
@@ -150,7 +168,7 @@ class LDU():
         is_music = meta.get('is_music', False)
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        cat_id = await self.get_cat_id(meta['category'], meta.get('genres', ''), meta.get('keywords', ''), meta.get('service', ''), meta.get('edition', ''), meta)
+        cat_id = await self.get_cat_id(meta)
         type_id = await self.get_type_id(meta['type'],meta['edition'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -531,10 +549,7 @@ class LDU():
         console.print("[yellow]Searching for existing torrents on site...")
         params = {
             'api_token': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
-            'categories[]': await self.get_cat_id(
-                meta['category'], meta.get('genres', ''), meta.get('keywords', ''), 
-                meta.get('service', ''), meta.get('edition', ''), meta
-            ),
+            'categories[]': await self.get_cat_id(meta),
             'types[]': await self.get_type_id(meta['type'], meta['edition']),
             'name': meta.get('album', '') if meta.get('is_music', False) else ""
         }

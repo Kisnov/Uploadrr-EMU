@@ -12,6 +12,7 @@ from src.console import console
 class ITA():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'ITA'
         self.source_flag = 'ItaTorrents'
         self.upload_url = 'https://itatorrents.xyz/api/torrents/upload'

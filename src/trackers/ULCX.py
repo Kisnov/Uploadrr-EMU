@@ -14,12 +14,23 @@ class ULCX():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'ULCX'
         self.source_flag = 'ULCX'
         self.upload_url = 'https://upload.cx/api/torrents/upload'
         self.search_url = 'https://upload.cx/api/torrents/filter'
         self.signature = None
-        self.banned_groups = ['Tigole', 'x0r', 'Judas', 'SPDVD', 'MeGusta', 'YIFY', 'SWTYBLZ', 'TAoE', 'TSP', 'TSPxL', 'LAMA', '4K4U', 'ION10', 'Will1869', 'TGx', 'Sicario', 'QxR', 'Hi10', 'EMBER', 'FGT', 'AROMA', 'd3g', 'nikt0', 'Grym', 'RARBG', 'iVy', 'NuBz', 'NAHOM', 'EDGE2020', 'FnP']
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "4K4U", "AROMA", "d3g", "EMBER", "FGT", "FnP", "Grym", "Hi10", 
+                "ION10", "iVy", "Judas", "LAMA", "MeGusta", "NAHOM", "Niblets", "nikt0", 
+                "QxR", "RARBG", "Sicario", "SPDVD", "SWTYBLZ", "TAoE", "TGx", "Tigole", "TSP", 
+                "TSPxL", "Will1869", "x0r", "YIFY"
+            ],
+            "EDGE2020": ["ENCODE", "WEBRIP"],
+            "NuBz": ["ENCODE", "WEBRIP"],
+            "Ralphy": ["ENCODE", "WEBRIP"]
+        }
         pass
     
     async def get_cat_id(self, category_name):

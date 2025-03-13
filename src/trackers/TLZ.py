@@ -12,6 +12,7 @@ from src.console import console
 class TLZ():
     def __init__(self, config):
         self.config = config
+        self.tracker = 'unit3d'
         self.tracker = 'TLZ'
         self.source_flag = 'TLZ'
         self.upload_url = 'https://tlzdigital.com/api/torrents/upload'

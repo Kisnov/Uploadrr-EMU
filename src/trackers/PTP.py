@@ -25,6 +25,7 @@ class PTP():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'other'
         self.tracker = 'PTP'
         self.source_flag = 'PTP'
         self.signature = None
@@ -35,8 +36,13 @@ class PTP():
         self.password = config['TRACKERS']['PTP'].get('password', '').strip()
         self.web_source = config['TRACKERS']['PTP'].get('add_web_source_to_desc', True) 
         self.user_agent = f'Uploadrr ({platform.system()} {platform.release()})'
-        self.banned_groups = ['aXXo', 'BRrip', 'CM8', 'CrEwSaDe', 'CTFOH', 'DNL', 'FaNGDiNG0', 'HD2DVD', 'HDTime', 'ION10', 'iPlanet', 'KiNGDOM', 'mHD', 'mSD', 'nHD', 'nikt0', 'nSD', 'NhaNc3', 'OFT', 'PRODJi', 'SANTi', 'STUTTERSHIT', 'ViSION', 'VXT', 'WAF', 'd3g', 'x0r', 'YIFY', 'BMDru']
-    
+        self.banned_groups = [
+            'aXXo', 'BMDru', 'BRrip', 'CM8', 'CrEwSaDe', 'CTFOH', 'DNL', 'd3g', 
+            'FaNGDiNG0', 'HD2DVD', 'HDTime', 'ION10', 'iPlanet', 'KiNGDOM', 'LAMA', 
+            'mHD', 'mSD', 'nHD', 'nikt0', 'nSD', 'NhaNc3', 'OFT', 'PRODJi', 'SANTi', 
+            'SPiRiT', 'STUTTERSHIT', 'ViSION', 'VXT', 'WAF', 'WORLD', 'x0r', 'YIFY'
+        ]
+
         self.sub_lang_map = {
             ("Arabic", "ara", "ar") : 22,
             ("Brazilian Portuguese", "Brazilian", "Portuguese-BR", 'pt-br') : 49,

@@ -12,6 +12,7 @@ from src.console import console
 class YU():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'YU'
         self.source_flag = 'YUSCENE'
         self.upload_url = 'https://yu-scene.net/api/torrents/upload'

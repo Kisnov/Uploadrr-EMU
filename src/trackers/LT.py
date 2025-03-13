@@ -14,6 +14,7 @@ class LT():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'LT'
         self.source_flag = 'Lat-Team "Poder Latino"'
         self.upload_url = 'https://lat-team.com/api/torrents/upload'
@@ -22,11 +23,20 @@ class LT():
         self.banned_groups = [""]
         pass
     
-    async def get_cat_id(self, category_name):
+    async def get_cat_id(self, category_name, anime, overview, keywords):
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
-            }.get(category_name, '0')
+        }.get(category_name, '0')
+        if category_name == 'TV':
+            if anime:
+                category_id = '5'
+            elif "telenovela" in overview.lower() or "telenovela" in keyword_list:
+                category_id = '8'
+            else:
+                category_id = '2'  
+
         return category_id
 
     async def get_type_id(self, type):
@@ -246,7 +256,7 @@ class LT():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        cat_id = await self.get_cat_id(meta['category'])
+        cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('overview', ''), meta.get('keywords', ''))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -380,7 +390,7 @@ class LT():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
             'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category']),
+            'categories[]' : await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('overview', ''), meta.get('keywords', '')),
             'types[]' : await self.get_type_id(meta['type']),
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""

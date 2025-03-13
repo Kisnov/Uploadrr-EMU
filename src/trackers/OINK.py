@@ -14,6 +14,7 @@ class OINK():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'OINK'
         self.source_flag = 'YOiNKED'
         self.upload_url = 'https://yoinked.org/api/torrents/upload'

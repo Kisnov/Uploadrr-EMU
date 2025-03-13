@@ -14,6 +14,7 @@ class TTR():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'TTR'
         self.source_flag = 'TTR'
         self.upload_url = 'https://torrenteros.org/api/torrents/upload'

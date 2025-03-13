@@ -12,6 +12,7 @@ from src.console import console
 class HHD():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'HHD'
         self.source_flag = 'HHD'
         self.upload_url = 'https://homiehelpdesk.net/api/torrents/upload'

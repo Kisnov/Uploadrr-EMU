@@ -19,6 +19,7 @@ class FL():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'http'
         self.tracker = 'FL'
         self.source_flag = 'FL'
         self.signature = None

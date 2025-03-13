@@ -13,6 +13,7 @@ from src.console import console
 class HUNO():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'HUNO'
         self.source_flag = 'HUNO'
         self.search_url = 'https://hawke.uno/api/torrents/filter'

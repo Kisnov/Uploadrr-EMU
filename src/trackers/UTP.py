@@ -11,6 +11,7 @@ class UTP():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'UTP'
         self.source_flag = 'UTOPIA'
         self.search_url = 'https://utp.to/api/torrents/filter'

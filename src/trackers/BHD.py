@@ -14,6 +14,7 @@ class BHD():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'api'
         self.tracker = 'BHD'
         self.source_flag = 'BHD'
         self.upload_url = 'https://beyond-hd.me/api/upload/'

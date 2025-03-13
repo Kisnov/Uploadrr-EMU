@@ -15,17 +15,22 @@ class MTV():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'http'
         self.tracker = 'MTV'
         self.source_flag = 'MTV'
         self.upload_url = 'https://www.morethantv.me/upload.php'
         self.forum_link = 'https://www.morethantv.me/wiki.php?action=article&id=73'
         self.search_url = 'https://www.morethantv.me/api/torznab'
         self.signature = None
-        self.banned_groups = [
-            'aXXo', 'BRrip', 'CM8', 'CrEwSaDe', 'DNL', 'FaNGDiNG0', 'FRDS', 'HD2DVD', 'HDTime', 'iPlanet',
-            'KiNGDOM', 'Leffe', 'mHD', 'mSD', 'nHD', 'nikt0', 'nSD', 'NhaNc3', 'PRODJi', 'RDN', 'SANTi',
-            'STUTTERSHIT', 'TERMiNAL', 'ViSION', 'WAF', 'x0r', 'YIFY', ['EVO', 'WEB-DL Only']
-        ]
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "aXXo", "BRrip", "CM8", "CrEwSaDe", "DNL", "FaNGDiNG0", "FRDS", "HD2DVD", "HDTime", "iPlanet",
+                "KiNGDOM", "Leffe", "mHD", "mSD", "nHD", "nikt0", "nSD", "NhaNc3", "PRODJi", "RDN", "SANTi",
+                "STUTTERSHIT", "TERMiNAL", "ViSION", "WAF", "x0r", "YIFY"
+            ],
+            "EVO": ["DISC", "REMUX", "WEBRIP", "HDTV", "DVDRIP", "ENCODE"]
+        }
+
         pass
 
     async def upload(self, meta):
@@ -35,7 +40,7 @@ class MTV():
         torrent_filename = "BASE"
         if not Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent").piece_size <= 8388608: 
             console.print("[red]Piece size is OVER 8M and does not work on MTV. Generating a new .torrent")
-            from prep_what import Prep
+            from src.prep import Prep
             prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=self.config)
             prep.create_torrent(meta, Path(meta['path']), "MTV", piece_size_max=8)
             torrent_filename = "MTV"
@@ -90,7 +95,7 @@ class MTV():
         data = {
             # 'image': poster,
             'image': '',
-            'title': mtv_name if not manual_name else manual_name,
+            'title': manual_name or mtv_name,
             'category': cat_id,
             'Resolution': resolution_id,
             'source': source_id,

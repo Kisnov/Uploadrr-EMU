@@ -12,6 +12,7 @@ from src.console import console
 class SHRI():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'SHRI'
         self.source_flag = 'ShareIsland'
         self.upload_url = 'https://shareisland.org/api/torrents/upload'

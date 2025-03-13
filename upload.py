@@ -35,27 +35,6 @@ import bencodepy as bencode
 from urllib.parse import urlparse, parse_qs
 import importlib
 
-####################################
-#######  Tracker List Here   #######
-### Add below + api or http list ###
-####################################
-tracker_data = {
-    'api': ['ACM', 'AITHER', 'ANT', 'BHD', 'BHDTV', 'BLU', 'CBR', 'EMU', 'FNP', 'HHD', 'HUNO', 'ITA', 'JPTV', 'LCD', 'LDU', 'LST', 'LT', 'MB', 'NBL', 'OE', 'OINK', 'OTW', 'PSS', 'PTT', 'RF', 'R4E', 'RHD', 'RTF', 'SHRI', 'SN', 'SP', 'TLZ', 'TTR', 'TOCA', 'ULCX', 'UTP', 'YU'],
-    'http': ['FL', 'HDB', 'HDT', 'MTV', 'PTER', 'TTG'],
-    'other': ['AR', 'PTP', 'THR', 'TL']
- }
-
-# Combine all trackers into one list
-tracker_list = tracker_data['api'] + tracker_data['http'] + tracker_data['other']
-
-# Import corresponding modules and create a dictionary mapping
-tracker_class_map = {}
-for tracker in tracker_list:
-    try:
-        tracker_class_map[tracker] = getattr(importlib.import_module(f"src.trackers.{tracker}"), tracker)
-    except ImportError as e:
-        logging.error(f"Error importing {tracker}: {e}")
-
 # Detect python3 or fallback to default python command
 python_cmd = shutil.which("python3") or "python"
 
@@ -149,6 +128,32 @@ async def do_the_thing(base_dir):
     # If 'reconfig' is set in meta, run reconfigure()
     if meta.get("reconfig", False):
         reconfigure()
+
+    # Determine trackers to use
+    if meta.get('trackers', None) is not None:
+        trackers = meta['trackers']
+        if isinstance(trackers, list):  # From nargs='*'
+            trackers = ','.join(trackers)
+    else:
+        trackers = config['TRACKERS']['default_trackers']
+    
+    # Normalize trackers
+    trackers = trackers.split(',') if ',' in trackers else [trackers]
+    trackers = [t.strip().upper() for t in trackers]
+    if meta.get('manual', False):
+        trackers.insert(0, "MANUAL")
+    
+    # Load only the specified trackers
+    TRACKER_REGISTRY = load_trackers(trackers, config)
+    tracker_list = list(TRACKER_REGISTRY.keys())
+    logging.debug(f"Loaded trackers: {', '.join(tracker_list)}")
+
+    # Check if we have any valid trackers
+    valid_trackers = [t for t in trackers if t in TRACKER_REGISTRY or t == "MANUAL"]
+    if not valid_trackers:
+        logging.error(f"[bold]No valid trackers provided.[/bold] Specified trackers: {', '.join(trackers)}")
+        console.print(f"[bold red]Please check your tracker names or config and try again.[/bold red]", justify="center")
+        sys.exit(1)
 
     # Collect existing paths from the arguments
     paths = []
@@ -343,7 +348,6 @@ async def do_the_thing(base_dir):
             f.close()
         confirm = get_confirmation(meta)  
         while not confirm:
-            # help.print_help()
             if meta.get('is_music', False):
                 console.print("Input args that need correction e.g.(--tag PMEDIA --mbid e7bb5806-36bb-45a7-b6ea-0b6de4eed94b)") 
             else:    
@@ -366,284 +370,190 @@ async def do_the_thing(base_dir):
                 if confirm:
                     break
 
-        if not isinstance(trackers, list):
-            trackers = [trackers]
-        trackers = [s.strip().upper() for s in trackers]
-        if meta.get('manual', False):
-            trackers.insert(0, "MANUAL")
-
         console.print(f"Processing: [bold cyan]{path}[/bold cyan]")
         common = COMMON(config=config)
-        for tracker in trackers:
-            if meta['name'].endswith('DUPE?'):
-                meta['name'] = meta['name'].replace(' DUPE?', '')
-            tracker = tracker.replace(" ", "").upper().strip()
-            
-            if meta['debug']:
-                debug = "(DEBUG)"
-            else:
-                debug = ""
 
-            if tracker not in tracker_list:
-                console.print(f"[bold red]Error:[/bold red] Tracker '{tracker}' not recognized or supported.")
+        for tracker in trackers:
+            if meta.get('name', '').endswith('DUPE?'):
+                meta['name'] = meta['name'].replace(' DUPE?', '')
+            
+            debug = "(DEBUG)" if meta.get('debug') else ""
+
+            if tracker not in TRACKER_REGISTRY and tracker != "MANUAL":
+                logging.error(f"[bold red]Error:[/bold red] Tracker '{tracker}' not recognized or supported.")
                 skipped_files += 1
                 skipped_details.append((path, f"No such tracker: {tracker}"))
                 continue
 
-            if tracker in tracker_data['api']:
-                tracker_class = tracker_class_map[tracker](config=config)
-                if meta['unattended']:
-                    upload_to_tracker = True
-                else:
-                    upload_to_tracker = Confirm.ask(f"Upload to {tracker_class.tracker}? {debug}")
-                if upload_to_tracker:
-                    console.print(f"Uploading to {tracker_class.tracker}")
-                else:
-                    upload_to_tracker = False
-                    skipped_files += 1
-                    skipped_details.append((path, f"User skipped Upload on {tracker_class.tracker}"))
-                    continue
-                if check_banned_group(tracker_class.tracker, tracker_class.banned_groups, meta, skipped_details, path):
-                    skipped_files += 1
-                    skipped_details.append((path, f"Banned Group on {tracker_class.tracker}"))
-                    continue
-                dupes = await tracker_class.search_existing(meta)
-                if not meta.get('is_music', False):
-                    dupes = await common.filter_dupes(dupes, meta)
-                meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)                    
-                if skipped:
-                    skipped_files += 1
-                    skipped_details.append((path, f"Potential duplicate on {tracker_class.tracker}"))
-                    continue                        
-                if meta['upload']:
-                    #await tracker_class.upload(meta)    
-                    upload_success = await tracker_class.upload(meta)
-                    if upload_success:
-                        if tracker == 'SN':
-                            await asyncio.sleep(16)
-                        await client.add_to_client(meta, tracker_class.tracker)
-                        successful_uploads += 1
-                    else:
-                        skipped_files += 1
-                        if meta['debug']:
-                            skipped_details.append((path, f"{tracker_class.tracker} (DEBUG MODE)"))
-                        else:
-                            skipped_details.append((path, f"{tracker_class.tracker} Rejected Upload"))
-            
-            if tracker in tracker_data['http']:
-                tracker_class = tracker_class_map[tracker](config=config)
-                if meta['unattended']:
-                    upload_to_tracker = True
-                else:
-                    upload_to_tracker = Confirm.ask(f"Upload to {tracker_class.tracker}? {debug}", choices=["y", "N"])
-                if upload_to_tracker:
-                    console.print(f"Uploading to {tracker}")
-                    if check_banned_group(tracker_class.tracker, tracker_class.banned_groups, meta, skipped_details, path):
-                        skipped_files += 1
-                        skipped_details.append((path, f"Banned group on {tracker_class.tracker}"))                        
-                        continue
-                    if await tracker_class.validate_credentials(meta):
-                        dupes = await tracker_class.search_existing(meta)
-                        dupes = await common.filter_dupes(dupes, meta)
-                        meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
-                        if skipped:
-                            skipped_files += 1
-                            skipped_details.append((path, tracker))
-                            continue
-                        if upload_success:
-                            await tracker_class.upload(meta)
-                            await client.add_to_client(meta, tracker_class.tracker)
-                            successful_uploads += 1
+            # Instantiate tracker only if needed (skip for MANUAL)
+            if tracker != "MANUAL":
+                tracker_info = TRACKER_REGISTRY[tracker]
+                tracker_instance = tracker_info["class"](config=config)
+                tracker_type = tracker_info["type"]
+            else:
+                tracker_instance = None
+                tracker_type = None
 
-            if tracker == "MANUAL":
-                if meta['unattended']:
-                    do_manual = True
-                else:
-                    do_manual = Confirm.ask("Get files for manual upload?", default=True)
+            # Standard upload flow for unit3d/api/http trackers (for now)
+            if tracker != "MANUAL":
+                tracker_info = TRACKER_REGISTRY[tracker]
+                tracker_instance = tracker_info["class"](config=config)
+                tracker_type = tracker_info["type"]
+            else:
+                tracker_instance = None
+                tracker_type = None
+
+            # Standard upload flow for api/http/unit3d trackers (for now)
+            if tracker != "MANUAL" and tracker_type in ['api', 'http', 'unit3d']:
+                upload_prompt = f"Upload to {tracker_instance.tracker}? {debug}"
+                upload_to_tracker_flag = meta.get('unattended', False) or Confirm.ask(upload_prompt)
+                
+                if not upload_to_tracker_flag:
+                    skipped_files += 1
+                    skipped_details.append((path, f"User skipped upload on {tracker_instance.tracker}"))
+                    continue
+                
+                if tracker_type == 'http' and not await tracker_instance.validate_credentials(meta):
+                    skipped_files += 1
+                    skipped_details.append((path, f"Invalid credentials for {tracker_instance.tracker}"))
+                    continue
+                
+                success, skipped_files = await upload_to_tracker(
+                    tracker_instance, tracker_instance.tracker, meta, config, client,
+                    skipped_files, skipped_details, path, debug
+                )
+                if success:
+                    successful_uploads += 1
+
+            # MANUAL
+            elif tracker == "MANUAL":
+                do_manual = meta.get('unattended', False) or Confirm.ask("Get files for manual upload?", default=True)
                 if do_manual:
                     for manual_tracker in trackers:
-                        if manual_tracker != 'MANUAL':
-                            manual_tracker = manual_tracker.replace(" ", "").upper().strip()
-                            tracker_class = tracker_class_map[manual_tracker](config=config)
-                            if manual_tracker in tracker_data['api']:
-                                await common.unit3d_edit_desc(meta, tracker_class.tracker, tracker_class.signature)
+                        if manual_tracker != 'MANUAL' and manual_tracker in TRACKER_REGISTRY:
+                            manual_instance = TRACKER_REGISTRY[manual_tracker]["class"](config=config)
+                            if TRACKER_REGISTRY[manual_tracker]["type"] == 'api':
+                                await common.unit3d_edit_desc(meta, manual_instance.tracker, manual_instance.signature)
                             else:
-                                await tracker_class.edit_desc(meta)
+                                await manual_instance.edit_desc(meta)
                     url = await prep.package(meta)
                     if not url:
-                        console.print(f"[yellow]Unable to upload prep files, they can be found at `tmp/{meta['uuid']}")
+                        console.print(f"[yellow]Unable to upload prep files, they can be found at `tmp/{meta['uuid']}`")
                     else:
                         console.print(f"[green]{meta['name']}")
-                        console.print(f"[green]Files can be found at: [yellow]{url}[/yellow]")  
+                        console.print(f"[green]Files can be found at: [yellow]{url}[/yellow]")
 
-            ar = None
-            if tracker == "AR":
-                ar = tracker_class_map[tracker](config=config)
-                if meta['unattended']:
-                    upload_to_ar = True
-                else:
-                    upload_to_ar = Confirm.ask(f"Upload to AlphaRatio? {debug}", choices=["y", "N"])
+            # ALPHARATIO
+            elif tracker == "AR":
+                ar = tracker_instance
+                upload_to_ar = meta['unattended'] or Confirm.ask(f"Upload to AlphaRatio? {debug}")
                 if upload_to_ar:
-                    console.print("Uploading to AlphaRatio")               
-                    if check_banned_group(tracker, ar.banned_groups, meta, skipped_details, path):
+                    console.print("Uploading to AlphaRatio")
+                    if check_banned_group("AR", ar.banned_groups, meta, skipped_details, path):
                         skipped_files += 1
-                        skipped_details.append((path, f"Banned group on {tracker_class.tracker}"))                
+                        skipped_details.append((path, "Banned group on AlphaRatio"))
                         continue
-                console.print("[yellow]Searching for Existing Releases")
-                if await ar.validate_credentials(meta):
-                    dupes = await ar.search_existing(meta)
-                    dupes = await common.filter_dupes(dupes, meta)
-                    meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
-                    if skipped:
-                        skipped_files += 1
-                        skipped_details.append((path, tracker))
-                        continue
-                if meta['upload']:
-                    await ar.upload(meta)
-                    #await ar.update_torrent_file
-                    await asyncio.sleep(5)
-                    await client.add_to_client(meta, "AR")
-                    successful_uploads += 1
-            if ar is not None:
-                await ar.close_session()
-                    
-            if tracker == "BHD":
-                bhd = tracker_class_map[tracker](config=config)
+                    if await ar.validate_credentials(meta):
+                        success, skipped_files = await upload_to_tracker(ar, "AR", meta, config, client, skipped_files, skipped_details, path, debug)
+                        if success:
+                            await asyncio.sleep(5)
+                            successful_uploads += 1
+                if ar.session:
+                    await ar.close_session()
+
+            # BEYONDHD
+            elif tracker == "BHD":
+                bhd = tracker_instance
                 draft_int = await bhd.get_live(meta)
                 draft = "Draft" if draft_int == 0 else "Live"
-                if meta['unattended']:
-                    upload_to_bhd = True
-                else:
-                    upload_to_bhd = Confirm.ask(f"Upload to BHD? ({draft}) {debug}")
+                upload_to_bhd = meta['unattended'] or Confirm.ask(f"Upload to BHD? ({draft}) {debug}")
                 if upload_to_bhd:
-                    console.print("Uploading to BHD")
-                    if check_banned_group("BHD", bhd.banned_groups, meta, skipped_details, path):
-                        skipped_files += 1
-                        skipped_details.append((path, f"Banned group on {tracker_class.tracker}")) 
-                        continue
-                    dupes = await bhd.search_existing(meta)
-                    dupes = await common.filter_dupes(dupes, meta)
-                    meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
-                    if skipped:
-                        skipped_files += 1
-                        skipped_details.append((path, tracker))
-                        continue
-                    if meta['upload']:
-                        await bhd.upload(meta)
-                        await client.add_to_client(meta, "BHD")
+                    success, skipped_files = await upload_to_tracker(bhd, "BHD", meta, config, client, skipped_files, skipped_details, path, debug)
+                    if success:
                         successful_uploads += 1
-            
-            if tracker == "THR":
-                if meta['unattended']:
-                    upload_to_thr = True
-                else:
-                    upload_to_thr = Confirm.ask(f"Upload to THR? {debug}")
+
+            # DigitalCore
+            elif tracker == "DC":
+                dc = tracker_instance
+                upload_to_dc = meta['unattended'] or Confirm.ask(f"Upload to DigitalCore? {debug}")
+                if upload_to_dc:
+                    console.print("Uploading to DigitalCore")
+                    if await dc.validate_credentials(meta):
+                        success, skipped_files = await upload_to_tracker(dc, "DC", meta, config, client, skipped_files, skipped_details, path, debug)
+                        if success:
+                            await asyncio.sleep(5)
+                            successful_uploads += 1
+                    if dc.session:
+                        await dc.close_session()
+
+            # THR
+            elif tracker == "THR":
+                upload_to_thr = meta['unattended'] or Confirm.ask(f"Upload to THR? {debug}")
                 if upload_to_thr:
                     console.print("Uploading to THR")
-                    def is_valid_imdb_id(imdb_id):
-                        return re.match(r'tt\d{7}', imdb_id) is not None
                     if meta.get('imdb_id', '0') == '0':
                         while True:
                             imdb_id = Prompt.ask("Please enter a valid IMDB id (e.g., tt1234567)")
-                            if is_valid_imdb_id(imdb_id):
+                            if re.match(r'tt\d{7}', imdb_id):
                                 meta['imdb_id'] = imdb_id.replace('tt', '').zfill(7)
                                 break
-                            else:
-                                print("Invalid IMDB id. Please try again.")
-                    def get_youtube_id(url):
-                        parsed_url = urlparse(url)
-                        if "youtube.com" in parsed_url.netloc:
-                            if "watch" in parsed_url.path:
-                                video_id = parse_qs(parsed_url.query).get('v', None)
-                                if video_id:
-                                    return video_id[0]
-                        return None
-
+                            print("Invalid IMDB id. Please try again.")
                     if meta.get('youtube', None) is None:
                         while True:
-                            youtube = Prompt.ask("Unable to find youtube trailer, please link one\n[dim] e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ or dQw4w9WgXcQ)[/dim]")
-                            video_id = get_youtube_id(youtube)
-                            if video_id is not None:
+                            youtube = Prompt.ask("Unable to find youtube trailer, please link one\n[dim] e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ)[/dim]")
+                            video_id = parse_qs(urlparse(youtube).query).get('v', [None])[0] or youtube
+                            if video_id:
                                 meta['youtube'] = video_id
                                 break
-                            else:
-                                print("Invalid YouTube URL or ID. Please enter a valid full URL.")
-                    thr = tracker_class_map[tracker](config=config)
+                            print("Invalid YouTube URL or ID.")
+                    thr = tracker_instance
                     try:
                         with requests.Session() as session:
                             console.print("[yellow]Logging in to THR")
                             session = thr.login(session)
-                            console.print("[yellow]Searching for Dupes")
-                            dupes = thr.search_existing(session, meta.get('imdb_id'))
-                            dupes = await common.filter_dupes(dupes, meta)
-                            meta, skipped = dupe_check(dupes, meta)
-                            if skipped:
-                                skipped_files += 1
-                                skipped_details.append((path, tracker))
-                                continue
-                            if meta['upload']:
-                                await thr.upload(session, meta)
-                                await client.add_to_client(meta, "THR")
+                            success, skipped_files = await upload_to_tracker(thr, "THR", meta, config, client, skipped_files, skipped_details, path, debug)
+                            if success:
                                 successful_uploads += 1
                     except:
                         console.print(traceback.print_exc())
 
-            if tracker == "PTP":
-                if meta['unattended']:
-                    upload_to_ptp = True
-                else:
-                    upload_to_ptp = Confirm.ask(f"Upload to {tracker}? {debug}")
+            # PassThePopcorn
+            elif tracker == "PTP":
+                upload_to_ptp = meta['unattended'] or Confirm.ask(f"Upload to PTP? {debug}")
                 if upload_to_ptp:
-                    console.print(f"Uploading to {tracker}")
-                    def is_valid_imdb_id(imdb_id):
-                        # Check if the imdb_id matches the pattern tt followed by 7 digits
-                        return re.match(r'tt\d{7}', imdb_id) is not None
-
+                    console.print("Uploading to PTP")
                     if meta.get('imdb_id', '0') == '0':
                         while True:
                             imdb_id = Prompt.ask("Please enter a valid IMDB id (e.g., tt1234567)")
-                            if is_valid_imdb_id(imdb_id):
+                            if re.match(r'tt\d{7}', imdb_id):
                                 meta['imdb_id'] = imdb_id.replace('tt', '').zfill(7)
                                 break
-                            else:
-                                print("Invalid IMDB id. Please try again.")
-                    ptp = tracker_class_map[tracker](config=config)
-                    if check_banned_group(tracker_class.tracker, tracker_class.banned_groups, meta, skipped_details, path):
+                            print("Invalid IMDB id.")
+                    ptp = tracker_instance
+                    if check_banned_group("PTP", ptp.banned_groups, meta, skipped_details, path):
                         skipped_files += 1
-                        skipped_details.append((path, f"Banned group on {tracker_class.tracker}"))                                          
+                        skipped_details.append((path, "Banned group on PTP"))
                         continue
                     try:
-                        console.print("[yellow]Searching for Group ID")
                         groupID = await ptp.get_group_by_imdb(meta['imdb_id'])
                         if groupID is None:
                             console.print("[yellow]No Existing Group found")
-                            def get_youtube_id(url):
-                                parsed_url = urlparse(url)
-                                if "youtube.com" in parsed_url.netloc:
-                                    if "watch" in parsed_url.path:
-                                        video_id = parse_qs(parsed_url.query).get('v', None)
-                                        if video_id:
-                                            return video_id[0]
-                                return None
-
                             if meta.get('youtube', None) is None:
                                 while True:
-                                    youtube = Prompt.ask("Unable to find youtube trailer, please link one\n[dim] e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ or dQw4w9WgXcQ)[/dim]")
-                                    video_id = get_youtube_id(youtube)
-                                    if video_id is not None:
+                                    youtube = Prompt.ask("Unable to find youtube trailer, please link one\n[dim] e.g.(https://www.youtube.com/watch?v=dQw4w9WgXcQ)[/dim]")
+                                    video_id = parse_qs(urlparse(youtube).query).get('v', [None])[0] or youtube
+                                    if video_id:
                                         meta['youtube'] = video_id
                                         break
-                                    else:
-                                        print("Invalid YouTube URL or ID. Please enter a valid full URL.")
+                                    print("Invalid YouTube URL or ID.")
                             meta['upload'] = True
                         else:
-                            console.print("[yellow]Searching for Existing Releases")
                             dupes = await ptp.search_existing(groupID, meta)
                             dupes = await common.filter_dupes(dupes, meta)
                             meta, skipped = dupe_check(dupes, meta)
                             if skipped:
                                 skipped_files += 1
-                                skipped_details.append((path, tracker))
+                                skipped_details.append((path, "PTP"))
                                 continue
                         if meta.get('imdb_info', {}) == {}:
                             meta['imdb_info'] = await prep.get_imdb_info(meta['imdb_id'], meta)
@@ -656,21 +566,13 @@ async def do_the_thing(base_dir):
                     except:
                         console.print(traceback.print_exc())
 
-            if tracker == "TL":
-                tracker_class = tracker_class_map[tracker](config=config)
-                if meta['unattended']:
-                    upload_to_tracker = True
-                else:
-                    upload_to_tracker = Confirm.ask(f"Upload to {tracker_class.tracker}? {debug}")
-                if upload_to_tracker:
-                    console.print(f"Uploading to {tracker_class.tracker}")
-                    if check_banned_group(tracker_class.tracker, tracker_class.banned_groups, meta, skipped_details, path):
-                        skipped_files += 1
-                        skipped_details.append((path, f"Banned group on {tracker_class.tracker}"))  
-                        continue
-                    await tracker_class.upload(meta)
-                    await client.add_to_client(meta, tracker_class.tracker)
-                    successful_uploads += 1            
+            # TorrentLeech
+            elif tracker == "TL":
+                upload_to_tl = meta['unattended'] or Confirm.ask(f"Upload to {tracker_instance.tracker}? {debug}")
+                if upload_to_tl:
+                    success, skipped_files = await upload_to_tracker(tracker_instance, "TL", meta, config, client, skipped_files, skipped_details, path, debug)
+                    if success:
+                        successful_uploads += 1   
 
     ### FEEDBACK ###
 
@@ -764,6 +666,65 @@ async def do_the_thing(base_dir):
         )
 
         console.print(reason_panel)
+
+async def upload_to_tracker(tracker_instance, tracker_name, meta, config, client, skipped_files, skipped_details, path, debug):
+    console.print(f"Uploading to {tracker_name} {'(DEBUG)' if meta['debug'] else ''}")
+    common = COMMON(config=config)
+
+    # Check for banned groups
+    if hasattr(tracker_instance, 'banned_groups') and check_banned_group(tracker_name, tracker_instance.banned_groups, meta, skipped_details, path):
+        skipped_files += 1
+        skipped_details.append((path, f"Banned group on {tracker_name}"))
+        return False, skipped_files
+
+    # Check other banned content 
+    if hasattr(tracker_instance, 'other_banned_content'):
+        result = await tracker_instance.other_banned_content(meta, path)
+        # Incase a tuple isn't returned (ie: someone returns a simple True/False)
+        if isinstance(result, tuple):
+            is_content_banned, is_absolute = result
+        else:
+            is_content_banned = result
+            is_absolute = False
+        if is_content_banned:
+            # Absolute Ban (unskipable)
+            if is_absolute:
+                console.print(f"[bold yellow]{tracker_name}[/bold yellow][bold red] strictly prohibits this content.")
+                skipped_files += 1
+                skipped_details.append((path, f"Banned content on {tracker_name}"))
+                return False, skipped_files
+            else:
+                # Regular Ban: Allow User Override
+                console.print(f"[bold yellow]{tracker_name}[/bold yellow][bold red] flagged this content as banned.")
+                if meta.get('unattended', False) or not Confirm.ask("[bold red] Upload Anyways?"):
+                    skipped_files += 1
+                    skipped_details.append((path, f"Banned content on {tracker_name}"))
+                    return False, skipped_files
+
+    # Search for duplicates
+    dupes = await tracker_instance.search_existing(meta)
+    if not meta.get('is_music', False):
+        dupes = await common.filter_dupes(dupes, meta)
+    meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
+    if skipped:
+        skipped_files += 1
+        skipped_details.append((path, f"Potential duplicate on {tracker_name}"))
+        return False, skipped_files
+
+    # Perform the upload
+    if meta['upload']:
+        upload_success = await tracker_instance.upload(meta)
+        if upload_success:
+            if tracker_name == 'SN':
+                await asyncio.sleep(16)
+            await client.add_to_client(meta, tracker_name)
+            return True, skipped_files
+        else:
+            skipped_files += 1
+            skipped_details.append((path, f"{tracker_name} {'(DEBUG MODE)' if meta['debug'] else 'Rejected Upload'}"))
+            return False, skipped_files
+    return False, skipped_files
+
 
 def get_confirmation(meta):
     ddebug = meta.get('deep_debug')
@@ -976,24 +937,38 @@ def extract_size_from_torrent(base_dir, uuid):
 
 # Return True if banned group
 def check_banned_group(tracker, banned_group_list, meta, skipped_details, path):
-    if meta['tag'] == "":
+    if not meta.get('tag'):  # Safer check for missing/empty tag
         return False
-    else:
-        q = False
-        for tag in banned_group_list:
-            if isinstance(tag, list):
-                if meta['tag'][1:].lower() == tag[0].lower():
-                    console.print(f"[bold yellow]{meta['tag'][1:]}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups.")
-                    console.print(f"[bold red]NOTE: [bold yellow]{tag[1]}")
-                    q = True
-            else:
-                if meta['tag'][1:].lower() == tag.lower():
-                    console.print(f"[bold yellow]{meta['tag'][1:]}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups.")
-                    q = True
-        if q:
+
+    group_name = meta['tag'][1:] #Case-sensitive matching
+    release_type = meta.get('type', '')   
+
+    # Fallback for old list format: convert to dict with "ALL" as default
+    if isinstance(banned_group_list, list):
+        banned_group_list = {group.lower(): ["ALL"] for group in banned_group_list if group}
+
+    all_banned = [g.lower() for g in banned_group_list.get("ALL_TYPES", [])]
+    if group_name in all_banned:
+        console.print(f"[bold yellow]{meta['tag'][1:]}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups.")
+        if meta.get('unattended', False) or not Confirm.ask("[bold red] Upload Anyways?"):
+            return True
+        return False
+
+    # Check if group has specific banned types
+    banned_types = banned_group_list.get(group_name, None)
+    if banned_types is not None:  # Group is explicitly listed
+        if not banned_types or "ALL" in banned_types:  # Check "ALL" as uppercase
+            console.print(f"[bold yellow]{meta['tag'][1:]}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups.")
             if meta.get('unattended', False) or not Confirm.ask("[bold red] Upload Anyways?"):
                 return True
-    return False
+            return False
+        elif release_type and release_type in banned_types:  # Direct comparison, no lowercase
+            console.print(f"[bold yellow]{meta['tag'][1:]}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups for type [bold yellow]{release_type}[/bold yellow].")
+            if meta.get('unattended', False) or not Confirm.ask("[bold red] Upload Anyways?"):
+                return True
+            return False
+    
+    return False  # Good to go!
 
 def get_missing(meta):
     info_notes = {
@@ -1024,6 +999,50 @@ def get_missing(meta):
 
     console.print()
     return
+
+# Dynamically load in requested trackers
+def load_trackers(tracker_names, config=None):
+    tracker_dir = Path(__file__).parent / "src" / "trackers"
+    tracker_registry = {}
+    ignore_files = {"COMMON.py", "UNIT3D_TEMPLATE.py", "__init__.py"}
+    
+    if not isinstance(tracker_names, list):
+        tracker_names = [tracker_names]
+    tracker_names = [t.strip().upper() for t in tracker_names if t.strip()]
+    
+    for tracker in tracker_names:
+        if tracker in ignore_files or tracker == "MANUAL":  # Skip MANUAL as it’s not a module
+            continue
+            
+        module_name = f"src.trackers.{tracker}"
+        tracker_file = tracker_dir / f"{tracker}.py"
+        
+        if not tracker_file.exists():
+            logging.error(f"[bold] NO SUCH TRACKER.[/bold] '{tracker}' not found at {tracker_file}")
+            continue
+            
+        try:
+            module = importlib.import_module(module_name)
+            tracker_class = getattr(module, tracker, None)
+            if not tracker_class:
+                logging.warning(f"No class '{tracker}' found in {module_name}")
+                continue
+                
+            # Instantiate temporarily to scrape metadata
+            temp_instance = tracker_class(config=config)
+            tracker_name = getattr(temp_instance, "tracker", tracker)  
+            tracker_type = getattr(temp_instance, "type", "other")
+            
+            tracker_registry[tracker_name] = {
+                "class": tracker_class,
+                "type": tracker_type
+            }
+        except ImportError as e:
+            logging.error(f"Failed to import {module_name}: {e}")
+        except Exception as e:
+            logging.error(f"Error processing {module_name}: {e}")
+    
+    return tracker_registry
 
 def print_banner():
     ascii_art = r"""

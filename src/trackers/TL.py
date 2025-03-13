@@ -30,6 +30,7 @@ class TL():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'other'
         self.tracker = 'TL'
         self.source_flag = 'TorrentLeech.org'
         self.upload_url = 'https://www.torrentleech.org/torrents/upload/apiupload'

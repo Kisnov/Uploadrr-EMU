@@ -8,10 +8,10 @@ from src.trackers.COMMON import COMMON
 from src.console import console
 from rich.pretty import Pretty
 
-
 class ACM():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'ACM'
         self.source_flag = 'AsianCinema'
         self.upload_url = 'https://eiga.moi/api/torrents/upload'
@@ -374,14 +374,6 @@ class ACM():
 
         return dupes
 
-
-    # async def fix_rtl(self, meta):
-    #     original_title = meta.get('original_title')
-    #     right_to_left_languages: ["Arabic", "Aramaic", "Azeri", "Divehi", "Fula", "Hebrew", "Kurdish", "N'ko", "Persian", "Rohingya", "Syriac", "Urdu"]
-    #     if meta.get('original_language') in right_to_left_languages:
-    #         return f' / {original_title} {chr(int("202A", 16))}'
-    #     return original_title
-
     async def edit_name(self, meta):
         name = meta.get('name')
         aka = meta.get('aka')
@@ -398,7 +390,6 @@ class ACM():
             name = name.replace (aka, f' / {original_title} {chr(int("202A", 16))}')
         elif aka == '':
             if meta.get('title') != original_title:
-                # name = f'{name[:name.find(year)]}/ {original_title} {chr(int("202A", 16))}{name[name.find(year):]}'
                 name = name.replace(meta['title'], f"{meta['title']} / {original_title} {chr(int('202A', 16))}")
         if 'AAC' in audio:
             name = name.replace(audio.strip().replace("  ", " "), audio.replace("AAC ", "AAC"))

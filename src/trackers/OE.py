@@ -12,12 +12,27 @@ from src.console import console
 class OE():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'OE'
         self.source_flag = 'OE'
         self.search_url = 'https://onlyencodes.cc/api/torrents/filter'
         self.upload_url = 'https://onlyencodes.cc/api/torrents/upload'
         self.signature = None
-        self.banned_groups = ['0neshot', '3LT0N', '4K4U', '4yEo', '$andra', '[Oj]', 'AFG', 'AkihitoSubs', 'AniHLS', 'Anime Time', 'AnimeRG', 'AniURL', 'AR', 'AROMA', 'ASW', 'aXXo', 'BakedFish', 'BiTOR', 'BHDStudio', 'BRrip', 'bonkai', 'Cleo', 'CM8', 'C4K', 'CrEwSaDe', 'core', 'd3g', 'DDR', 'DeadFish', 'DeeJayAhmed', 'DNL', 'ELiTE', 'EMBER', 'eSc', 'EVO', 'EZTV', 'FaNGDiNG0', 'FGT', 'fenix', 'FUM', 'FRDS', 'FROZEN', 'GalaxyTV', 'GalaxyRG', 'GERMini', 'Grym', 'GrymLegacy', 'HAiKU', 'HD2DVD', 'HDTime', 'Hi10', 'ION10', 'iPlanet', 'JacobSwaggedUp', 'JIVE', 'Judas', 'KiNGDOM', 'LAMA', 'Leffe', 'LiGaS', 'LOAD', 'LycanHD', 'MeGusta,' 'MezRips,' 'mHD,' 'Mr.Deadpool', 'mSD', 'NemDiggers', 'neoHEVC', 'NeXus', 'NhaNc3', 'nHD', 'nikt0', 'nSD', 'NhaNc3', 'NOIVTC', 'pahe.in', 'PlaySD', 'playXD', 'PRODJi', 'ProRes', 'project-gxs', 'PSA', 'QaS', 'Ranger', 'RAPiDCOWS', 'RARBG', 'Raze', 'RCDiVX', 'RDN', 'Reaktor', 'REsuRRecTioN', 'RMTeam', 'ROBOTS', 'rubix', 'SANTi', 'SHUTTERSHIT', 'SpaceFish', 'SPASM', 'SSA', 'TBS', 'Telly,' 'Tenrai-Sensei,' 'TERMiNAL,' 'TM', 'topaz', 'TSP', 'TSPxL', 'Trix', 'URANiME', 'UTR', 'VipapkSudios', 'ViSION', 'WAF', 'Wardevil', 'x0r', 'xRed', 'XS', 'YakuboEncodes', 'YIFY', 'YTS', 'YuiSubs', 'ZKBL', 'ZmN', 'ZMNT']
+        self.banned_groups = [
+        "0neshot", "3LT0N", "4K4U", "4yEo", "$andra", "[Oj]", "AFG", "AkihitoSubs", "AniHLS", "Anime Time",
+        "AnimeRG", "AniURL", "AOC", "AR", "AROMA", "ASW", "aXXo", "BakedFish", "BiTOR", "BRrip",
+        "bonkai", "Cleo", "CM8", "C4K", "CrEwSaDe", "core", "d3g", "DDR", "DE3PM", "DeadFish", "DeeJayAhmed",
+        "DNL", "ELiTE", "EMBER", "eSc", "EVO", "EZTV", "FaNGDiNG0", "FGT", "fenix", "FUM", "FRDS", "FROZEN",
+        "GalaxyTV", "GalaxyRG", "GalaxyRG265", "GERMini", "Grym", "GrymLegacy", "HAiKU", "HD2DVD", "HDTime",
+        "Hi10", "HiQVE", "ION10", "iPlanet", "JacobSwaggedUp", "JIVE", "Judas", "KiNGDOM", "LAMA", "Leffe",
+        "LiGaS", "LOAD", "LycanHD", "MeGusta", "MezRips", "mHD", "Mr.Deadpool", "mSD", "NemDiggers", "neoHEVC",
+        "NeXus", "NhaNc3", "nHD", "nikt0", "nSD", "NOIVTC", "pahe.in", "PlaySD", "playXD", "PRODJi", "ProRes",
+        "project-gxs", "PSA", "QaS", "Ranger", "RAPiDCOWS", "RARBG", "Raze", "RCDiVX", "RDN", "Reaktor",
+        "REsuRRecTioN", "RMTeam", "ROBOTS", "rubix", "SANTi", "SHUTTERSHIT", "SpaceFish", "SPASM", "SSA", "TBS",
+        "Telly", "Tenrai-Sensei", "TERMiNAL", "TGx", "TM", "topaz", "ToVaR", "TSP", "TSPxL", "UnKn0wn",
+        "URANiME", "UTR", "VipapkSudios", "ViSION", "WAF", "Wardevil", "x0r", "xRed", "XS", "YakuboEncodes",
+        "YIFY", "YTS", "YuiSubs", "ZKBL", "ZmN", "ZMNT"
+]
         pass
     
     async def upload(self, meta):

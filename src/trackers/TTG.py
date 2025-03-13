@@ -19,6 +19,7 @@ class TTG():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'http'
         self.tracker = 'TTG'
         self.source_flag = 'TTG'
         self.username = str(config['TRACKERS']['TTG'].get('username', '')).strip()

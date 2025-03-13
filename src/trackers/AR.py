@@ -17,6 +17,7 @@ from src.bbcode import BBCODE
 class AR():
     def __init__(self, config):
         self.config = config
+        self.type = 'other'
         self.session = None 
         self.tracker = 'AR'
         self.source_flag = 'AlphaRatio'
