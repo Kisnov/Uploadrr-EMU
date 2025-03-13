@@ -11,6 +11,7 @@ from src.console import console
 class RF():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'RF'
         self.source_flag = 'ReelFliX'
         self.signature = None
@@ -160,7 +161,6 @@ class RF():
             'REMUX': '40',
             'WEBDL': '42',
             'WEBRIP': '45',
-            #'FANRES': '6',
             'ENCODE': '41',
             'HDTV': '35',
             }.get(type, '0')
@@ -168,10 +168,8 @@ class RF():
 
     async def get_res_id(self, resolution):
         resolution_id = {
-            # '8640p':'10',
             '4320p': '1',
             '2160p': '2',
-            # '1440p' : '3',
             '1080p': '3',
             '1080i': '4',
              '720p': '5',
@@ -182,7 +180,22 @@ class RF():
             }.get(resolution, '10')
         return resolution_id
 
+    async def other_banned_content(self, meta, path):
+        adult = meta.get('adult', False)
+        keywords = meta.get('keywords', '')
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
+        if meta['category'] != 'MOVIE':
+            console.print(f'[bold red]Content not Supported: ReelFLiX only support Movies.')
+            return True, True
+        elif ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic'])) and adult:
+            console.print(f'[bold red]Porn is strictly prohibited on ReelFlix')
+            return True, True
+        elif adult:
+            console.print(f'[bold red]Flagged as adult content.ReelFlix bans all porn/erotica.')
+            return True, False
 
+        return False, False
+    
     async def search_existing(self, meta):
         dupes = {}
         console.print("[yellow]Searching for existing torrents on site...")
@@ -194,9 +207,6 @@ class RF():
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""
         }
-        if meta['category'] == 'TV':
-            console.print('[bold red]Unable to search site for TV as this site only ALLOWS Movies')
-        #     params['name'] = f"{meta.get('season', '')}{meta.get('episode', '')}"
         if meta.get('edition', "") != "":
             params['name'] = params['name'] + meta['edition']
         try:

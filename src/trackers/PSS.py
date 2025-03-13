@@ -3,6 +3,7 @@ import asyncio
 import requests
 import json
 import os
+import re
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
@@ -13,27 +14,41 @@ class PSS():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'PSS'
         self.source_flag = 'PSS'
         self.upload_url = 'https://privatesilverscreen.cc/api/torrents/upload'
         self.search_url = 'https://privatesilverscreen.cc/api/torrents/filter'
         self.signature = None
-        self.banned_groups = [
+        self.banned_groups = {
+            "ALL_TYPES": [
             "$andra", "AR", "AROMA", "aXXo", "BRrip", "C4K", "CM8", "core", "CrEwSaDe", "d3g",
             "DNL", "FaNGDiNG0", "FGT", "FRDS", "FROZEN", "GalaxyRG", "Grym", "GrymLegacy", "HD2DVD", 
             "HDTime", "iPlanet", "KiNGDOM", "Lama", "Leffe", "LycanHD", "MeGusta", "MezRips", "mHD", 
             "msd", "NeXus", "NhaNc3", "nHD", "nikt0", "nSD", "PRODJi", "ProRes", "rarbg", "RCDiVX", 
             "RDN", "SANTi", "STUTTERSHIT", "STC", "TSP", "TSPxL", "UTR", "ViSION", "WAF", "Will1869", 
-            "x0r", "YIFY", "YTS", "ZMNT", #EVO not listed because will filter out WEB-DL's which are accceptable 
-        ]
+            "x0r", "YIFY", "YTS", "ZMNT"
+            ],
+            "EVO": ["DISC", "REMUX", "ENCODE", "WEBRIP", "HDTV"]
+        }
         pass
     
-    async def get_cat_id(self, category_name):
+    async def get_cat_id(self, category_name, name):
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
             }.get(category_name, '0')
+        if self.is_sports(name):
+            category_id = '6'
         return category_id
+
+    def is_sports(self, name):
+        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
+                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
+                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
+                        r'.*overtake.*)'
+
+        return re.search(sports_pattern, name, re.IGNORECASE) is not None
 
     async def get_type_id(self, type):
         type_id = {
@@ -69,7 +84,7 @@ class PSS():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        cat_id = await self.get_cat_id(meta['category'])
+        cat_id = await self.get_cat_id(meta['category'], meta['name_notag'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -330,7 +345,7 @@ class PSS():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
             'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category']),
+            'categories[]' : await self.get_cat_id(meta['category'], meta['name_notag']),
             'types[]' : await self.get_type_id(meta['type']),
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""

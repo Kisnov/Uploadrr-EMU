@@ -14,6 +14,7 @@ class RTF():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'RTF'
         self.source_flag = 'sunshine'
         self.signature = None
@@ -102,6 +103,20 @@ class RTF():
                 console.print(data)
     
             return success
+
+
+    async def other_banned_content(self, meta, path):
+        adult = meta.get('adult', False)
+        keywords = meta.get('keywords', '')
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
+        if ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic'])) and adult:
+            console.print(f'[bold red]Porn is strictly prohibited on RetroFlix')
+            return True, True
+        elif adult:
+            console.print(f'[bold red]Flagged as adult content.RetroFlix bans all porn/erotica.')
+            return True, False
+
+        return False, False
 
     async def search_existing(self, meta):
         dupes = {}

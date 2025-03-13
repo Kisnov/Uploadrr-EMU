@@ -12,18 +12,26 @@ from src.console import console
 class OTW():
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'OTW'
         self.source_flag = 'OLD'
         self.upload_url = 'https://oldtoons.world/api/torrents/upload'
         self.search_url = 'https://oldtoons.world/api/torrents/filter'
         self.signature = None
-        self.banned_groups = [
-    '[Oj]', '3LTON', '4yEo', 'ADE', 'AFG', 'AniHLS', 'AnimeRG', 'AniURL', 'AROMA', 'aXXo', 'Brrip', 'CHD', 'CM8', 
-    'CrEwSaDe', 'DeadFish', 'DNL', 'ELiTE', 'eSc', 'FaNGDiNG0', 'FGT', 'Flights', 'FRDS', 'FUM', 'HAiKU', 'HD2DVD',
-    'HDS', 'HDTime', 'Hi10', 'ION10', 'iPlanet', 'JIVE', 'KiNGDOM', 'LAMA', 'Leffe', 'LOAD', 'mHD', 'NhaNc3', 'nHD', 
-    'NOIVTC', 'nSD', 'PiRaTeS', 'PRODJi', 'RAPiDCOWS', 'RARBG', 'RDN', 'REsuRRecTioN', 'RMTeam', 'SANTi', 'SicFoI', 'SPASM', 
-    'STUTTERSHIT', 'Telly', 'TM', 'UPiNSMOKE', 'WAF', 'xRed', 'XS', 'YIFY', 'ZKBL', 'ZmN', 'ZMNT'
-]
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "[Oj]", "3LTON", "4yEo", "ADE", "AFG", "AniHLS", "AnimeRG", "AniURL", "AROMA", "aXXo", "Brrip", "CHD",
+                "CM8", "CrEwSaDe", "d3g", "DeadFish", "DNL", "ELiTE", "eSc", "FaNGDiNG0", "FGT", "Flights", "FRDS",
+                "FUM", "HAiKU", "HD2DVD", "HDS", "HDTime", "Hi10", "ION10", "iPlanet", "JIVE", "KiNGDOM", "Leffe",
+                "LEGi0N", "LOAD", "MeGusta", "mHD", "mSD", "NhaNc3", "nHD", "nikt0", "NOIVTC", "OFT", "nSD", "PiRaTeS",
+                "playBD", "PlaySD", "playXD", "PRODJi", "RAPiDCOWS", "RARBG", "RetroPeeps", "RDN", "REsuRRecTioN",
+                "RMTeam", "SANTi", "SicFoI", "SPASM", "SPDVD", "STUTTERSHIT", "Telly", "TM", "TRiToN", "UPiNSMOKE",
+                "URANiME", "WAF", "x0r", "xRed", "XS", "YIFY", "ZKBL", "ZmN", "ZMNT", "AOC", "ViSION"
+            ],
+            "CMRG": ["ENCODE", "WEBRIP"],
+            "EVO": ["ENCODE", "WEBRIP"],
+            "TERMiNAL": ["ENCODE", "WEBRIP"]
+        }
         pass
     
     async def get_cat_id(self, category_name):
@@ -70,6 +78,8 @@ class OTW():
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
+        manual_name = meta.get('manual_name')
+        name = manual_name or self.edit_name(meta)
         await common.unit3d_edit_desc(meta, self.tracker)
         region_id = await common.unit3d_region_ids(meta.get('region'))
         distributor_id = await common.unit3d_distributor_ids(meta.get('distributor'))
@@ -92,7 +102,7 @@ class OTW():
             open_nfo = open(nfo_file, 'rb') 
             files['nfo'] = open_nfo
         data = {
-            'name' : meta['name'],
+            'name' : name,
             'description' : desc,
             'mediainfo' : mi_dump,
             'bdinfo' : bd_dump, 
@@ -193,6 +203,42 @@ class OTW():
 
             return success
 
+
+    async def edit_name(self, meta):
+        otw_name = meta['name']
+
+        if meta['category'] == "TV":
+            try:
+                year = meta['year']
+                if not year:
+                    raise ValueError("No TMDB Year Found..trying IMDB")
+            except (KeyError, ValueError):
+                try:
+                    year = meta['imdb_info']['year']
+                    if not year:
+                        raise ValueError("No IMDB Year Found..")
+                except (KeyError, ValueError):
+                    year = ""
+
+        if meta.get('no_year', False) is True:
+            year = ''
+
+        otw_name = otw_name.replace(meta['title'], f"{meta['title']} {year}", 1)
+
+        return otw_name
+
+    async def other_banned_content(self, meta, path):
+        adult = meta.get('adult', False)
+        keywords = meta.get('keywords', '')
+        keyword_list = [k.strip() for k in keywords.lower().split(',')]
+        if ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic', 'animation'])) and adult:
+            console.print(f'[bold red]OldToons strictly prohibits Porn/Hentai.')
+            return True, True
+        elif adult:
+            console.print(f'[bold red]Flagged as adult content. OldToons is family friendly. Please check rules.')
+            return True, False
+
+        return False, False
 
 
     async def search_existing(self, meta):

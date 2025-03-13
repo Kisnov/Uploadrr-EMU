@@ -2,6 +2,7 @@
 import asyncio
 import requests
 import json
+import re
 import os
 import platform
 from rich.pretty import Pretty
@@ -13,20 +14,42 @@ class FNP():
 
     def __init__(self, config):
         self.config = config
+        self.type = 'unit3d'
         self.tracker = 'FNP'
         self.source_flag = 'FnP'
         self.upload_url = 'https://fearnopeer.com/api/torrents/upload'
         self.search_url = 'https://fearnopeer.com/api/torrents/filter'
         self.signature = None
-        self.banned_groups = ["YIFY", "RARBG", "YTS", "LAMA", "D3g", "YAWNiX", "MeGusta", "PSA", "INFINITY"]
+        self.banned_groups = {
+            "ALL_TYPES": [
+                "4K4U", "BiTOR", "d3g", "FGT", "FRDS", "GalaxyRG", "iVy", "INFINITY", "LAMA", 
+                "MeGusta", "PSA", "RARBG", "YAWNiX", "YIFY", "YTS", "x0r"
+            ],
+            "EVO": ["WEBRIP", "ENCODE", "DVDRIP"]
+        }
+
         pass
     
-    async def get_cat_id(self, category_name):
+    async def get_cat_id(self, category_name, anime, name):
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
+            'MUSIC': '3',
             }.get(category_name, '0')
+        if anime:
+            category_id = '6'
+        elif category_name == 'TV':
+            if self.is_sports(name):
+                category_id = '9' 
         return category_id
+
+    def is_sports(self, name):
+        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
+                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
+                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
+                        r'.*overtake.*)'
+
+        return re.search(sports_pattern, name, re.IGNORECASE) is not None
 
     async def get_type_id(self, type):
         type_id = {
@@ -35,23 +58,23 @@ class FNP():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
+            'FLAC': '7',
+            'MP3': '11'
             }.get(type, '0')
         return type_id
 
     async def get_res_id(self, resolution):
         resolution_id = {
-            '8640p':'10', 
-            '4320p': '1', 
-            '2160p': '2', 
-            '1440p' : '3',
+            '4320p': '1',
+            '2160p': '2',
             '1080p': '3',
-            '1080i':'4', 
-            '720p': '5',  
-            '576p': '6', 
-            '576i': '7',
-            '480p': '8', 
-            '480i': '9'
+            '1080i': '11',
+            '720p': '5',
+            '576p': '6',
+            '576i': '15',
+            '480p': '8',
+            '480i': '14'
             }.get(resolution, '10')
         return resolution_id
 
@@ -62,7 +85,7 @@ class FNP():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag)
-        cat_id = await self.get_cat_id(meta['category'])
+        cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('name_notag'))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -196,7 +219,7 @@ class FNP():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
             'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category']),
+            'categories[]' : await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('name_notag')),
             'types[]' : await self.get_type_id(meta['type']),
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""
