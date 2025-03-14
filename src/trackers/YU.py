@@ -14,7 +14,7 @@ class YU():
         self.config = config
         self.type = 'unit3d'
         self.tracker = 'YU'
-        self.source_flag = 'YUSCENE'
+        self.source_flag = 'YuScene'
         self.upload_url = 'https://yu-scene.net/api/torrents/upload'
         self.search_url = 'https://yu-scene.net/api/torrents/filter'
         self.banned_groups = [
