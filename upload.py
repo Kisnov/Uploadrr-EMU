@@ -136,13 +136,14 @@ async def do_the_thing(base_dir):
             trackers = ','.join(trackers)
     else:
         trackers = config['TRACKERS']['default_trackers']
-    
+
     # Normalize trackers
-    trackers = trackers.split(',') if ',' in trackers else [trackers]
-    trackers = [t.strip().upper() for t in trackers]
+    if isinstance(trackers, str):
+        trackers = [t.strip() for t in trackers.split(',')] if ',' in trackers else [trackers.strip()]
+    trackers = [t.upper() for t in trackers]
     if meta.get('manual', False):
         trackers.insert(0, "MANUAL")
-    
+
     # Load only the specified trackers
     TRACKER_REGISTRY = load_trackers(trackers, config)
     tracker_list = list(TRACKER_REGISTRY.keys())
@@ -336,13 +337,7 @@ async def do_the_thing(base_dir):
             prep.create_torrent(meta, Path(meta['path']), "BASE", meta.get('piece_size_max', 0))
         if int(meta.get('randomized', 0)) >= 1:
             prep.create_random_torrents(meta['base_dir'], meta['uuid'], meta['randomized'], meta['path'])
-            
-        if meta.get('trackers', None) != None:
-            trackers = meta['trackers']
-        else:
-            trackers = config['TRACKERS']['default_trackers']
-        if "," in trackers:
-            trackers = trackers.split(',')
+
         with open (f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=4)
             f.close()
