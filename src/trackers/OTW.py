@@ -79,7 +79,7 @@ class OTW():
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         manual_name = meta.get('manual_name')
-        name = manual_name or self.edit_name(meta)
+        name = manual_name or await self.edit_name(meta)
         await common.unit3d_edit_desc(meta, self.tracker)
         region_id = await common.unit3d_region_ids(meta.get('region'))
         distributor_id = await common.unit3d_distributor_ids(meta.get('distributor'))
@@ -220,12 +220,11 @@ class OTW():
                 except (KeyError, ValueError):
                     year = ""
 
-        if meta.get('no_year', False) is True:
-            year = ''
-
-        otw_name = otw_name.replace(meta['title'], f"{meta['title']} {year}", 1)
+            if meta.get('no_year', False) is False:
+                otw_name = otw_name.replace(meta['title'], f"{meta['title']} {year}", 1)
 
         return otw_name
+        
 
     async def other_banned_content(self, meta, path):
         adult = meta.get('adult', False)
