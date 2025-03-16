@@ -7,7 +7,7 @@
         ##-----------------------------------------------------##
 
 config = {
-    'version': '1.0.7',
+    'version': '1.0.8',
 	
     "DEFAULT" : {
 
@@ -160,6 +160,17 @@ config = {
             "pr_signature": "\n [center][b][size=6]PERSONAL RELEASE[/size][/b][/center] \n [center][url=https://codeberg.org/CvT/Uploadrr][img=69]https://capybarabr.com/img/capybara.svg[/img][/url][/center]",
             "anon_pr_signature": "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]",
             #"qbit_tag": "CBR",		
+        },
+
+        "DARK" : {
+            "api_key" : "DarkPeers_API_KEY",
+            "announce_url" : "https://darkpeers.org/announce/Custom_Announce_URL",
+            "anon" : False,
+            "signature" : "[url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp/img][/url][/center]",
+            "anon_signature" : "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]",   
+            "pr_signature": "\n [center][b][size=6]PERSONAL RELEASE[/size][/b][/center] \n [center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]",
+            "anon_pr_signature": "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]",
+            #"qbit_tag": "DARK",		
         },
 
         "EMU" :{
