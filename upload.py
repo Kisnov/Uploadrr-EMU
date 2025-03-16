@@ -313,15 +313,10 @@ async def do_the_thing(base_dir):
                 log.error("get_name was called")            
             continue
 
-        if meta.get('image_list', False) in (False, []) and meta.get('skip_imghost_upload', False) == False:
-            return_dict = {}
-            meta['image_list'], dummy_var = prep.upload_screens(meta, meta['screens'], 1, 0, meta['screens'],[], return_dict)
-            if meta['debug']:
-                console.print(meta['image_list'])
-            # meta['uploaded_screens'] = True
-        elif meta.get('skip_imghost_upload', False) and not meta.get('image_list', False):
-            meta['image_list'] = []
-
+        if not meta.get('image_list', False) and not meta.get('skip_imghost_upload', False):
+            meta['image_list'] = [] 
+        if meta.get('debug'):
+            console.print(meta['image_list'])
 
         if not os.path.exists(os.path.abspath(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent")):
             reuse_torrent = None
@@ -422,21 +417,26 @@ async def do_the_thing(base_dir):
 
             # MANUAL
             elif tracker == "MANUAL":
+                from src.manual import ManualPackager
                 do_manual = meta.get('unattended', False) or Confirm.ask("Get files for manual upload?", default=True)
                 if do_manual:
+                    packager = ManualPackager(config, prep.img_host, prep.base_dir)
                     for manual_tracker in trackers:
                         if manual_tracker != 'MANUAL' and manual_tracker in TRACKER_REGISTRY:
                             manual_instance = TRACKER_REGISTRY[manual_tracker]["class"](config=config)
-                            if TRACKER_REGISTRY[manual_tracker]["type"] == 'api':
+                            if TRACKER_REGISTRY[manual_tracker]["type"] in ["api", "unit3d"]:
                                 await common.unit3d_edit_desc(meta, manual_instance.tracker, manual_instance.signature)
-                            else:
+                            elif hasattr(manual_instance, 'edit_desc'):
                                 await manual_instance.edit_desc(meta)
-                    url = await prep.package(meta)
+                            else:
+                                pass
+                    url = await packager.package(meta)
                     if not url:
                         console.print(f"[yellow]Unable to upload prep files, they can be found at `tmp/{meta['uuid']}`")
                     else:
                         console.print(f"[green]{meta['name']}")
                         console.print(f"[green]Files can be found at: [yellow]{url}[/yellow]")
+
 
             # ALPHARATIO
             elif tracker == "AR":
