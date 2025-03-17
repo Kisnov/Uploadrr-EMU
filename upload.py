@@ -389,15 +389,6 @@ async def do_the_thing(base_dir):
                 tracker_instance = None
                 tracker_type = None
 
-            # Standard upload flow for unit3d/api/http trackers (for now)
-            if tracker != "MANUAL":
-                tracker_info = TRACKER_REGISTRY[tracker]
-                tracker_instance = tracker_info["class"](config=config)
-                tracker_type = tracker_info["type"]
-            else:
-                tracker_instance = None
-                tracker_type = None
-
             # Standard upload flow for api/http/unit3d trackers (for now)
             if tracker != "MANUAL" and tracker_type in ['api', 'http', 'unit3d']:
                 upload_prompt = f"Upload to {tracker_instance.tracker}? {debug}"
@@ -449,12 +440,21 @@ async def do_the_thing(base_dir):
                         skipped_details.append((path, "Banned group on AlphaRatio"))
                         continue
                     if await ar.validate_credentials(meta):
-                        success, skipped_files = await upload_to_tracker(ar, "AR", meta, config, client, skipped_files, skipped_details, path, debug)
-                        if success:
-                            await asyncio.sleep(5)
-                            successful_uploads += 1
+                        dupes = await ar.search_existing(meta)
+                        dupes = await common.filter_dupes(dupes, meta)
+                        meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
+                        if skipped:
+                            skipped_files += 1
+                            skipped_details.append((path, tracker))
+                            continue
+                    if meta['upload']:
+                        await ar.upload(meta)
+                        #await ar.update_torrent_file
+                        await asyncio.sleep(5)
+                        await client.add_to_client(meta, "AR")
+                        successful_uploads += 1
                 if ar.session:
-                    await ar.close_session()
+                    await ar.close_session()                        
 
             # BEYONDHD
             elif tracker == "BHD":
@@ -563,11 +563,16 @@ async def do_the_thing(base_dir):
 
             # TorrentLeech
             elif tracker == "TL":
-                upload_to_tl = meta['unattended'] or Confirm.ask(f"Upload to {tracker_instance.tracker}? {debug}")
-                if upload_to_tl:
-                    success, skipped_files = await upload_to_tracker(tracker_instance, "TL", meta, config, client, skipped_files, skipped_details, path, debug)
-                    if success:
-                        successful_uploads += 1   
+                upload_to_tracker = meta.get('unattended', False) or Confirm.ask(f"Upload to {tracker_instance.tracker}? {debug}")
+                if upload_to_tracker:
+                    console.print(f"Uploading to {tracker_instance.tracker}")
+                    if hasattr(tracker_instance, 'banned_groups') and check_banned_group(tracker_instance.tracker, tracker_instance.banned_groups, meta, skipped_details, path):
+                        skipped_files += 1
+                        skipped_details.append((path, f"Banned group on {tracker_instance.tracker}"))
+                        continue
+                    await tracker_instance.upload(meta)
+                    await client.add_to_client(meta, tracker_instance.tracker)
+                    successful_uploads += 1
 
     ### FEEDBACK ###
 
