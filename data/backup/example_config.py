@@ -7,7 +7,7 @@
         ##-----------------------------------------------------##
 
 config = {
-    'version': '1.0.8',
+    'version': '1.0.9',
 	
     "DEFAULT" : {
 
@@ -446,7 +446,7 @@ config = {
 
         "RHD" : {
             "api_key" : "RHD_API_KEY",
-            "announce_url" : "https://r0k3t.li/announce/Custom_Announce_URL",
+            "announce_url" : "https://rocket-hd.cc/announce/Custom_Announce_URL",
             "anon" : False,
             "signature" : "\n[center][b]PLEASE SEED RocketHD[/b][/center]\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]",
             "anon_signature" : "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]",   
