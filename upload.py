@@ -679,7 +679,7 @@ async def upload_to_tracker(tracker_instance, tracker_name, meta, config, client
 
     # Check other banned content 
     if hasattr(tracker_instance, 'other_banned_content'):
-        result = await tracker_instance.other_banned_content(meta, path)
+        result = await tracker_instance.other_banned_content(meta)
         # Incase a tuple isn't returned (ie: someone returns a simple True/False)
         if isinstance(result, tuple):
             is_content_banned, is_absolute = result

@@ -190,7 +190,7 @@ class DARK():
         
         ### haXXy said they aren't banning content for lacking nordic audio/subs at this time. 
     '''
-    async def other_banned_content(self, meta, path):
+    async def other_banned_content(self, meta):
         nordic_languages = ['Danish', 'Finnish', 'Icelandic', 'Norwegian', 'Swedish']
         if 'mediainfo' in meta and 'media' in meta['mediainfo']:
             for track in meta['mediainfo']['media']['track']:

@@ -208,7 +208,8 @@ class UNIT3D_TEMPLATE():
         # adult here would be defined by TMDB the user-overide option is prefered method as TMDB is user generated and makes mistakes. 
         # For example use cases see RF, OTW, RTF 
         """    
-        async def other_banned_content(self, meta, path):
+        async def other_banned_content(self, meta):
+        path = meta.get('uuid', '')
         adult = meta.get('adult', False)
         keywords = meta.get('keywords', '')
         keyword_list = [k.strip() for k in keywords.lower().split(',')]

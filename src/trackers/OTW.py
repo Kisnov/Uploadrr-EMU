@@ -226,7 +226,8 @@ class OTW():
         return otw_name
         
 
-    async def other_banned_content(self, meta, path):
+    async def other_banned_content(self, meta):
+        path = meta.get('uuid', '')
         adult = meta.get('adult', False)
         keywords = meta.get('keywords', '')
         keyword_list = [k.strip() for k in keywords.lower().split(',')]
