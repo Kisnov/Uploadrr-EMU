@@ -403,7 +403,7 @@ async def do_the_thing(base_dir):
                     skipped_files += 1
                     skipped_details.append((path, f"Invalid credentials for {tracker_instance.tracker}"))
                     continue
-                
+
                 success, skipped_files = await upload_to_tracker(
                     tracker_instance, tracker_instance.tracker, meta, config, client,
                     skipped_files, skipped_details, path, debug
@@ -563,8 +563,8 @@ async def do_the_thing(base_dir):
 
             # TorrentLeech
             elif tracker == "TL":
-                upload_to_tracker = meta.get('unattended', False) or Confirm.ask(f"Upload to {tracker_instance.tracker}? {debug}")
-                if upload_to_tracker:
+                upload_to_tl = meta.get('unattended', False) or Confirm.ask(f"Upload to {tracker_instance.tracker}? {debug}")
+                if upload_to_tl:
                     console.print(f"Uploading to {tracker_instance.tracker}")
                     if hasattr(tracker_instance, 'banned_groups') and check_banned_group(tracker_instance.tracker, tracker_instance.banned_groups, meta, skipped_details, path):
                         skipped_files += 1
