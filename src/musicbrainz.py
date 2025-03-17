@@ -30,7 +30,7 @@ class MusicBrainzAPI:
                 return None
 
         full_url = f"{self.BASE_URL}{endpoint}?{urlencode(params)}"
-        log.dinfo(f"Querying URL: {full_url}")
+        log.debug(f"Querying URL: {full_url}")
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, sync_request)
@@ -69,10 +69,10 @@ class MusicBrainzAPI:
     async def search_musicbrainz_by_barcode(self, barcode: str, meta: Dict[str, Any]) -> None:
         """Asynchronously search MusicBrainz by barcode and populate meta dictionary."""
         releases = await self.search_by_barcode(barcode)
-        log.dinfo("Search by barcode response: %s", releases)  # Debug
+        log.debug("Search by barcode response: %s", releases)  # Debug
         if releases and 'releases' in releases and releases['releases']:
             best_release = releases['releases'][0]
-            log.dinfo("Best release found: %s", best_release)  # Debug
+            log.debug("Best release found: %s", best_release)  # Debug
             meta['mbid'] = best_release.get('id', '')
             meta['artist'] = best_release['artist-credit'][0]['name']
             meta['album'] = best_release.get('title', '')
@@ -151,7 +151,7 @@ class MusicBrainzAPI:
             # Choose the best match from filtered results
             if exact_matches:
                 correct_release = exact_matches[0]
-                log.dinfo(f"Correct release: {correct_release}")
+                log.debug(f"Correct release: {correct_release}")
                 meta['mbid'] = correct_release.get('id', '')
                 await self.fetch_musicbrainz_mbid(meta['mbid'], meta)
             else:
@@ -294,7 +294,7 @@ class MusicBrainzAPI:
     async def get_image_list(self, mbid: str) -> Dict[str, Any]:
         cover_aa = "http://coverartarchive.org/release/"
         url = f"{cover_aa}{mbid}"
-        log.dinfo(f"Querying Cover Art Archive: {url}") 
+        log.debug(f"Querying Cover Art Archive: {url}") 
 
         def sync_request():
             try:
