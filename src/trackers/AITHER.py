@@ -191,6 +191,13 @@ class AITHER():
                 audio_lang = meta['bdinfo']['audio'][0]['language'].upper()
                 if audio_lang != "":
                     aither_name = aither_name.replace(meta['resolution'], f"{audio_lang} {meta['resolution']}", 1)
+        if meta['is_disc'] == 'DVD':
+            aither_name = aither_name.replace(str(meta['year']), f"{meta['year']} {meta['resolution']}", 1)
+            aither_name = aither_name.replace(meta['audio'], f"{meta['video_codec']} {meta['audio']}", 1)            
+        if meta['category'] == "MOVIE":
+            if meta.get('type') == "REMUX" and meta.get('source', '') in ("PAL DVD", "NTSC DVD"):
+                aither_name = aither_name.replace(meta['source'], f"{meta['resolution']} {meta['source']}", 1)
+                aither_name = aither_name.replace('REMUX', f"REMUX {meta['video_codec']}", 1)
         if meta['category'] == "TV" and meta.get('tv_pack', 0) == 0 and meta.get('episode_title_storage', '').strip() != '' and meta['episode'].strip() != '':
             aither_name = aither_name.replace(meta['episode'], f"{meta['episode']} {meta['episode_title_storage']}", 1)
         return aither_name
