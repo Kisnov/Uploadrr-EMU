@@ -13,3 +13,6 @@ tmp/*
 venv/*
 .idea/*
 ._*
+.python-version
+.*.yml
+*.lock
