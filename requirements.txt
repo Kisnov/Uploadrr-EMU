@@ -1,5 +1,4 @@
 aiofiles
-aiohttp
 anitopy
 beautifulsoup4
 bencode.py
@@ -7,6 +6,7 @@ cinemagoer
 deluge-client
 ffmpeg-python
 guessit
+httpx
 Jinja2
 language-data<=1.2.0; python_version<='3.8'
 langcodes<=3.4.0; python_version<='3.8'
@@ -18,11 +18,11 @@ pyotp
 pyoxipng
 pyrobase
 pymediainfo
+pyyaml
 qbittorrent-api<=2023.9.53; python_version<'3.8'
 qbittorrent-api; python_version>='3.8'
 requests
 rich
 tinytag
 torf
-tmdbsimple
 unidecode
