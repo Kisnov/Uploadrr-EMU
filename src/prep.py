@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*- 
 import sys
-from src.args import Args
 from src.console import console, log
-from src.discparse import DiscParse
 from src.exceptions import *
 from src.trackers.PTP import PTP
 from src.trackers.BLU import BLU
@@ -11,7 +9,8 @@ from src.trackers.COMMON import COMMON
 from src.musicbrainz import MusicBrainzAPI
 from src.discparse import DiscParse
 from src.discogs import DiscogsAPI
-from src.screenshots import ScreenshotGenerator, ScreenshotUploader
+from src.screenshots import ScreenshotManager
+from src.databases import TMDbHandler, IMDbHandler, search_tvmaze
 
 try:
     import aiofiles
@@ -42,9 +41,7 @@ try:
     import tmdbsimple as tmdb
     import urllib
     import urllib.parse
-    from os.path import basename
-    from datetime import datetime, date, timedelta
-    from collections import defaultdict
+    from datetime import datetime
     from difflib import SequenceMatcher
     from guessit import guessit
     from imdb import Cinemagoer
@@ -77,402 +74,366 @@ class Prep():
     """
     base_dir=os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
                                              
-    def __init__(self, screens, img_host, config):
-        self.screens = screens
+    def __init__(self, config: Dict):
         self.config = config
-        self.img_host = img_host.lower()
-        self.screenshot_gen = ScreenshotGenerator(screens, img_host, config, self.base_dir)
-        self.screenshot_uploader = ScreenshotUploader(config, img_host, self.base_dir)
+        self.screenshot_manager = ScreenshotManager(config=self.config, base_dir=self.base_dir)
         tmdb.API_KEY = config['DEFAULT']['tmdb_api']
         self._regions = None
         self._distributor_list = None
         self._services = None
+        self.TMDb = TMDbHandler(config)
+        self.IMDb = IMDbHandler()
+        self.tasks = []
 
-    async def gather_prep(self, meta, mode):        
+    async def gather_prep(self, meta, mode):
+        #Initialize gather
         meta.update(
             mode=mode,
             isdir=os.path.isdir(meta['path']),
-            base_dir= self.base_dir,
+            base_dir=self.base_dir,
             is_music=False,
             is_video=False,
             filelist={},
             user_images=[],
             log_files=[],
             nfo_file='',
-            uuid=meta.get('uuid') or os.path.basename(meta['path'])  
+            uuid=meta.get('uuid') or os.path.basename(meta['path'])
         )
 
         # Create temp directory
         tmp_dir = Path(f"{meta['base_dir']}/tmp/{meta['uuid']}")
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
 
         log.debug(f"[cyan]ID: {meta['uuid']}")
 
+        # File collection and initial processing
+        if meta['isdir']:
+            meta = await self._process_directory(meta, mode)
+        else:
+            meta = await self._process_single_file(meta, mode)
+
+        if meta['is_music']:
+            meta = await self.gen_desc(meta)
+            return meta
+
+        # Video processing
+        console.print('[red]Processing as video')
+        meta = await self._process_video_metadata(meta)
+
+        meta = await self.gen_desc(meta)
+        return meta
+
+    async def _process_directory(self, meta, mode):
+        """Process directory contents recursively."""
         def collect_files_recursive(directory, meta):
-            """Recursively collect files in a directory."""
             return {
                 f"{path.parent.name}/{path.name}" if path.parent.name != meta['uuid'] else f"BASE/{path.name}": str(path)
                 for path in Path(directory).rglob('*')
                 if path.is_file() and not path.name.startswith('._')
             }
 
+        try:
+            all_files = await asyncio.to_thread(collect_files_recursive, meta['path'], meta)
+            base_name = os.path.basename(meta['path'])
+            nfo_candidates = []
 
-        if meta['isdir']:
-            try:
-                all_files = collect_files_recursive(meta['path'], meta)
-                base_name = os.path.basename(meta['path'])
-                nfo_candidates = []
-                for file_name, full_path in all_files.items():
-                    ext = os.path.splitext(file_name)[1].lower()
+            for file_name, full_path in all_files.items():
+                ext = os.path.splitext(file_name)[1].lower()
+                if ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
+                    meta['filelist'][file_name] = full_path
+                    meta['is_music'] = True
+                elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
+                    meta['user_images'].append(full_path)
+                elif ext == '.nfo':
+                    nfo_candidates.append((file_name, full_path))
+                elif ext == '.log':
+                    meta['log_files'].append(full_path)
 
-                    if ext in ['.aac', 'ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
-                        key = file_name
-                        meta['filelist'][key] = full_path
-                        meta['is_music'] = True
-                    elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
-                        meta['user_images'].append(full_path)   
-                    elif ext == '.nfo':
-                        nfo_candidates.append((file_name, full_path))
+            if nfo_candidates:
+                for file_name, full_path in nfo_candidates:
+                    if file_name == f"{base_name}.nfo":
+                        meta['nfo_file'] = full_path
+                        break
+                else:
+                    meta['nfo_file'] = nfo_candidates[0][1]
 
-                    if nfo_candidates:
-                        for file_name, full_path in nfo_candidates:
-                            if file_name == f"{base_name}.nfo":
-                                meta['nfo_file'] = full_path
-                                break  
-                        else:                            
-                            meta['nfo_file'] = nfo_candidates[0][1]
-                        
-                    elif ext == '.log':
-                        meta['log_files'].append(full_path)
-
+            if not meta['is_music']:
                 video_extensions = ['.mkv', '.mp4', '.ts']
-                if not meta['is_music']:
-                    meta['is_video'] = any(full_path.lower().endswith(tuple(video_extensions)) for full_path in all_files.values())
+                meta['is_video'] = any(full_path.lower().endswith(tuple(video_extensions)) for full_path in all_files.values())
 
-                if meta['is_music']:
-                    console.print('[red]Processing as music')
-                    await self.get_music(meta, mode)
-
-            except Exception as e:
-                log.error(f"Error processing directory: {e}")
-
-        else:  # Single file scenario
-            file_extension = os.path.splitext(meta['path'])[1].lower()
-            if file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
-                meta['is_music'] = True
+            if meta['is_music']:
                 console.print('[red]Processing as music')
-                await self.process_single_music_file(meta, mode)
-            elif file_extension in ['.mkv', '.mp4', '.ts']:
-                meta['is_video'] = True
-                base_name = os.path.splitext(meta['path'])[0]
-                match_nfo = f"{base_name}.nfo"
-                if os.path.exists(match_nfo):
-                    meta['nfo_file'] = match_nfo
-                elif not os.path.exists(match_nfo) and meta.get('nfo'):
-                    directory = os.path.dirname(meta['path'])
-                    nfo_files = [f for f in os.listdir(directory) if f.endswith('.nfo')]
-                    if nfo_files:
-                        meta['nfo_file'] = os.path.join(directory, nfo_files[0])
-        if meta['is_music']:
-            meta = await self.gen_desc(meta)
-            return meta
+                await self.get_music(meta, mode)
 
-        else:
-            # Video processing logic
-            console.print('[red]Processing as video')
-            meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.get_disc(meta)        
-            
-            # If BD:
-            if meta['is_disc'] == "BDMV":
-                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta.get('imdb', None))
-                meta['filelist'] = []
-                try:
-                    guess_name = bdinfo['title'].replace('-',' ')
-                    filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes" : ["country", "language"]})['title']
-                    untouched_filename = bdinfo['title']
-                    try:
-                        meta['search_year'] = guessit(bdinfo['title'])['year']
-                    except Exception:
-                        meta['search_year'] = ""
-                except Exception:
-                    guess_name = bdinfo['label'].replace('-',' ')
-                    filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes" : ["country", "language"]})['title']
-                    untouched_filename = bdinfo['label']
-                    try:
-                        meta['search_year'] = guessit(bdinfo['label'])['year']
-                    except Exception:
-                        meta['search_year'] = ""
+        except Exception as e:
+            log.error(f"Error processing directory: {e}")
+        return meta
 
-                if meta.get('resolution', None) == None:
-                    meta['resolution'] = self.mi_resolution(bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0)
-                # if meta.get('sd', None) == None:
-                meta['sd'] = self.is_sd(meta['resolution'])
+    async def _process_single_file(self, meta, mode):
+        """Process a single file."""
+        file_extension = os.path.splitext(meta['path'])[1].lower()
+        if file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
+            meta['is_music'] = True
+            console.print('[red]Processing as music')
+            await self.process_single_music_file(meta, mode)
+        elif file_extension in ['.mkv', '.mp4', '.ts']:
+            meta['is_video'] = True
+            base_name = os.path.splitext(meta['path'])[0]
+            match_nfo = f"{base_name}.nfo"
+            if await asyncio.to_thread(os.path.exists, match_nfo):
+                meta['nfo_file'] = match_nfo
+            elif not await asyncio.to_thread(os.path.exists, match_nfo) and meta.get('nfo'):
+                directory = os.path.dirname(meta['path'])
+                nfo_files = await asyncio.to_thread(lambda: [f for f in os.listdir(directory) if f.endswith('.nfo')])
+                if nfo_files:
+                    meta['nfo_file'] = os.path.join(directory, nfo_files[0])
+        return meta
 
-                mi = None
-                mi_dump = None
-            #IF DVD
-            elif meta['is_disc'] == "DVD":
-                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta.get('imdb', None))
-                meta['filelist'] = []
-                guess_name = meta['discs'][0]['path'].replace('-',' ')
-                # filename = guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name))['title']
-                filename = guessit(guess_name, {"excludes" : ["country", "language"]})['title']
-                untouched_filename = os.path.basename(os.path.dirname(meta['discs'][0]['path']))
-                try:
-                    meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
-                except Exception:
-                    meta['search_year'] = ""
-                if meta.get('edit', False) == False:
-                    mi = self.exportInfo(f"{meta['discs'][0]['path']}/VTS_{meta['discs'][0]['main_set'][0][:2]}_1.VOB", False, meta['uuid'], meta['base_dir'], export_text=False)
-                    meta['mediainfo'] = mi
-                else:
-                    mi = meta['mediainfo']
-                
-                #NTSC/PAL
-                meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
-                meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], meta['base_dir'])
-                meta['sd'] = self.is_sd(meta['resolution'])
-            elif meta['is_disc'] == "HDDVD":
-                video, meta['scene'], meta['imdb'] = self.is_scene(meta['path'], meta.get('imdb', None))
-                meta['filelist'] = []
-                guess_name = meta['discs'][0]['path'].replace('-','')
-                filename = guessit(guess_name, {"excludes" : ["country", "language"]})['title']
-                untouched_filename = os.path.basename(meta['discs'][0]['path'])
-                videopath = meta['discs'][0]['largest_evo']
-                try:
-                    meta['search_year'] = guessit(meta['discs'][0]['path'])['year']
-                except Exception:
-                    meta['search_year'] = ""
-                if meta.get('edit', False) == False:
-                    mi = self.exportInfo(meta['discs'][0]['largest_evo'], False, meta['uuid'], meta['base_dir'], export_text=False)
-                    meta['mediainfo'] = mi
-                else:
-                    mi = meta['mediainfo']
-                meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], meta['base_dir'])
-                meta['sd'] = self.is_sd(meta['resolution'])
-            #If NOT BD/DVD/HDDVD
-            else:
-                videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord')) 
-                video, meta['scene'], meta['imdb'] = self.is_scene(videopath, meta.get('imdb', None))
-                guess_name = ntpath.basename(video).replace('-',' ')
-                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes" : ["country", "language"]}).get("title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes" : ["country", "language"]})["title"])
-                untouched_filename = os.path.basename(video)
-                try:
-                    meta['search_year'] = guessit(video)['year']
-                except Exception:
-                    meta['search_year'] = ""
-                
-                if meta.get('edit', False) == False:
-                    mi = self.exportInfo(videopath, meta['isdir'], meta['uuid'], meta['base_dir'], export_text=True)
-                    meta['mediainfo'] = mi
-                else:
-                    mi = meta['mediainfo']
+    async def _process_video_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Process video-specific metadata"""
+        # Get disc info
+        meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.get_disc(meta)
+        meta['filelist'] = []
+        meta['bdinfo'] = video = videopath = filename = mi = None
+        meta['is_sports'] = False
 
-                if meta.get('resolution', None) == None:
-                    meta['resolution'] = self.get_resolution(guessit(video), meta['uuid'], meta['base_dir'])
-                # if meta.get('sd', None) == None:
-                meta['sd'] = self.is_sd(meta['resolution'])
-
-                
-            
-            if " AKA " in filename.replace('.',' '):
-                filename = filename.split('AKA')[0]
-            meta['filename'] = filename
-
+        # Process based on disc type
+        if meta['is_disc'] == "BDMV":
+            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            try:
+                guess_name = bdinfo['title'].replace('-', ' ')
+                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                meta['search_year'] = guessit(bdinfo['title']).get('year', "")
+            except Exception:
+                guess_name = bdinfo['label'].replace('-', ' ')
+                filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
+                meta['search_year'] = guessit(bdinfo['label']).get('year', "")
+            meta['resolution'] = self.mi_resolution(
+                bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0
+            )
             meta['bdinfo'] = bdinfo
+
+        elif meta['is_disc'] == "DVD":
+            disc_path = meta['discs'][0]['path']
+            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            guess_name = disc_path.replace('-', ' ')
+            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+            meta['search_year'] = guessit(video).get('year', "")
             
+            if not meta.get('edit', False):
+                tmp_dir = Path(meta['base_dir']) / 'tmp' / meta['uuid']
+                title_set = meta['discs'][0]['main_set'][0][:2]
+                vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
+                ifo_path = f"{disc_path}/VTS_{title_set}_0.IFO"
+                ifo_tmp = tmp_dir / f"VTS_{title_set}_0.IFO"
 
+                mi = await self.exportInfo(vob_path, False, meta['uuid'], meta['base_dir'], export_text=True)
 
-            # Reuse information from other trackers
-            if str(self.config['TRACKERS'].get('PTP', {}).get('useAPI')).lower() == "true":
-                ptp = PTP(config=self.config)
-                if meta.get('ptp', None) != None:
-                    meta['ptp_manual'] = meta['ptp']
-                    meta['imdb'], meta['ext_torrenthash'] = await ptp.get_imdb_from_torrent_id(meta['ptp'])
-                else:
-                    if meta['is_disc'] in [None, ""]:
-                        ptp_search_term = os.path.basename(meta['filelist'][0])
-                        search_file_folder = 'file'
-                    else:
-                        search_file_folder = 'folder'
-                        ptp_search_term = os.path.basename(meta['path'])
-                    ptp_imdb, ptp_id, meta['ext_torrenthash'] = await ptp.get_ptp_id_imdb(ptp_search_term, search_file_folder)
-                    if ptp_imdb != None:
-                        meta['imdb'] = ptp_imdb
-                    if ptp_id != None:
-                        meta['ptp'] = ptp_id
-            
-            if str(self.config['TRACKERS'].get('HDB', {}).get('useAPI')).lower() == "true":
-                hdb = HDB(config=self.config)
-                if meta.get('ptp', None) == None or meta.get('hdb', None) != None:
-                    hdb_imdb = hdb_tvdb = hdb_id = None
-                    hdb_id = meta.get('hdb')
-                    if hdb_id != None:
-                        meta['hdb_manual'] = hdb_id
-                        hdb_imdb, hdb_tvdb, meta['hdb_name'], meta['ext_torrenthash'] = await hdb.get_info_from_torrent_id(hdb_id)
-                    else:
-                        if meta['is_disc'] in [None, ""]:
-                            hdb_imdb, hdb_tvdb, meta['hdb_name'], meta['ext_torrenthash'], hdb_id = await hdb.search_filename(meta['filelist'])
-                        else:
-                            # Somehow search for disc
-                            pass
-                    if hdb_imdb != None:
-                        meta['imdb'] = str(hdb_imdb)
-                    if hdb_tvdb != None:
-                        meta['tvdb_id'] = str(hdb_tvdb)
-                    if hdb_id != None:
-                        meta['hdb'] = hdb_id
-            
-            if str(self.config['TRACKERS'].get('BLU', {}).get('useAPI')).lower() == "true":
-                blu = BLU(config=self.config)
-                if meta.get('blu', None) != None:
-                    meta['blu_manual'] = meta['blu']
-                    blu_tmdb, blu_imdb, blu_tvdb, blu_mal, blu_desc, blu_category, meta['ext_torrenthash'], blu_imagelist = await COMMON(self.config).unit3d_torrent_info("BLU", blu.torrent_url, meta['blu'])
-                    if blu_tmdb not in [None, '0']:
-                        meta['tmdb_manual'] = blu_tmdb
-                    if blu_imdb not in [None, '0']:
-                        meta['imdb'] = str(blu_imdb)
-                    if blu_tvdb not in [None, '0']:
-                        meta['tvdb_id'] = blu_tvdb
-                    if blu_mal not in [None, '0']:
-                        meta['mal'] = blu_mal
-                    if blu_desc not in [None, '0', '']:
-                        meta['blu_desc'] = blu_desc
-                    if blu_category.upper() in ['MOVIE', 'TV SHOW', 'FANRES']:
-                        if blu_category.upper() == 'TV SHOW':
-                            meta['category'] = 'TV'
-                        else:
-                            meta['category'] = blu_category.upper()
-                    if meta.get('image_list', []) == []:
-                        meta['image_list'] = blu_imagelist
-                else:
-                    # Seach automatically
-                    pass
+                # DVD version check and patch if not already done
+                text_file = tmp_dir / "MEDIAINFO.txt"
+                version = "Unknown"
+                if text_file.exists() and not ifo_tmp.exists():
+                    with open(text_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if lines:
+                            last_line = lines[-1].strip()
+                            match = re.search(r'MediaInfoLib - v(\d+\.\d+)', last_line)
+                            if match:
+                                version = match.group(1)
+                                log.debug(f"Detected MediaInfoLib version: {version}")
 
-            # Take Screenshots
-            if meta['is_disc'] == "BDMV":
-                if not meta.get('edit', False):
-                    use_vs = meta.get('vapoursynth', False)
-                    try:
-                        ds = multiprocessing.Process(
-                            target=self.screenshot_gen.disc_screenshots,
-                            args=(filename, bdinfo, meta['uuid'], use_vs, meta.get('image_list', []), meta.get('ffdebug', False), None)
-                        )
-                        ds.start()
-                        while ds.is_alive():
-                            await asyncio.sleep(1)
-                    except KeyboardInterrupt:
-                        ds.terminate()
-            elif meta['is_disc'] == "DVD":
-                if not meta.get('edit', False):
-                    try:
-                        ds = multiprocessing.Process(
-                            target=self.screenshot_gen.dvd_screenshots,
-                            args=(meta, 0, None)
-                        )
-                        ds.start()
-                        while ds.is_alive():
-                            await asyncio.sleep(1)
-                    except KeyboardInterrupt:
-                        ds.terminate()
-            else:
-                if not meta.get('edit', False):
-                    try:
-                        s = multiprocessing.Process(
-                            target=self.screenshot_gen.screenshots,
-                            args=(videopath, filename, meta['uuid'], meta)
-                        )
-                        s.start()
-                        while s.is_alive():
-                            await asyncio.sleep(3)
-                    except KeyboardInterrupt:
-                        s.terminate()
+                if version != "Unknown":
+                    major, minor = map(int, version.split('.'))
+                    if (major > 23) or (major == 23 and minor > 6) and os.path.exists(ifo_path):
+                        try:
+                            shutil.copy2(ifo_path, ifo_tmp)
+                            log.debug("[bold green]DVD Language Patched - Using IFO for text output")
+                            mi = await self.exportInfo(ifo_tmp, False, meta['uuid'], meta['base_dir'], export_text=True, dvd_patch=True)
+                        except Exception as e:
+                            log.error(f"[bold red]Failed to copy IFO file {ifo_path}: {e}")
+                meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
 
-            if not meta.get('image_list', False) and not meta.get('skip_imghost_upload', False):
-                        image_list, _ = await self.screenshot_uploader.upload_screenshots(meta, self.screens)
-                        meta['image_list'] = image_list
+        elif meta['is_disc'] == "HDDVD":
+            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            guess_name = meta['discs'][0]['path'].replace('-', '')
+            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+            meta['search_year'] = guessit(meta['discs'][0]['path']).get('year', "")
+            if not meta.get('edit', False):
+                mi = await self.exportInfo(video, False, meta['uuid'], meta['base_dir'], export_text=False)
 
-            meta['tmdb'] = meta.get('tmdb_manual', None)
-            if meta.get('type', None) == None:
-                meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
-            if meta.get('category', None) == None:
-                meta['category'] = self.get_cat(video)
-            else:
-                meta['category'] = meta['category'].upper()
-            if meta.get('tmdb', None) == None and meta.get('imdb', None) == None:
-                meta['category'], meta['tmdb'], meta['imdb'] = self.get_tmdb_imdb_from_mediainfo(mi, meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb'])      
-            if meta.get('tmdb', None) == None and meta.get('imdb', None) == None:
-                meta = await self.get_tmdb_id(filename, meta['search_year'], meta, meta['category'], untouched_filename)
-            elif meta.get('imdb', None) != None and meta.get('tmdb_manual', None) == None:
+        else:  # Non-disc case
+            videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
+            video, meta['scene'], meta['imdb'] = await self.is_scene(videopath, meta.get('imdb'))
+            guess_name = ntpath.basename(video).replace('-', ' ')
+            filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get(
+                "title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"]
+            )
+            meta['search_year'] = guessit(video).get('year', "")
+            if not meta.get('edit', False):
+                mi = await self.exportInfo(videopath, meta.get('isdir', False), meta['uuid'], meta['base_dir'], export_text=True)
+
+        # Common processing
+        meta['video'] = video
+        meta['resolution'] = meta.get('resolution') or self.get_resolution(guessit(meta['video']), meta['uuid'], meta['base_dir'])
+        meta['sd'] = self.is_sd(meta['resolution'])
+
+        if self.is_sports(meta['uuid']):
+            meta['is_sports'] = True
+            meta['category'] = 'SPORTS'
+        
+        meta['mediainfo'] = mi
+        meta['filename'] = filename.split(' AKA ')[0] if " AKA " in filename.replace('.', ' ') else filename
+
+        mi = meta.get('mediainfo')
+        bdinfo = meta.get('bdinfo', {})
+        video = meta.get('video')
+        filename = meta['filename']
+
+        # Tracker API integrations
+        await self._integrate_tracker_apis(meta)
+
+        if not meta['category']:
+            meta['category'] = self.get_cat(video)
+
+        if meta['category'] in ("TV", "MOVIE"):
+            meta['tmdb'] = meta.get('tmdb_manual', meta.get('tmdb'))  # Use tmdb_manual if available
+            meta['type'] = meta.get('type') or self.get_type(video, meta['scene'], meta['is_disc'])
+
+            if not meta.get('imdb') and meta.get('imdb_id'):
+                meta['imdb'] = f"tt{meta['imdb_id']}"
+            if not meta.get('tmdb') and not meta.get('imdb'):
+                meta['category'], meta['tmdb'], meta['imdb'] = self.get_tmdb_imdb_from_mediainfo(
+                    mi, meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb']
+                )
+            if not meta.get('tmdb') and not meta.get('imdb'):
+                meta = await self.TMDb.get_tmdb_id(meta['filename'], meta['search_year'], meta, meta['category'], meta['filename'])
+
+            elif meta.get('imdb') and not meta.get('tmdb_manual'):
                 meta['imdb_id'] = str(meta['imdb']).replace('tt', '')
-                meta = await self.get_tmdb_from_imdb(meta, filename)
-            else:
-                meta['tmdb_manual'] = meta.get('tmdb', None)
+                meta = await self.TMDb.get_tmdb_from_imdb(meta, meta['filename'])
 
-            # Check for TMDb not found
-            uuid = meta.get('uuid', '')
+            else:
+                meta['tmdb_manual'] = meta.get('tmdb')
+
+            # If unattended mode is on, and TMDb ID is missing or invalid
             if meta.get('unattended') and (meta.get('tmdb') is None or int(meta['tmdb']) == 0):
                 meta['tmdb_not_found'] = True
-                console.print(f"[red]Unable to find TMDb match for {Path(uuid).stem}")
+                console.print(f"[red]Unable to find TMDb match for {Path(meta['uuid']).stem}")
                 return meta
-                
-            # If no tmdb, use imdb for meta
-            if int(meta['tmdb']) == 0:
-                meta = await self.imdb_other_meta(meta)
-            else:
-                meta = await self.tmdb_other_meta(meta)
-            # Search tvmaze
-            meta['tvmaze_id'], meta['imdb_id'], meta['tvdb_id'] = await self.search_tvmaze(filename, meta['search_year'], meta.get('imdb_id','0'), meta.get('tvdb_id', 0))
-            # If no imdb, search for it
-            if meta.get('imdb_id', None) == None:
-                meta['imdb_id'] = await self.search_imdb(filename, meta['search_year'])
-            if meta.get('imdb_info', None) == None and int(meta['imdb_id']) != 0:
-                meta['imdb_info'] = await self.get_imdb_info(meta['imdb_id'], meta)            
-            if meta.get('tag', None) == None:
-                meta['tag'] = self.get_tag(video, meta)
-            else:
-                if not meta['tag'].startswith('-') and meta['tag'] != "":
-                    meta['tag'] = f"-{meta['tag']}"
+
+            meta = await (self.IMDb.imdb_other_meta(meta) if int(meta['tmdb']) == 0 else self.TMDb.tmdb_other_meta(meta))
+            meta['tvmaze_id'], meta['imdb_id'], meta['tvdb_id'] = await search_tvmaze(meta['filename'], meta['search_year'], meta.get('imdb_id', '0'), meta.get('tvdb_id', 0))
+            meta['imdb_id'] = meta.get('imdb_id') or await self.IMDb.search_imdb(meta['filename'], meta['search_year'])
+            if not meta.get('imdb_info') and int(meta['imdb_id']) != 0:
+                meta['imdb_info'] = await self.IMDb.get_imdb_info(meta['imdb_id'], meta)
+
+        meta['tag'] = meta.get('tag') or self.get_tag(video, meta)
+        if meta['tag'] and not meta['tag'].startswith('-'):
+            meta['tag'] = f"-{meta['tag']}"
+        if meta['category'] == 'TV':    
             meta = await self.get_season_episode(video, meta)
-            meta = await self.tag_override(meta)
+        meta = await self.tag_override(meta)
 
-            meta['video'] = video
-            meta['audio'], meta['channels'], meta['has_commentary'] = self.get_audio_v2(mi, meta, bdinfo)
-            if meta['tag'][1:].startswith(meta['channels']):
-                meta['tag'] = meta['tag'].replace(f"-{meta['channels']}", '')
-            if meta.get('no_tag', False):
-                meta['tag'] = ""
-            meta['3D'] = self.is_3d(mi, bdinfo)
-            meta['source'], meta['type'] = self.get_source(meta['type'], video, meta['path'], meta['is_disc'], meta)
-            if meta.get('service', None) in (None, ''):
-                meta['service'], meta['service_longname'] = self.get_service(video, meta.get('tag', ''), meta['audio'], meta['filename'])
-            meta['uhd'] = self.get_uhd(meta['type'], guessit(meta['path']), meta['resolution'], meta['path'])
-            meta['hdr'] = self.get_hdr(mi, bdinfo)
-            meta['distributor'] = self.get_distributor(meta['distributor'])
-            if meta.get('is_disc', None) == "BDMV": #Blu-ray Specific
-                meta['region'] = self.get_region(bdinfo, meta.get('region', None))
-                meta['video_codec'] = self.get_video_codec(bdinfo)
+        meta['video'] = video
+        meta['audio'], meta['channels'], meta['has_commentary'] = self.get_audio_v2(mi, meta, bdinfo)
+        if meta['tag'][1:].startswith(meta['channels']):
+            meta['tag'] = meta['tag'].replace(f"-{meta['channels']}", '')
+        if meta.get('no_tag', False):
+            meta['tag'] = ""
+        meta['3D'] = self.is_3d(mi, bdinfo)
+        meta['source'], meta['type'] = self.get_source(meta['type'], video, meta['path'], meta['is_disc'], meta)
+        meta['service'], meta['service_longname'] = self.get_service(video, meta.get('tag', ''), meta['audio'], meta['filename']) if meta.get('service') in (None, '') else (meta['service'], meta['service_longname'])
+        meta['uhd'] = self.get_uhd(meta['type'], guessit(meta['path']), meta['resolution'], meta['path'])
+        meta['hdr'] = self.get_hdr(mi, bdinfo)
+        meta['distributor'] = self.get_distributor(meta['distributor'])
+        if meta.get('is_disc') == "BDMV":
+            meta['region'] = self.get_region(bdinfo, meta.get('region'))
+            meta['video_codec'] = self.get_video_codec(bdinfo)
+        else:
+            meta['video_encode'], meta['video_codec'], meta['has_encode_settings'], meta['bit_depth'] = self.get_video_encode(mi, meta['type'], bdinfo)
+        if meta['category'] == 'SPORTS':
+            if meta['scene']:
+                meta['name'] = meta['title'] = Path(video).stem
             else:
-                meta['video_encode'], meta['video_codec'], meta['has_encode_settings'], meta['bit_depth'] = self.get_video_encode(mi, meta['type'], bdinfo)
-            
-            meta['edition'], meta['repack'], meta['cut'], meta['ratio'] = self.get_edition(meta['title'], meta['path'], bdinfo, meta['filelist'], meta.get('manual_edition'))
-            if "REPACK" in meta.get('edition', ""):
-                meta['repack'] = re.search(r"REPACK[\d]?", meta['edition'])[0]
-                meta['edition'] = re.sub(r"REPACK[\d]?", "", meta['edition']).strip().replace('  ', ' ')
-            
-            
-            
-            #WORK ON THIS
-            meta.get('stream', False)
-            meta['stream'] = self.stream_optimized(meta['stream'])
-            meta.get('anon', False)
-            meta['anon'] = self.is_anon(meta['anon'])
-                
-            
-            
-            meta = await self.gen_desc(meta)
-            return meta
+                meta['name'] = meta['title'] = Path(meta['uuid']).stem
 
+        meta['edition'], meta['repack'], meta['cut'], meta['ratio'] = self.get_edition(meta['title'], meta['path'], bdinfo, meta['filelist'], meta.get('manual_edition'))
+        if "REPACK" in meta.get('edition', ""):
+            meta['repack'] = re.search(r"REPACK[\d]?", meta['edition'])[0]
+            meta['edition'] = re.sub(r"REPACK[\d]?", "", meta['edition']).strip().replace('  ', ' ')
+
+        meta['stream'] = self.stream_optimized(meta.get('stream', False))
+        meta['anon'] = self.is_anon(meta.get('anon', False))
+
+        return meta
+
+    def get_tmdb_imdb_from_mediainfo(self, mediainfo, category, is_disc, tmdbid, imdbid):
+            """Extract TMDb and IMDb IDs from mediainfo metadata."""
+            if not is_disc and mediainfo['media']['track'][0].get('extra'):
+                extra = mediainfo['media']['track'][0]['extra']
+                for key in extra:
+                    if key.lower().startswith('tmdb'):
+                        parser = Args(config=self.config)
+                        category, tmdbid = parser.parse_tmdb_id(id=extra[key], category=category)
+                    if key.lower().startswith('imdb'):
+                        try:
+                            imdbid = str(int(extra[key].replace('tt', ''))).zfill(7)
+                        except (ValueError, TypeError):
+                            log.debug(f"Invalid IMDb ID in mediainfo: {extra[key]}")
+                            pass
+            return category, tmdbid, imdbid
+
+    async def _integrate_tracker_apis(self, meta):
+        """Integrate with tracker APIs."""
+        if str(self.config['TRACKERS'].get('PTP', {}).get('useAPI')).lower() == "true":
+            ptp = PTP(config=self.config)
+            if meta.get('ptp'):
+                meta['ptp_manual'] = meta['ptp']
+                meta['imdb'], meta['ext_torrenthash'] = await ptp.get_imdb_from_torrent_id(meta['ptp'])
+            else:
+                search_file_folder = 'file' if meta['is_disc'] in [None, ""] else 'folder'
+                ptp_search_term = os.path.basename(meta['filelist'][0] if meta['is_disc'] in [None, ""] else meta['path'])
+                ptp_imdb, ptp_id, meta['ext_torrenthash'] = await ptp.get_ptp_id_imdb(ptp_search_term, search_file_folder)
+                if ptp_imdb:
+                    meta['imdb'] = ptp_imdb
+                if ptp_id:
+                    meta['ptp'] = ptp_id
+
+        if str(self.config['TRACKERS'].get('HDB', {}).get('useAPI')).lower() == "true":
+            hdb = HDB(config=self.config)
+            if not meta.get('ptp') or meta.get('hdb'):
+                hdb_id = meta.get('hdb')
+                if hdb_id:
+                    meta['hdb_manual'] = hdb_id
+                    hdb_imdb, hdb_tvdb, meta['hdb_name'], meta['ext_torrenthash'] = await hdb.get_info_from_torrent_id(hdb_id)
+                elif meta['is_disc'] in [None, ""]:
+                    hdb_imdb, hdb_tvdb, meta['hdb_name'], meta['ext_torrenthash'], hdb_id = await hdb.search_filename(meta['filelist'])
+                if hdb_imdb:
+                    meta['imdb'] = str(hdb_imdb)
+                if hdb_tvdb:
+                    meta['tvdb_id'] = str(hdb_tvdb)
+                if hdb_id:
+                    meta['hdb'] = hdb_id
+
+        if str(self.config['TRACKERS'].get('BLU', {}).get('useAPI')).lower() == "true":
+            blu = BLU(config=self.config)
+            if meta.get('blu'):
+                meta['blu_manual'] = meta['blu']
+                blu_tmdb, blu_imdb, blu_tvdb, blu_mal, blu_desc, blu_category, meta['ext_torrenthash'], blu_imagelist = await COMMON(self.config).unit3d_torrent_info("BLU", blu.torrent_url, meta['blu'])
+                if blu_tmdb not in [None, '0']:
+                    meta['tmdb_manual'] = blu_tmdb
+                if blu_imdb not in [None, '0']:
+                    meta['imdb'] = str(blu_imdb)
+                if blu_tvdb not in [None, '0']:
+                    meta['tvdb_id'] = blu_tvdb
+                if blu_mal not in [None, '0']:
+                    meta['mal'] = blu_mal
+                if blu_desc not in [None, '0', '']:
+                    meta['blu_desc'] = blu_desc
+                if blu_category.upper() in ['MOVIE', 'TV SHOW', 'FANRES']:
+                    meta['category'] = 'TV' if blu_category.upper() == 'TV SHOW' else blu_category.upper()
+                if not meta.get('image_list', []):
+                    meta['image_list'] = blu_imagelist
 
     def load_json(self, filename): #Lazy-Load json's
             filepath = os.path.join(self.base_dir, "data", filename)
@@ -599,7 +560,7 @@ class Prep():
         return video, filelist
 
     async def get_music(self, meta, mode):
-        log.debug("Starting get_music")
+        log.ddebug("Starting get_music")
         meta['is_music'] = True
         # base_dir = meta['base_dir']
         musicloc = meta['path']
@@ -860,13 +821,9 @@ class Prep():
 
         await self.process_with_discogs(meta)
 
-        # self.upload_proof_covers(meta, 'album_cover', 'user_cover', ('.jpg', '.jpeg'))
-        # self.upload_proof_covers(meta, 'album_back', 'back_cover')
-        # self.upload_proof_covers(meta, 'album_proof', 'user_proof')
-
-        await self.screenshot_uploader.upload_proof_or_cover(meta, 'album_cover', 'user_cover', ('.jpg', '.jpeg'))
-        await self.screenshot_uploader.upload_proof_or_cover(meta, 'album_back', 'back_cover')
-        await self.screenshot_uploader.upload_proof_or_cover(meta, 'album_proof', 'user_proof')
+        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_cover', 'user_cover', ('.jpg', '.jpeg'))
+        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_back', 'back_cover')
+        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_proof', 'user_proof')
 
         if not meta.get('tracklist', {}):
             log.debug('[magenta]MANUAL TRACKLIST')
@@ -910,22 +867,6 @@ class Prep():
 
         log.debug('Finishing process_music, retunring meta')
         return meta
-
-    # def upload_proof_covers(self, meta, image_key, file_key, file_exts=('jpg', '.jpeg')):
-    #     if image_key in meta and meta[image_key]:
-    #         return
-    #     image_path = meta.get(file_key)
-    #     if image_path and os.path.isfile(image_path) and image_path.lower().endswith(file_exts):
-    #         console.print(f"[yellow]Uploading {file_key.replace('_', ' ')} image: {image_path}")
-            
-    #         image_list, _ = self.upload_screens(meta, 1, 1, 0, 1, [image_path], {})
-            
-    #         if image_list:
-    #             meta[image_key] = image_list[0]['raw_url']
-    #             console.print(f"[green]Successfully uploaded and set {file_key.replace('_', ' ')} image: {meta[image_key]}")
-    #         else:
-    #             console.print(f"[red]Failed to upload {file_key.replace('_', ' ')} image.")
-
 
     async def try_search_method(self, meta, mb, method_name, search_func):
         try:
@@ -1135,35 +1076,39 @@ class Prep():
     """
     Get and parse mediainfo
     """
-    def exportInfo(self, media_path, isdir, folder_id, base_dir, export_text=True):
+    async def exportInfo(self, media_path, isdir, folder_id, base_dir, export_text=True, dvd_patch=False):
         media_path = os.path.normpath(media_path)
-        try:
-            if export_text:
-                if not os.path.exists(f"{base_dir}/tmp/{folder_id}/MEDIAINFO.txt"):
-                    console.print("[bold yellow]Exporting MediaInfo...")
-                    # Change to the directory of the media file for MediaInfo to work correctly with relative paths
-                    os.chdir(os.path.dirname(media_path))
-                    media_info = MediaInfo.parse(media_path, output="STRING", full=False, mediainfo_options={'inform_version' : '1'})
-                    with open(f"{base_dir}/tmp/{folder_id}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
-                        export.write(media_info)
-                    with open(f"{base_dir}/tmp/{folder_id}/MEDIAINFO_CLEANPATH.txt", 'w', newline="", encoding='utf-8') as export_cleanpath:
-                        # Replace full path with just the filename to sanitize the path
-                        export_cleanpath.write(media_info.replace(media_path, os.path.basename(media_path)))
-                    console.print("[bold green]MediaInfo text Exported.")
+        tmp_dir = Path(base_dir) / 'tmp' / folder_id
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        basename = os.path.basename(str(media_path))
 
-            if not os.path.exists(f"{base_dir}/tmp/{folder_id}/MediaInfo.json"):
-                # MediaInfo to JSON
-                media_info = MediaInfo.parse(media_path, output="JSON", mediainfo_options={'inform_version' : '1'})
-                with open(f"{base_dir}/tmp/{folder_id}/MediaInfo.json", 'w', encoding='utf-8') as export:
-                    export.write(media_info)
+        try:
+            # Text output
+            if export_text and (dvd_patch or not (tmp_dir / "MEDIAINFO.txt").exists()):
+                console.print("[bold yellow]Exporting MediaInfo...")
+                os.chdir(os.path.dirname(media_path))
+                media_info = MediaInfo.parse(media_path, output="STRING", full=False, mediainfo_options={'inform_version': '1'})
+                clean_path = media_info.replace(str(tmp_dir), folder_id) if dvd_patch else media_info.replace(media_path, basename)
+                async with aiofiles.open(tmp_dir / "MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
+                    await export.write(clean_path)
+                console.print("[bold green]MediaInfo text Exported.]") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
+
+            # JSON output
+            if not (tmp_dir / "MediaInfo.json").exists() or dvd_patch: #TODO alter LDU name logic for DVD's. MediaInfo.txt should suffice
+                media_info = MediaInfo.parse(media_path, output="JSON", mediainfo_options={'inform_version': '1'})
+                async with aiofiles.open(tmp_dir / "MediaInfo.json", 'w', encoding='utf-8') as export:
+                    await export.write(media_info)
                 console.print("[bold green]MediaInfo JSON Exported.")
 
-            with open(f"{base_dir}/tmp/{folder_id}/MediaInfo.json", 'r', encoding='utf-8') as f:
-                return json.load(f)
+            async with aiofiles.open(tmp_dir / "MediaInfo.json", 'r', encoding='utf-8') as f:
+                return json.loads(await f.read())
 
         except FileNotFoundError:
             console.print(f"[bold red]File not found: {media_path}")
             sys.exit()
+        except Exception as e:
+            log.error(f"[bold red]Error processing MediaInfo for {media_path}: {e}")
+            raise
 
 
     """
@@ -1176,20 +1121,11 @@ class Prep():
             try:
                 width = mi['media']['track'][1]['Width']
                 height = mi['media']['track'][1]['Height']
-            except:
+            except (KeyError, IndexError):
                 width = 0
                 height = 0
-            framerate = mi['media']['track'][1].get('FrameRate', '')
-            try:
-                scan = mi['media']['track'][1]['ScanType']
-            except:
-                scan = "Progressive"
-            if scan == "Progressive":
-                scan = "p"
-            elif framerate == "25.000":
-                scan = "p"
-            else:
-                scan = "i"
+            scan = mi['media']['track'][1].get('ScanType', 'Progressive')       
+            scan = "p" if scan == "Progressive" else "i"
             width_list = [3840, 2560, 1920, 1280, 1024, 854, 720, 15360, 7680, 0]
             height_list = [2160, 1440, 1080, 720, 576, 540, 480, 8640, 4320, 0]
             width = self.closest(width_list, int(width))
@@ -1211,57 +1147,58 @@ class Prep():
                 res = each
                 break
         return res
-            
-        # return lst[min(range(len(lst)), key = lambda i: abs(lst[i]-K))]
 
     def mi_resolution(self, res, guess, width, scan, height, actual_height):
-        res_map = {
-            "3840x2160p" : "2160p", "2160p" : "2160p",
-            "2560x1440p" : "1440p", "1440p" : "1440p",
-            "1920x1080p" : "1080p", "1080p" : "1080p",
-            "1920x1080i" : "1080i", "1080i" : "1080i", 
-            "1280x720p" : "720p", "720p" : "720p",
-            "1280x540p" : "720p", "1280x576p" : "720p",
-            "1024x576p" : "576p", "576p" : "576p",
-            "1024x576i" : "576i", "576i" : "576i",
-            "854x480p" :  "480p", "480p" : "480p",
-            "854x480i" : "480i", "480i" : "480i",
-            "720x576p" : "576p", "576p" : "576p",
-            "720x576i" : "576i", "576i" : "576i",
-            "720x480p" :  "480p", "480p" : "480p",
-            "720x480i" : "480i", "480i" : "480i",
-            "15360x8640p" : "8640p", "8640p" : "8640p",
-            "7680x4320p" : "4320p", "4320p" : "4320p",
-            "OTHER" : "OTHER"}
-        resolution = res_map.get(res, None)
-        if actual_height == 540:
-            resolution = "OTHER"
-        if resolution == None:
-            try:     
-                resolution = guess['screen_size']
-            except:
-                width_map = {
-                    '3840p' : '2160p',
-                    '2560p' : '1550p',
-                    '1920p' : '1080p',
-                    '1920i' : '1080i',
-                    '1280p' : '720p',
-                    '1024p' : '576p',
-                    '1024i' : '576i',
-                    '854p' : '480p',
-                    '854i' : '480i',
-                    '720p' : '576p',
-                    '720i' : '576i',
-                    '15360p' : '4320p',
-                    'OTHERp' : 'OTHER'
-                }
-                resolution = width_map.get(f"{width}{scan}", "OTHER")
-            resolution = self.mi_resolution(resolution, guess, width, scan, height, actual_height)
-        
-        return resolution
-           
-               
+        # Primary resolution mapping
+        RESOLUTION_MAP = {
+            "15360x8640p": "8640p",
+            "7680x4320p": "4320p",
+            "3840x2160p": "2160p",
+            "2560x1440p": "1440p",
+            "1920x1080p": "1080p",
+            "1920x1080i": "1080i",
+            "1280x720p": "720p",
+            "1280x540p": "720p",
+            "1280x576p": "720p",
+            "1024x576p": "576p",
+            "1024x576i": "576i",
+            "720x576p": "576p",
+            "720x576i": "576i",
+            "854x480p": "480p",
+            "854x480i": "480i",
+            "720x480p": "480p",
+            "720x480i": "480i",
+            "OTHER": "OTHER"
+        }
 
+        WIDTH_FALLBACK = {
+            15360: "8640p",
+            7680: "4320p",
+            3840: "2160p",
+            2560: "1440p",
+            1920: {"p": "1080p", "i": "1080i"},
+            1280: "720p",
+            1024: {"p": "576p", "i": "576i"},
+            854: {"p": "480p", "i": "480i"},
+            720: {"p": "576p", "i": "576i"}
+        }
+
+        if actual_height == 540:
+            return "OTHER"
+
+        resolution = RESOLUTION_MAP.get(res)
+        if resolution:
+            return resolution
+
+        try:
+            return guess['screen_size']
+        except (KeyError, TypeError):
+            width_mapping = WIDTH_FALLBACK.get(width, "OTHER")
+            if isinstance(width_mapping, dict):
+                return width_mapping.get(scan, "OTHER")
+            return width_mapping
+
+           
     def is_sd(self, resolution):
         if resolution in ("480i", "480p", "576i", "576p", "540p"):
             sd = 1
@@ -1272,28 +1209,44 @@ class Prep():
     """
     Is a scene release?
     """
-    def is_scene(self, video, imdb=None):
+    async def is_scene(self, video, imdb=None):
         scene = False
-        base = os.path.basename(video)
-        base = os.path.splitext(base)[0]
+        base = os.path.splitext(os.path.basename(video))[0]
         base = urllib.parse.quote(base)
-        url = f"https://api.srrdb.com/v1/search/r:{base}"
-        try:
-            response = requests.get(url, timeout=30)
-            response = response.json()
-            if int(response.get('resultsCount', 0)) != 0:
-                video = f"{response['results'][0]['release']}.mkv"
-                scene = True
-                r = requests.get(f"https://api.srrdb.com/v1/imdb/{base}")
-                r = r.json()
-                if r['releases'] != [] and imdb == None:
-                    imdb = r['releases'][0].get('imdb', imdb) if r['releases'][0].get('imdb') is not None else imdb
-                console.print(f"[green]SRRDB: Matched to {response['results'][0]['release']}")
-        except Exception:
-            video = video
-            scene = False
-            console.print("[yellow]SRRDB: No match found, or request has timed out")
+        urls = [
+            f"https://api.srrdb.com/v1/search/r:{base}",
+            f"https://api.srrdb.com/v1/imdb/{base}"
+        ]
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(urls[0], timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    data = await response.json()
+                    if int(data.get('resultsCount', 0)) > 0:
+                        video = f"{data['results'][0]['release']}.mkv"
+                        scene = True
+                        console.print(f"[green]SRRDB: Matched to {data['results'][0]['release']}")
+
+                        if imdb is None:
+                            async with session.get(urls[1]) as r:
+                                imdb_data = await r.json()
+                                if imdb_data.get('releases', []):
+                                    imdb = imdb_data['releases'][0].get('imdb', imdb)
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                console.print("[yellow]SRRDB: No match found, or request has timed out")
+        log.debug(f"Video is: {video}")
         return video, scene, imdb
+
+    """
+    Is a sports release?
+    """
+    def is_sports(self, name):
+        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
+                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
+                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
+                        r'.*overtake.*)'
+        return re.search(sports_pattern, name, re.IGNORECASE) is not None
+
 
 
     """
@@ -1319,7 +1272,6 @@ class Prep():
         return type
 
     def get_cat(self, video):
-        # if category is None:
         category = guessit(video.replace('1.0', ''))['type']
         if category.lower() == "movie":
             category = "MOVIE" #1
@@ -1328,439 +1280,6 @@ class Prep():
         else:
             category = "MOVIE"
         return category
-
-    async def get_tmdb_from_imdb(self, meta, filename):
-        if meta.get('tmdb_manual') != None:
-            meta['tmdb'] = meta['tmdb_manual']
-            return meta
-        imdb_id = meta['imdb']
-        if str(imdb_id)[:2].lower() != "tt":
-            imdb_id = f"tt{imdb_id}"
-        find = tmdb.Find(id=imdb_id)
-        info = find.info(external_source="imdb_id")
-        if len(info['movie_results']) >= 1:
-            meta['category'] = "MOVIE"
-            meta['tmdb'] =  info['movie_results'][0]['id']
-        elif len(info['tv_results']) >= 1:
-            meta['category'] = "TV"
-            meta['tmdb'] =  info['tv_results'][0]['id']
-        else:
-            imdb_info = await self.get_imdb_info(imdb_id.replace('tt', ''), meta)
-            title = imdb_info.get("title")
-            if title == None:
-                title = filename
-            year = imdb_info.get('year')
-            if year == None:
-                year = meta['search_year']
-            console.print(f"[yellow]TMDb was unable to find anything with that IMDb, searching TMDb for {title}")
-            meta = await self.get_tmdb_id(title, year, meta, meta['category'], imdb_info.get('original title', imdb_info.get('localized title', meta['uuid'])))
-            if meta.get('tmdb') in ('None', '', None, 0, '0'):
-                if meta.get('mode', 'discord') == 'cli':
-                    console.print('[yellow]Unable to find a matching TMDb entry')
-                    tmdb_id = console.input("Please enter tmdb id: ")
-                    parser = Args(config=self.config)
-                    meta['category'], meta['tmdb'] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get('category'))
-        await asyncio.sleep(2)
-        return meta
-
-    async def get_tmdb_id(self, filename, search_year, meta, category, untouched_filename="", attempted=0):
-        search = tmdb.Search()
-        try:
-            if category == "MOVIE":
-                search.movie(query=filename, year=search_year)
-            elif category == "TV":
-                search.tv(query=filename, first_air_date_year=search_year)
-            
-            if meta.get('tmdb_manual') is not None:
-                meta['tmdb'] = meta['tmdb_manual']
-            else:
-                meta['tmdb'] = search.results[0]['id']
-                meta['category'] = category
-        except IndexError:
-            try:
-                if category == "MOVIE":
-                    search.movie(query=filename)
-                elif category == "TV":
-                    search.tv(query=filename)
-                meta['tmdb'] = search.results[0]['id']
-                meta['category'] = category
-            except IndexError:
-                if category == "MOVIE":
-                    category = "TV"
-                else:
-                    category = "MOVIE"
-                
-                if attempted <= 1:
-                    attempted += 1
-                    meta = await self.get_tmdb_id(filename, search_year, meta, category, untouched_filename, attempted)
-                elif attempted == 2:
-                    attempted += 1
-                    parsed_title = anitopy.parse(guessit(untouched_filename, {"excludes": ["country", "language"]})['title'])['anime_title']
-                    meta = await self.get_tmdb_id(parsed_title, search_year, meta, meta['category'], untouched_filename, attempted)
-
-                if meta.get('tmdb') in (None, ""):
-                    console.print(f"[red]Unable to find TMDb match for {filename}")
-                    if meta.get('unattended'):
-                        meta['tmdb_not_found'] = True
-                        return meta
-                    else:
-                        tmdb_id = Prompt.ask(f"Please enter tmdb id in this format: tv/12345 or movie/12345\n")
-                        parser = Args(config=self.config)
-                        meta['category'], meta['tmdb'] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get('category'))
-                        meta['tmdb_manual'] = meta['tmdb']
-                        return meta
-
-        return meta
-
-
-
-    
-    async def tmdb_other_meta(self, meta):
-        
-        if meta['tmdb'] == "0":
-            try:
-                title = guessit(meta['path'], {"excludes" : ["country", "language"]})['title'].lower()
-                title = title.split('aka')[0]
-                meta = await self.get_tmdb_id(guessit(title, {"excludes" : ["country", "language"]})['title'], meta['search_year'], meta)
-                if meta['tmdb'] == "0":
-                    meta = await self.get_tmdb_id(title, "", meta, meta['category'])
-            except:
-                if meta.get('mode', 'discord') == 'cli':
-                    console.print("[bold red]Unable to find tmdb entry. Exiting.")
-                    exit()
-                else:
-                    console.print("[bold red]Unable to find tmdb entry")
-                    return meta
-        if meta['category'] == "MOVIE":
-            movie = tmdb.Movies(meta['tmdb'])
-            while True:  # Keep looping until a valid response is obtained
-                try:
-                    response = movie.info()  # Fetch movie info
-                    break 
-                except HTTPError as e:
-                    if e.response.status_code == 404:
-                        console.print("[red]The TMDb ID you entered could not be found. Please make sure the ID is correct and try again.")
-                        tmdb_id = Prompt.ask(f"Please enter tmdb id in this format: tv/12345 or movie/12345\n")
-                        parser = Args(config=self.config)
-                        meta['category'], meta['tmdb'] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get('category'))
-                        meta['tmdb_manual'] = meta['tmdb']
-                        movie = tmdb.Movies(meta['tmdb'])  # Update the movie object with the new TMDb ID
-                    else:
-                        raise
-            
-            # Extract general movie information
-            meta['title'] = response['title']
-            if response['release_date']:
-                try:
-                    meta['year'] = datetime.strptime(response['release_date'],'%Y-%m-%d').year
-                    full_date = datetime.strptime(response['release_date'],'%Y-%m-%d')
-                    meta['full_date'] = full_date.strftime('%Y-%m-%d')
-                except Exception:
-                    meta['full_date'] = ""
-            else:
-                console.print('[yellow]TMDB does not have a release date, using year from filename instead (if it exists)')
-                meta['year'] = meta['search_year']
-            
-            external = movie.external_ids()
-            if meta.get('imdb', None) is None:
-                imdb_id = external.get('imdb_id', "0")
-                meta['imdb_id'] = str(int(imdb_id.replace('tt', ''))).zfill(7) if imdb_id else '0'
-            else:
-                meta['imdb_id'] = str(meta['imdb']).replace('tt', '').zfill(7)
-
-            if meta.get('tvdb_id', '0') in ['', ' ', None, 'None', '0']:
-                meta['tvdb_id'] = external.get('tvdb_id', '0') or '0'
-
-            # Fetch Trailer
-            try:
-                videos = movie.videos()
-                for each in videos.get('results', []):
-                    if each.get('site', "") == 'YouTube' and each.get('type', "") == "Trailer":
-                        meta['youtube'] = f"{each.get('key')}"
-                        break
-            except Exception:
-                console.print('[yellow]Unable to grab videos from TMDb.')
-            
-            # Additional metadata
-            meta['aka'], original_language = await self.get_imdb_aka(meta['imdb_id'])
-            meta['original_language'] = original_language if original_language is not None else response['original_language']
-            meta['original_title'] = response.get('original_title', meta['title'])
-            meta['keywords'] = self.get_keywords(movie)
-            meta['genres'] = self.get_genres(response)
-            meta['adult'] = response['adult']
-            meta['tmdb_directors'] = self.get_directors(movie)
-            
-            if not meta.get('anime', False):
-                meta['mal_id'], meta['aka'], meta['anime'] = self.get_anime(response, meta)
-            
-            meta['poster'] = response.get('poster_path', "")
-
-            # Fetch logos from the images endpoint
-            logo_response = movie.images()
-            logos = logo_response.get('logos', [])
-            first_logo = next((logo for logo in logos if logo.get('iso_639_1') == 'en'), None) or (logos[0] if logos else None)
-
-            if first_logo:
-                logo_path = first_logo['file_path']
-                meta['logo'] = f"https://image.tmdb.org/t/p/original{logo_path}"
-            else:
-                meta['logo'] = None
-
-            #Get backdrop for non-tmdb linked categories
-            backdrop_response = movie.images()
-            backdrops = backdrop_response.get('backdrops', [])  
-            first_backdrop = next((backdrop for backdrop in backdrops if backdrop.get('iso_639_1') == 'en'), None) or (backdrops[0] if backdrops else None)
-            if first_backdrop:
-                backdrop_path = first_backdrop['file_path']
-                meta['backdrop'] = f"https://image.tmdb.org/t/p/original{backdrop_path}"
-            else:
-                meta['backdrop'] = None
-
-            meta['overview'] = response['overview']
-            meta['tmdb_type'] = 'Movie'
-            meta['runtime'] = response.get('episode_run_time', 60)
-
-        elif meta['category'] == "TV":
-            tv = tmdb.TV(meta['tmdb'])
-            response = tv.info()
-            meta['title'] = response['name']
-            if response['first_air_date']:
-                try:
-                    meta['year'] = datetime.strptime(response['first_air_date'],'%Y-%m-%d').year
-                    full_date = datetime.strptime(response['first_air_date'],'%Y-%m-%d')
-                    meta['full_date'] = full_date.strftime('%Y-%m-%d')
-                except Exception:
-                    meta['full_date'] = ""
-            else:
-                console.print('[yellow]TMDB does not have a release date, using year from filename instead (if it exists)')
-                meta['year'] = meta['search_year']    
-            external = tv.external_ids()
-            if meta.get('imdb', None) == None:
-                imdb_id = external.get('imdb_id', "0")
-                if imdb_id == "" or imdb_id == None:
-                    meta['imdb_id'] = '0'
-                else:
-                    meta['imdb_id'] = str(int(imdb_id.replace('tt', ''))).zfill(7)
-            else:
-                meta['imdb_id'] = str(int(meta['imdb'].replace('tt', ''))).zfill(7)
-            if meta.get('tvdb_id', '0') in ['', ' ', None, 'None', '0']:
-                meta['tvdb_id'] = external.get('tvdb_id', '0')
-                if meta['tvdb_id'] in ["", None, " ", "None"]:
-                    meta['tvdb_id'] = '0'
-            try:
-                videos = tv.videos()
-                for each in videos.get('results', []):
-                    if each.get('site', "") == 'YouTube' and each.get('type', "") == "Trailer":
-                        meta['youtube'] = f"{each.get('key')}"
-                        break
-            except Exception:
-                console.print('[yellow]Unable to grab videos from TMDb.')
-
-            # meta['aka'] = f" AKA {response['original_name']}"
-            meta['aka'], original_language = await self.get_imdb_aka(meta['imdb_id'])
-            if original_language != None:
-                meta['original_language'] = original_language
-            else:
-                meta['original_language'] = response['original_language']
-            meta['original_title'] = response.get('original_name', meta['title'])
-            meta['keywords'] = self.get_keywords(tv)
-            meta['genres'] = self.get_genres(response)
-            meta['adult'] = response['adult']
-            meta['tmdb_directors'] = self.get_directors(tv)
-            meta['mal_id'], meta['aka'], meta['anime'] = self.get_anime(response, meta)
-            meta['poster'] = response.get('poster_path', '')
-            meta['overview'] = response['overview']
-
-            meta['tmdb_type'] = response.get('type', 'Scripted')
-            runtime = response.get('episode_run_time', [60])
-            if runtime == []:
-                runtime = [60]
-            meta['runtime'] = runtime[0]
-
-            logo_response = tv.images() 
-            logos = logo_response.get('logos', [])
-            first_logo = next((logo for logo in logos if logo.get('iso_639_1') == 'en'), None) or (logos[0] if logos else None)
-
-            if first_logo:
-                logo_path = first_logo['file_path']
-                meta['logo'] = f"https://image.tmdb.org/t/p/original{logo_path}"
-            else:
-                meta['logo'] = None 
-                
-            #Get backdrop for non-tmdb linked categories
-            backdrop_response = tv.images()
-            backdrops = backdrop_response.get('backdrops', [])
-            first_backdrop = next((backdrop for backdrop in backdrops if backdrop.get('iso_639_1') == 'en'), None) or (backdrops[0] if backdrops else None)
-            if first_backdrop:
-                backdrop_path = first_backdrop['file_path']
-                meta['backdrop'] = f"https://image.tmdb.org/t/p/original{backdrop_path}"
-            else:
-                meta['backdrop'] = None
-
-        if meta['poster'] not in (None, ''):
-            meta['poster'] = f"https://image.tmdb.org/t/p/original{meta['poster']}"
-
-        difference = SequenceMatcher(None, meta['title'].lower(), meta['aka'][5:].lower()).ratio()
-        if difference >= 0.9 or meta['aka'][5:].strip() == "" or meta['aka'][5:].strip().lower() in meta['title'].lower():
-            meta['aka'] = ""
-        if f"({meta['year']})" in meta['aka']:
-            meta['aka'] = meta['aka'].replace(f"({meta['year']})", "").strip()
-            
-        
-        return meta
-
-
-
-    def get_keywords(self, tmdb_info):
-        if tmdb_info is not None:
-            tmdb_keywords = tmdb_info.keywords()
-            if tmdb_keywords.get('keywords') is not None:
-                keywords=[f"{keyword['name'].replace(',',' ')}" for keyword in tmdb_keywords.get('keywords')]
-            elif tmdb_keywords.get('results') is not None:
-                keywords=[f"{keyword['name'].replace(',',' ')}" for keyword in tmdb_keywords.get('results')]
-            return(', '.join(keywords))
-        else:
-            return ''
-
-    def get_genres(self, tmdb_info):
-        if tmdb_info is not None:
-            tmdb_genres = tmdb_info.get('genres', [])
-            if tmdb_genres is not []:
-                genres=[f"{genre['name'].replace(',',' ')}" for genre in tmdb_genres]
-            return(', '.join(genres))
-        else:
-            return ''
-
-    def get_directors(self, tmdb_info):
-        if tmdb_info is not None:
-            tmdb_credits = tmdb_info.credits()
-            directors = []
-            if tmdb_credits.get('cast', []) != []:
-                for each in tmdb_credits['cast']:
-                    if each.get('known_for_department', '') == "Directing":
-                        directors.append(each.get('original_name', each.get('name')))
-            return directors
-        else:
-            return ''
-
-    def get_anime(self, response, meta):
-        tmdb_name = meta['title']
-        if meta.get('aka', "") == "":
-            alt_name = ""
-        else:
-            alt_name = meta['aka']
-        anime = False
-        animation = False
-        for each in response['genres']:
-            if each['id'] == 16:
-                animation = True
-        if response['original_language'] == 'ja' and animation == True:
-            romaji, mal_id, eng_title, season_year, episodes = self.get_romaji(tmdb_name, meta.get('mal', None))
-            alt_name = f" AKA {romaji}"
-            
-            anime = True
-            # mal = AnimeSearch(romaji)
-            # mal_id = mal.results[0].mal_id
-        else:
-            mal_id = 0
-        if meta.get('mal_id', 0) != 0:
-            mal_id = meta.get('mal_id')
-        if meta.get('mal') not in ('0', 0, None):
-            mal_id = meta.get('mal', 0)
-        return mal_id, alt_name, anime
-
-    def get_romaji(self, tmdb_name, mal):
-        if mal == None:
-            mal = 0
-            tmdb_name = tmdb_name.replace('-', "").replace("The Movie", "")
-            tmdb_name = ' '.join(tmdb_name.split())
-            query = '''
-                query ($search: String) {
-                    Page (page: 1) {
-                        pageInfo {
-                            total
-                        }
-                    media (search: $search, type: ANIME, sort: SEARCH_MATCH) {
-                        id
-                        idMal
-                        title {
-                            romaji
-                            english
-                            native
-                        }
-                        seasonYear
-                        episodes
-                    }
-                }
-            }
-            '''
-            # Define our query variables and values that will be used in the query request
-            variables = {
-                'search': tmdb_name
-            }
-        else:
-            query = '''
-                query ($search: Int) {
-                    Page (page: 1) {
-                        pageInfo {
-                            total
-                        }
-                    media (idMal: $search, type: ANIME, sort: SEARCH_MATCH) {
-                        id
-                        idMal
-                        title {
-                            romaji
-                            english
-                            native
-                        }
-                        seasonYear
-                        episodes
-                    }
-                }
-            }
-            '''
-            # Define our query variables and values that will be used in the query request
-            variables = {
-                'search': mal
-            }
-
-        # Make the HTTP Api request
-        url = 'https://graphql.anilist.co'
-        try:
-            response = requests.post(url, json={'query': query, 'variables': variables})
-            json = response.json()
-            media = json['data']['Page']['media']
-        except:
-            console.print('[red]Failed to get anime specific info from anilist. Continuing without it...')
-            media = []
-        if media not in (None, []):
-            result = {'title' : {}}
-            difference = 0
-            for anime in media:
-                search_name = re.sub(r"[^0-9a-zA-Z\[\]]+", "", tmdb_name.lower().replace(' ', ''))
-                for title in anime['title'].values():
-                    if title != None:
-                        title = re.sub(u'[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]+ (?=[A-Za-z ]+–)', "", title.lower().replace(' ', ''), re.U)
-                        diff = SequenceMatcher(None, title, search_name).ratio()
-                        if diff >= difference:
-                            result = anime
-                            difference = diff
-
-            romaji = result['title'].get('romaji', result['title'].get('english', ""))
-            mal_id = result.get('idMal', 0)
-            eng_title = result['title'].get('english', result['title'].get('romaji', ""))
-            season_year = result.get('season_year', "")
-            episodes = result.get('episodes', 0)
-        else:
-            romaji = eng_title = season_year  = ""
-            episodes = mal_id = 0
-        if mal_id in [None, 0]:
-            mal_id = mal
-        if not episodes:
-            episodes = 0
-        return romaji, mal_id, eng_title, season_year, episodes
-
-
 
     """
     Mediainfo/Bdinfo > meta
@@ -1821,7 +1340,7 @@ class Prep():
                     if t['@type'] != "Audio":
                         pass
                     else: 
-                        if t.get('Language', "") == meta['original_language'] and "commentary" not in t.get('Title', '').lower():
+                        if t.get('Language', "") == meta.get('original_language') and "commentary" not in t.get('Title', '').lower():
                             track_num = i
                             break
                 format = mi['media']['track'][track_num]['Format']
@@ -1860,7 +1379,7 @@ class Prep():
                 else:
                     chan = f"{channels}.0"
                 
-                if meta['original_language'] != 'en':
+                if meta.get('original_language') != 'en':
                     eng, orig = False, False
                     try:
                         for t in mi['media']['track']:
@@ -1872,27 +1391,26 @@ class Prep():
                                 if audio_language == "en" and "commentary" not in t.get('Title', '').lower():
                                     eng = True
                                 # Check for original Language Track
-                                if audio_language == meta['original_language'] and "commentary" not in t.get('Title', '').lower():
+                                if audio_language == meta.get('original_language') and "commentary" not in t.get('Title', '').lower():
                                     orig = True
                                 # Catch Chinese / Norwegian variants
                                 variants = ['zh', 'cn', 'cmn', 'no', 'nb']
-                                if audio_language in variants and meta['original_language'] in variants:
+                                if audio_language in variants and meta.get('original_language') in variants:
                                     orig = True
                                 # Check for additional, bloated Tracks
-                                if audio_language != meta['original_language'] and audio_language != "en":
+                                if audio_language != meta.get('original_language') and audio_language != "en":
                                     if meta['original_language'] not in variants and audio_language not in variants:
                                         audio_language = "und" if audio_language == "" else audio_language
                                         console.print(f"[bold red]This release has a(n) {audio_language} audio track, and may be considered bloated")
                                         time.sleep(5)
-                        if eng and orig == True:
+                        if eng and orig:
                             dual = "Dual-Audio"
-                        elif eng == True and orig == False and meta['original_language'] not in ['zxx', 'xx', None] and meta.get('no_dub', False) == False:
+                        elif eng and not orig and meta.get('original_language') not in ['zxx', 'xx', None] and not meta.get('no_dub', False):
                             dual = "Dubbed"
                     except Exception:
                         console.print(traceback.print_exc())
                         pass
-            
-                
+                         
                 for t in mi['media']['track']:
                     if t['@type'] != "Audio":
                         pass
@@ -1985,7 +1503,7 @@ class Prep():
 
 
     def is_3d(self, mi, bdinfo):
-        if bdinfo != None:
+        if bdinfo is not None:
             if bdinfo['video'][0]['3d'] != "":
                 return "3D"
             else:
@@ -2095,7 +1613,7 @@ class Prep():
     def get_hdr(self, mi, bdinfo):
         hdr = ""
         dv = ""
-        if bdinfo != None: #Disks
+        if bdinfo is not None: #Disks
             hdr_mi = bdinfo['video'][0]['hdr_dv']
             if "HDR10+" in hdr_mi:
                 hdr = "HDR10+"
@@ -2226,89 +1744,74 @@ class Prep():
 
         return video_encode, video_codec, has_encode_settings, bit_depth
 
-
     def get_edition(self, title, video, bdinfo, filelist, manual_edition):
-        if video.lower().startswith('dc'):
-            video = video.replace('dc', '', 1)
+        video = video.lower().startswith('dc') and video.replace('dc', '', 1) or video
         guess = guessit(video)
-        tag = guess.get('release_group', 'NOGROUP')
+
         repack = ""
         cut = ""
         ratio = ""
         edition = ""
-        if bdinfo != None:
-            try:
-                edition = guessit(bdinfo['label'])['edition']
-            except:
-                edition = ""
+
+        if manual_edition is not None:
+            edition = " ".join(manual_edition) if isinstance(manual_edition, list) else str(manual_edition)
+            if any(x in edition.upper() for x in ["AI", "UPSCALE"]):
+                edition = "AI UPSCALE"
+        elif bdinfo:
+            edition = guessit(bdinfo['label']).get('edition', "")
         else:
-            try:
-                edition = guess['edition']
-            except:
-                edition = ""
-        if isinstance(edition, list):
-            # time.sleep(2)
-            edition = " ".join(edition)
+            edition = guess.get('edition', "")
+        edition = " ".join(edition) if isinstance(edition, list) else edition
+
         if len(filelist) == 1:
             video = os.path.basename(video)
+        video_normalized = re.sub(r'[.\-_!]+', ' ', video).strip()
+        if title:
+            title_normalized = re.sub(r'[.\-_!:]+', ' ', title.lower()).strip()
+            title_pattern = re.escape(title_normalized).replace(' ', r'\s*')
+            video_normalized = re.sub(rf"^{title_pattern}\s*", "", video_normalized.lower(), 1)
+        if tag := guess.get('release_group'):  # Python 3.8+ walrus operator
+            video_normalized = video_normalized.replace(tag.lower(), '')
 
-        video = video.upper().replace('.', ' ').replace(tag, '').replace('-', '')
-
-        cuts = {
-            "director cut": "Director's Cut",
-            "international cut": "International Cut",
-            "extended": "Extended",
-            "special edition": "Special Edition",
-            "unrated": "Unrated",
-            "uncut": "Uncut",
-            "super duper": "Super Duper Cut"
+        CUTS = {
+            r"\bdirector'?s?\s*cut\b": "Director's Cut",
+            r"\binternational\s*cut\b": "International Cut",
+            r"\bextended\b": "Extended",
+            r"\bspecial\s*edition\b": "Special Edition",
+            r"\bunrated\b": "Unrated",
+            r"\buncut\b": "Uncut",
+            r"\bsuper\s*duper\b": "Super Duper Cut"
         }
-        for key, value in cuts.items():
-            if key in video.lower():
-                cut = value
+        cut = next((value for pattern, value in CUTS.items() if re.search(pattern, video_normalized)),"")
 
-        ratios = {"IMAX": "IMAX", "OPEN MATTE": "Open Matte", " MAR ": "MAR"}
-        for key, value in ratios.items():
-            if key in video.upper():
-                ratio = value
+        RATIOS = {
+            r"\bimax\b": "IMAX",
+            r"\bopen\s*matte\b": "Open Matte",
+            r"\bopen\s*om\b": "Open Matte",
+            r"\bmar\b": "MAR"
+        }
+        ratio = next((value for pattern, value in RATIOS.items() if re.search(pattern, video_normalized)),"")
 
-        if manual_edition != None:
-            if isinstance(manual_edition, list):
-                manual_edition = " ".join(manual_edition)
-            edition = str(manual_edition)
-        if manual_edition is not None and ("AI" in manual_edition.upper() or "UPSCALE" in manual_edition.upper()):
-            manual_edition = " AI UPSCALE"              
-        if "AI" in edition.upper() or "UPSCALE" in edition.upper():
-            edition = "AI UPSCALE" 
-        if "AI" in video.upper() and "UPSCALE" in video.upper():
-            edition = "AI UPSCALE"            
-        if " REPACK " in (video or edition) or "[REPACK]" in video or "V2" in video:
-            repack = "REPACK"
-        if " REPACK2 " in (video or edition) or "[REPACK2]" in video or "V3" in video:
-            repack = "REPACK2"
-        if " REPACK3 " in (video or edition) or "[REPACK3]" in video or "V4" in video:
-            repack = "REPACK3"
-        if " PROPER " in (video or edition):
-            repack = "PROPER"
-        if " RERIP " in (video.upper() or edition):
-            repack = "RERIP"
-        if " HYBRID " in video.upper() and "HYBRID" not in title.upper():
-            edition = "Hybrid " + edition
-        edition = re.sub(r"(REPACK\d?)?(RERIP)?(PROPER)?", "", edition, flags=re.IGNORECASE).strip()
-        bad = ['internal', 'limited', 'retail']
+        REPACK_PATTERNS = [
+            (r"\brepack3\b|\[repack3\]|v4", "REPACK3"),
+            (r"\brepack2\b|\[repack2\]|v3", "REPACK2"),
+            (r"\brepack\b|\[repack\]|v2", "REPACK"),
+            (r"\bproper\b", "PROPER"),
+            (r"\brerip\b", "RERIP")
+        ]
+        for pattern, repack_type in REPACK_PATTERNS:
+            if re.search(pattern, video_normalized):
+                repack = repack_type
+                break
 
-        if edition.lower() in bad:
+        if re.search(r"\bhybrid\b", video_normalized) and not re.search(r"\bhybrid\b", title.lower()):
+            edition = f"Hybrid {edition}"
+        
+        edition = re.sub(r"(repack\d?|rerip|proper)", "", edition, flags=re.IGNORECASE).strip()
+        if edition.lower() in ['internal', 'limited', 'retail']:
             edition = ""
-        # try:
-        #     other = guess['other']
-        # except:
-        #     other = ""
-        # if " 3D " in other:
-        #     edition = edition + " 3D "
-        # if edition == None or edition == None:s
-        #     edition = ""
-        return edition, repack, cut, ratio
 
+        return edition, repack, cut, ratio
 
 
     """
@@ -2317,7 +1820,7 @@ class Prep():
     def create_torrent(self, meta, path, output_filename, piece_size_max):
         piece_size_max = int(piece_size_max) if piece_size_max is not None else 0
         if not meta['full_dir']:
-            if meta['isdir'] == True:
+            if meta['isdir'] is True:
                 os.chdir(path)
                 globs = glob.glob1(path, "*.mkv") + glob.glob1(path, "*.mp4") + glob.glob1(path, "*.ts")
                 no_sample_globs = []
@@ -2335,7 +1838,7 @@ class Prep():
             include = ["*.mkv", "*.mp4", "*.ts"]
         torrent = Torrent(path,
             trackers = ["https://fake.tracker"],
-            source = "", #unstamped for easy storage finding for reuse via hash
+            source = "Uploadrr", 
             private = True,
             exclude_globs = exclude or [],
             include_globs = include or [],
@@ -2365,7 +1868,7 @@ class Prep():
             piece_size = 24
             piece_size_text = "16MiB"
         console.print(f"[bold yellow]Creating .torrent with a piece size of {piece_size_text}... (No valid --torrenthash was provided to reuse)")
-        if meta.get('torrent_creation') != None:
+        if meta.get('torrent_creation') is not None:
             torrent_creation = meta['torrent_creation']
         else:
             torrent_creation = self.config['DEFAULT'].get('torrent_creation', 'torf')
@@ -2431,11 +1934,9 @@ class Prep():
             for each in list(base_torrent.metainfo):
                 if each not in ('announce', 'comment', 'creation date', 'created by', 'encoding', 'info'):
                     base_torrent.metainfo.pop(each, None)
-            base_torrent.source = '' #unstamped for easy storage finding for reuse via hash
+            base_torrent.source = 'Uploadrr'
             base_torrent.private = True
             Torrent.copy(base_torrent).write(f"{base_dir}/tmp/{uuid}/BASE.torrent", overwrite=True)
-##TODO work on hash finding should iterate through hashes using stamp list.
-
 
     async def get_name(self, meta):
         manual_name = meta.get('manual_name')
@@ -2481,11 +1982,11 @@ class Prep():
             else:
                 year = ""
                 
-        if meta.get('no_season', False) == True:
+        if meta.get('no_season', False) is True:
             season = ''
-        if meta.get('no_year', False) == True:
+        if meta.get('no_year', False) is True:
             year = ''
-        if meta.get('no_aka', False) == True:
+        if meta.get('no_aka', False) is True:
             alt_title = ''
         if meta['debug']:
             console.log("[cyan]get_name cat/type")
@@ -2499,12 +2000,6 @@ class Prep():
                     console.log(f"SOURCE: {meta['source']}")
             console.log("[cyan]get_name meta:")
             console.log(meta)
-
-            
-        # name_notag = ''
-        # name = ''
-        # clean_name = ''
-        # potential_missing = []
 
         #YAY NAMING FUN
         if meta['category'] == "MOVIE": #MOVIE SPECIFIC
@@ -2596,234 +2091,138 @@ class Prep():
         return name_notag, name, clean_name, potential_missing
 
 
-
-
-    async def get_season_episode(self, video, meta):
-        if meta['category'] == 'TV':
-            filelist = meta['filelist']
-            meta['tv_pack'] = 0
-            is_daily = False
-            if meta['anime'] == False:
-                try:
-                    if meta.get('manual_date'):
-                        raise ManualDateException
-                    try:
-                        guess_year = guessit(video)['year']
-                    except Exception:
-                        guess_year = ""
-                    if guessit(video)["season"] == guess_year:
-                        if f"s{guessit(video)['season']}" in video.lower():
-                            season_int =  str(guessit(video)["season"])
-                            season = "S" + season_int.zfill(2)
-                        else:
-                            season_int = "1"
-                            season = "S01"
-                    else:
-                        season_int =  str(guessit(video)["season"])
-                        season = "S" + season_int.zfill(2)
-
-                except Exception:
-                    try:
-                        guess_date = meta.get('manual_date', guessit(video)['date']) if meta.get('manual_date') else guessit(video)['date']
-                        season_int, episode_int = self.daily_to_tmdb_season_episode(meta.get('tmdb'), guess_date)
-                        # season = f"S{season_int.zfill(2)}"
-                        # episode = f"E{episode_int.zfill(2)}"
-                        season = str(guess_date)
-                        episode = ""
-                        is_daily = True
-                    except Exception:
-                        console.print_exception()
-                        season_int = "1"
-                        season = "S01"
-                try:
-                    if is_daily != True:
-                        episodes = ""
-                        if len(filelist) == 1:
-                            episodes = guessit(video)['episode']
-                            if type(episodes) == list:
-                                episode = ""
-                                for item in guessit(video)["episode"]:
-                                    ep = (str(item).zfill(2))
-                                    episode += f"E{ep}"
-                                episode_int = episodes[0]
-                            else:
-                                episode_int = str(episodes)
-                                episode = "E" + str(episodes).zfill(2)
-                        else:
-                            episode = ""
-                            episode_int = "0"
-                            meta['tv_pack'] = 1
-                except Exception:
-                    episode = ""
-                    episode_int = "0"
-                    meta['tv_pack'] = 1
-            else:
-                #If Anime
-                parsed = anitopy.parse(Path(video).name)
-                # romaji, mal_id, eng_title, seasonYear, anilist_episodes = self.get_romaji(guessit(parsed['anime_title'], {"excludes" : ["country", "language"]})['title'])
-                romaji, mal_id, eng_title, seasonYear, anilist_episodes = self.get_romaji(parsed['anime_title'], meta.get('mal', None))
-                if mal_id:
-                    meta['mal_id'] = mal_id
-                if meta.get('tmdb_manual', None) == None:
-                    year = parsed.get('anime_year', str(seasonYear))
-                    meta = await self.get_tmdb_id(guessit(parsed['anime_title'], {"excludes" : ["country", "language"]})['title'], year, meta, meta['category'])
-                meta = await self.tmdb_other_meta(meta)
-                if meta['category'] != "TV":
-                    return meta
-
-                # meta['title'] = eng_title
-                # difference = SequenceMatcher(None, eng_title, romaji.lower()).ratio()
-                # if difference >= 0.8:
-                #     meta['aka'] = ""
-                # else:
-                #     meta['aka'] = f" AKA {romaji}"
-                tag = parsed.get('release_group', "")
-                if tag != "":
-                    meta['tag'] = f"-{tag}"
-                if len(filelist) == 1:
-                    try:
-                        episodes = parsed.get('episode_number', guessit(video).get('episode', '1'))
-                        if not isinstance(episodes, list) and not episodes.isnumeric():
-                            episodes = guessit(video)['episode']
-                        if type(episodes) == list:
-                            episode = ""
-                            for item in episodes:
-                                ep = (str(item).zfill(2))
-                                episode += f"E{ep}"
-                            episode_int = episodes[0]
-                        else:
-                            episode_int = str(int(episodes))
-                            episode = f"E{str(int(episodes)).zfill(2)}"
-                    except Exception:
-                        episode = "E01"
-                        episode_int = "1"
-                        console.print('[bold yellow]There was an error guessing the episode number. Guessing E01. Use [bold green]--episode #[/bold green] to correct if needed')
-                        await asyncio.sleep(1.5)
+    async def get_season_episode(self, video: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        filelist = meta['filelist']
+        meta.update({'tv_pack': 0, 'episode_title_storage': ''})
+        
+        if not meta.get('anime', False):
+            # Regular TV processing
+            try:
+                if meta.get('manual_date'):
+                    guess_date = meta['manual_date']
                 else:
-                    episode = ""
-                    episode_int = "0"
-                    meta['tv_pack'] = 1
+                    guess = guessit(video)
+                    guess_date = guess.get('date')
+                    season_int = int(guess.get('season', 1))
+                    season = f"S{str(season_int).zfill(2)}"
+                    if season_int == int(guess.get('year', 0)) and f"s{season_int}" not in video.lower():
+                        season_int, season = 1, "S01"
                     
-                try:
-                    if meta.get('season_int'):
-                        season = meta.get('season_int')
+                    if len(filelist) == 1:
+                        episodes = guess.get('episode', 0)
+                        if isinstance(episodes, list):
+                            episode = ''.join(f"E{str(ep).zfill(2)}" for ep in episodes)
+                            episode_int = int(episodes[0])
+                        else:
+                            episode_int = int(episodes)
+                            episode = f"E{str(episode_int).zfill(2)}"
                     else:
-                        season = parsed.get('anime_season', guessit(video)['season'])
-                    season_int = season
-                    season = f"S{season.zfill(2)}"
+                        episode, episode_int = "", 0
+                        meta['tv_pack'] = 1
+                        
+                if guess_date:
+                    season_int, episode_int = self.daily_to_tmdb_season_episode(meta.get('tmdb'), guess_date)
+                    season, episode = str(guess_date), ""
+                    
+            except Exception:
+                console.print_exception()
+                season, season_int = "S01", 1
+                episode, episode_int = "", 0
+                meta['tv_pack'] = 1
+                
+        else:
+            # Anime processing
+            parsed = anitopy.parse(Path(video).name)
+            romaji, mal_id, _, season_year, anilist_episodes = self.get_romaji(parsed['anime_title'], meta.get('mal'))
+            
+            if mal_id:
+                meta['mal_id'] = mal_id
+                
+            if not meta.get('tmdb_manual'):
+                year = parsed.get('anime_year', str(season_year))
+                meta = await self.get_tmdb_id(parsed['anime_title'], year, meta, 'TV')
+            
+            meta = await self.tmdb_other_meta(meta)
+            if meta['category'] != 'TV':
+                return meta
+                
+            if tag := parsed.get('release_group'):
+                meta['tag'] = f"-{tag}"
+                
+            # Episode handling
+            if len(filelist) == 1:
+                try:
+                    episodes = parsed.get('episode_number', guessit(video).get('episode', 1))
+                    if isinstance(episodes, list):
+                        episode = ''.join(f"E{str(ep).zfill(2)}" for ep in episodes)
+                        episode_int = int(episodes[0])
+                    else:
+                        episode_int = int(episodes)
+                        episode = f"E{str(episode_int).zfill(2)}"
+                except Exception:
+                    episode, episode_int = "E01", 1
+                    console.print('[bold yellow]There was an error guessing the episode number. Guessing E01. Use [bold green]--episode #[/bold green] to correct if needed')
+                    await asyncio.sleep(1.5)
+            else:
+                episode, episode_int = "", 0
+                meta['tv_pack'] = 1
+                
+            # Season handling
+            try:
+                season_int = int(meta.get('season_int', parsed.get('anime_season', guessit(video)['season'])))
+                season = f"S{str(season_int).zfill(2)}"
+            except Exception:
+                try:
+                    if episode_int >= anilist_episodes:
+                        response = requests.post("https://thexem.info/map/single", params={
+                            'id': str(meta['tvdb_id']),
+                            'origin': 'tvdb',
+                            'absolute': str(episode_int)
+                        }).json()
+                        if response['result'] != "failure":
+                            season_int = int(response['data']['scene']['season'])
+                            season = f"S{str(season_int).zfill(2)}"
+                            if len(filelist) == 1:
+                                episode_int = int(response['data']['scene']['episode'])
+                                episode = f"E{str(episode_int).zfill(2)}"
+                        else:
+                            raise Exception
+                    else:
+                        season, season_int = "S01", 1
                 except Exception:
                     try:
-                        if int(episode_int) >= anilist_episodes:
-                            params = {
-                                'id' : str(meta['tvdb_id']),
-                                'origin' : 'tvdb',
-                                'absolute' : str(episode_int),
-                                # 'destination' : 'tvdb'
-                            }
-                            url = "https://thexem.info/map/single"
-                            response = requests.post(url, params=params).json()
-                            if response['result'] == "failure":
-                                raise XEMNotFound
-                            if meta['debug']:
-                                console.log(f"[cyan]TheXEM Absolute -> Standard[/cyan]\n{response}")
-                            season_int = str(response['data']['scene']['season'])
-                            season = f"S{str(response['data']['scene']['season']).zfill(2)}"
-                            if len(filelist) == 1:
-                                episode_int = str(response['data']['scene']['episode'])
-                                episode = f"E{str(response['data']['scene']['episode']).zfill(2)}"
-                        else:
-                            #Get season from xem name map
-                            season = "S01"
-                            season_int = "1"
-                            names_url = f"https://thexem.info/map/names?origin=tvdb&id={str(meta['tvdb_id'])}"
-                            names_response = requests.get(names_url).json()
-                            if meta['debug']:
-                                console.log(f'[cyan]Matching Season Number from TheXEM\n{names_response}')
-                            difference = 0
-                            if names_response['result'] == "success":
-                                for season_num, values in names_response['data'].items():
-                                    for lang, names in values.items():
-                                        if lang == "jp":
-                                            for name in names:
-                                                romaji_check = re.sub(r"[^0-9a-zA-Z\[\]]+", "", romaji.lower().replace(' ', ''))
-                                                name_check = re.sub(r"[^0-9a-zA-Z\[\]]+", "", name.lower().replace(' ', ''))
-                                                diff = SequenceMatcher(None, romaji_check, name_check).ratio()
-                                                if romaji_check in name_check:
-                                                    if diff >= difference:
-                                                        if season_num != "all":
-                                                            season_int = season_num
-                                                            season = f"S{season_num.zfill(2)}"
-                                                        else:
-                                                            season_int = "1"
-                                                            season = "S01"
-                                                        difference = diff
-                                        if lang == "us":
-                                            for name in names:
-                                                eng_check = re.sub(r"[^0-9a-zA-Z\[\]]+", "", eng_title.lower().replace(' ', ''))
-                                                name_check = re.sub(r"[^0-9a-zA-Z\[\]]+", "", name.lower().replace(' ', ''))
-                                                diff = SequenceMatcher(None, eng_check, name_check).ratio()
-                                                if eng_check in name_check:
-                                                    if diff >= difference:
-                                                        if season_num != "all":
-                                                            season_int = season_num
-                                                            season = f"S{season_num.zfill(2)}"
-                                                        else:
-                                                            season_int = "1"
-                                                            season = "S01"
-                                                        difference = diff
-                            else:
-                                raise XEMNotFound
+                        season_int = int(guessit(video)['season'])
+                        season = f"S{str(season_int).zfill(2)}"
                     except Exception:
-                        if meta['debug']:
-                            console.print_exception()
-                        try:
-                            season = guessit(video)['season']
-                            season_int = season
-                        except Exception:
-                            season_int = "1"
-                            season = "S01"
-                        console.print(f"[bold yellow]{meta['title']} does not exist on thexem, guessing {season}")
-                        console.print(f"[bold yellow]If [green]{season}[/green] is incorrect, use --season to correct")
-                        await asyncio.sleep(3)
-                # try:
-                #     version = parsed['release_version']
-                #     if int(version) == 2:
-                #         meta['repack'] = "REPACK"
-                #     elif int(version) > 2:
-                #         meta['repack'] = f"REPACK{int(version) - 1}"
-                #     # version = f"v{version}"
-                # except Exception:
-                #     # version = ""
-                #     pass
-                    
-            if meta.get('manual_season', None) == None:
-                meta['season'] = season
-            else:
-                season_int = meta['manual_season'].lower().replace('s', '')
-                meta['season'] = f"S{meta['manual_season'].lower().replace('s', '').zfill(2)}"
-            if meta.get('manual_episode', None) == None:
-                meta['episode'] = episode
-            else:
-                episode_int = meta['manual_episode'].lower().replace('e', '')
-                meta['episode'] = f"E{meta['manual_episode'].lower().replace('e', '').zfill(2)}"
-                meta['tv_pack'] = 0
-            
-            # if " COMPLETE " in Path(video).name.replace('.', ' '):
-            #     meta['season'] = "COMPLETE"
-            meta['season_int'] = season_int
-            meta['episode_int'] = episode_int
+                        season, season_int = "S01", 1
+                    console.print(f"[bold yellow]{meta['title']} does not exist on thexem, guessing {season}")
+                    console.print(f"[bold yellow]If [green]{season}[/green] is incorrect, use --season to correct")
+                    await asyncio.sleep(3)
 
+        if not meta.get('manual_season'):
+            meta['season'] = season
+        else:
+            season_int = int(meta['manual_season'].lower().replace('s', ''))
+            meta['season'] = f"S{str(season_int).zfill(2)}"
             
-            meta['episode_title_storage'] = guessit(video,{"excludes" : "part"}).get('episode_title', '')
-            if meta['season'] == "S00" or meta['episode'] == "E00":
-                meta['episode_title'] = meta['episode_title_storage']
+        if meta.get('manual_episode'):
+            episode_int = int(meta['manual_episode'].lower().replace('e', ''))
+            meta.update({'episode': f"E{str(episode_int).zfill(2)}", 'tv_pack': 0})
+        else:
+            meta['episode'] = episode
             
-            # Guess the part of the episode (if available)
+        meta['episode_title_storage'] = guessit(video, {"excludes": "part"}).get('episode_title', '')
+        if meta['season'] == "S00" or meta['episode'] == "E00":
+            meta['episode_title'] = meta['episode_title_storage']
+            
+        if meta['tv_pack'] == 1:
+            part = guessit(os.path.dirname(video)).get('part')
+            meta['part'] = f"Part {part}" if part else ""
+        else:
             meta['part'] = ""
-            if meta['tv_pack'] == 1:
-                part = guessit(os.path.dirname(video)).get('part')
-                meta['part'] = f"Part {part}" if part else ""
-
+            
+        meta['season_int'] = season_int
+        meta['episode_int'] = episode_int
         return meta
 
 
@@ -2844,7 +2243,7 @@ class Prep():
         # Find the longest alias for the service code
         service_longname = service
         for service_code, aliases in self.services.items():
-            if service_code == service and aliases:  
+            if service_code is service and aliases:  
                 service_longname = max(aliases, key=len, default=service_longname)
         
         if service_longname == "Amazon Prime":
@@ -2852,7 +2251,7 @@ class Prep():
         return service, service_longname
 
     def stream_optimized(self, stream_opt):
-        if stream_opt == True:
+        if stream_opt is True:
             stream = 1
         else:
             stream = 0
@@ -2863,7 +2262,7 @@ class Prep():
         if anon.lower() == "true":
             console.print("[bold red]Global ANON has been removed in favor of per-tracker settings. Please update your config accordingly.")
             time.sleep(10)
-        if anon_in == True:
+        if anon_in is True:
             anon_out = 1
         else:
             anon_out = 0
@@ -3014,23 +2413,6 @@ class Prep():
                         meta[key] = value.get(key)
         return meta
 
-    async def get_imdb_aka(self, imdb_id):
-        if imdb_id == "0":
-            return "", None
-        ia = Cinemagoer()
-        result = ia.get_movie(imdb_id.replace('tt', ''))
-        
-        original_language = result.get('language codes')
-        if isinstance(original_language, list):
-            if len(original_language) > 1:
-                original_language = None
-            elif len(original_language) == 1:
-                original_language = original_language[0]
-        aka = result.get('original title', result.get('localized title', "")).replace(' - IMDb', '').replace('\u00ae', '')
-        if aka != "":
-            aka = f" AKA {aka}"
-        return aka, original_language
-
     async def get_dvd_size(self, discs):
         sizes = []
         dvd_sizes = []
@@ -3045,166 +2427,4 @@ class Prep():
         dvd_sizes.sort()
         compact = " ".join(dvd_sizes)
         return compact
-    
-
-    def get_tmdb_imdb_from_mediainfo(self, mediainfo, category, is_disc, tmdbid, imdbid):
-        if not is_disc:
-            if mediainfo['media']['track'][0].get('extra'):
-                extra = mediainfo['media']['track'][0]['extra']
-                for each in extra:
-                    if each.lower().startswith('tmdb'):
-                        parser = Args(config=self.config)
-                        category, tmdbid = parser.parse_tmdb_id(id = extra[each], category=category)
-                    if each.lower().startswith('imdb'):
-                        try:
-                            imdbid = str(int(extra[each].replace('tt', ''))).zfill(7)
-                        except Exception:
-                            pass
-        return category, tmdbid, imdbid
-
-
-    def daily_to_tmdb_season_episode(self, tmdbid, date):
-        show = tmdb.TV(tmdbid)
-        seasons = show.info().get('seasons')
-        season = '1'
-        episode = '1'
-        date = datetime.fromisoformat(str(date))
-        for each in seasons:
-            air_date = datetime.fromisoformat(each['air_date'])
-            if air_date <= date:
-                season = str(each['season_number'])
-        season_info = tmdb.TV_Seasons(tmdbid, season).info().get('episodes')
-        for each in season_info:
-            if str(each['air_date']) == str(date):
-                episode = str(each['episode_number'])
-                break
-        else:
-            console.print(f"[yellow]Unable to map the date ([bold yellow]{str(date)}[/bold yellow]) to a Season/Episode number")
-        return season, episode
-
-
-
-
-    async def get_imdb_info(self, imdbID, meta):
-        imdb_info = {}
-        if int(str(imdbID).replace('tt', '')) != 0:
-            ia = Cinemagoer()
-            info = ia.get_movie(imdbID)
-            ia.update(info, ['technical'])        
-            imdb_info['title'] = info.get('title')
-            imdb_info['year'] = info.get('year')
-            imdb_info['aka'] = info.get('original title', info.get('localized title', imdb_info['title'])).replace(' - IMDb', '')
-            imdb_info['type'] = info.get('kind')
-            imdb_info['imdbID'] = info.get('imdbID')
-            imdb_info['runtime'] = info.get('runtimes', ['0'])[0]
-            imdb_info['cover'] = info.get('full-size cover url', '').replace(".jpg", "._V1_FMjpg_UX750_.jpg")
-            imdb_info['plot'] = info.get('plot', [''])[0]
-            imdb_info['genres'] = ', '.join(info.get('genres', ''))
-            imdb_info['soundmix'] = info.get('sound mix')
-            imdb_info['countries_of_origin'] = info.get('countries', [])
-            imdb_info['original_language'] = info.get('language codes')
-            if isinstance(imdb_info['original_language'], list):
-                if len(imdb_info['original_language']) > 1:
-                    imdb_info['original_language'] = None
-                elif len(imdb_info['original_language']) == 1:
-                    imdb_info['original_language'] = imdb_info['original_language'][0]        
-            if imdb_info['cover'] == '':
-                imdb_info['cover'] = meta.get('poster', '')
-            if len(info.get('directors', [])) >= 1:
-                imdb_info['directors'] = []
-                for director in info.get('directors'):
-                    imdb_info['directors'].append(f"nm{director.getID()}")
-        else:
-            imdb_info = {
-                'title' : meta['title'],
-                'year' : meta['year'],
-                'aka' : '',
-                'type' : None,
-                'runtime' : meta.get('runtime', '60'),
-                'cover' : meta.get('poster'),
-            }
-            if len(meta.get('tmdb_directors', [])) >= 1:
-                imdb_info['directors'] = meta['tmdb_directors']
-
-        return imdb_info
-        
-
-    async def search_imdb(self, filename, search_year):
-        imdbID = '0'
-        ia = Cinemagoer()
-        search = ia.search_movie(filename)
-        for movie in search:
-            if filename in movie.get('title', ''):
-                if movie.get('year') == search_year:
-                    imdbID = str(movie.movieID).replace('tt', '')
-        return imdbID
-
-
-    async def imdb_other_meta(self, meta):
-        imdb_info = meta['imdb_info'] = await self.get_imdb_info(meta['imdb_id'], meta)
-        meta['title'] = imdb_info['title']
-        meta['year'] = imdb_info['year']
-        meta['aka'] = imdb_info['aka']
-        meta['poster'] = imdb_info['cover']
-        meta['original_language'] = imdb_info['original_language']
-        meta['overview'] = imdb_info['plot']
-
-        difference = SequenceMatcher(None, meta['title'].lower(), meta['aka'][5:].lower()).ratio()
-        if difference >= 0.9 or meta['aka'][5:].strip() == "" or meta['aka'][5:].strip().lower() in meta['title'].lower():
-            meta['aka'] = ""
-        if f"({meta['year']})" in meta['aka']:
-            meta['aka'] = meta['aka'].replace(f"({meta['year']})", "").strip()
-        return meta
-
-    async def search_tvmaze(self, filename, year, imdbID, tvdbID):
-        tvdbID = int(tvdbID)
-        tvmazeID = 0
-        lookup = False
-        show = None
-        if imdbID == None:
-            imdbID = '0'
-        if tvdbID == None:
-            tvdbID = 0
-        if int(tvdbID) != 0:
-            params = {
-                "thetvdb" : tvdbID
-            }
-            url = "https://api.tvmaze.com/lookup/shows"
-            lookup = True
-        elif int(imdbID) != 0:
-            params = {
-                "imdb" : f"tt{imdbID}"
-            }
-            url = "https://api.tvmaze.com/lookup/shows"
-            lookup = True
-        else:
-            params = {
-                "q" : filename
-            }
-            url = f"https://api.tvmaze.com/search/shows"
-        resp = requests.get(url=url, params=params)
-        if resp.ok:
-            resp = resp.json()
-            if resp == None:
-                return tvmazeID, imdbID, tvdbID
-            if lookup == True:
-                show = resp
-            else:
-                if year not in (None, ''):
-                    for each in resp:
-                        premier_date = each['show'].get('premiered', '')
-                        if premier_date != None:
-                            if premier_date.startswith(str(year)):
-                                show = each['show']
-                elif len(resp) >= 1:
-                    show = resp[0]['show']
-            if show != None:
-                tvmazeID = show.get('id')
-                if int(imdbID) == 0:
-                    if show.get('externals', {}).get('imdb', '0') != None:
-                        imdbID = str(show.get('externals', {}).get('imdb', '0')).replace('tt', '')
-                if int(tvdbID) == 0:
-                    if show.get('externals', {}).get('tvdb', '0') != None:
-                        tvdbID = show.get('externals', {}).get('tvdb', '0')
-        return tvmazeID, imdbID, tvdbID
-    
+   
