@@ -1,16 +1,20 @@
+from datetime import datetime
 import asyncio
 from asyncio import Semaphore
-import anitopy
+from difflib import SequenceMatcher
+import os
 import re
+import urllib.parse
+
 import httpx
 import requests
-from datetime import datetime
+import anitopy
 from imdb import Cinemagoer
-from difflib import SequenceMatcher
-from src.args import Args
 from guessit import guessit
-from rich.prompt import Prompt
 from aiocache import cached
+from rich.prompt import Prompt
+
+from src.args import Args
 from src.console import console, log
 
 
@@ -575,3 +579,38 @@ async def search_tvmaze(filename, year, imdbID, tvdbID):
                 if show.get('externals', {}).get('tvdb', '0') is not None:
                     tvdbID = show.get('externals', {}).get('tvdb', '0')
     return tvmazeID, imdbID, tvdbID
+
+async def is_scene(video, imdb=None):
+    scene = False
+    console.print(f"Video is: {video}")
+    base = os.path.splitext(os.path.basename(video))[0]
+    base = urllib.parse.quote(base)
+    urls = [
+        f"https://api.srrdb.com/v1/search/r:{base}",
+        f"https://api.srrdb.com/v1/imdb/{base}"
+    ]
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # First request to check for scene release
+            response = await client.get(urls[0], timeout=httpx.Timeout(30.0))
+            response.raise_for_status()
+            data = response.json()
+            if int(data.get('resultsCount', 0)) > 0:
+                video = f"{data['results'][0]['release']}.mkv"
+                scene = True
+                console.print(f"[green]SRRDB: Matched to {data['results'][0]['release']}")
+
+                # Second request to fetch IMDb data if not provided
+                if imdb is None:
+                    r = await client.get(urls[1])
+                    r.raise_for_status()
+                    imdb_data = r.json()
+                    if imdb_data.get('releases', []):
+                        imdb = imdb_data['releases'][0].get('imdb', imdb)
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            console.print("[yellow]SRRDB: No match found, or request has timed out")
+            log.debug(f"Exception occurred: {e}")
+    
+    log.debug(f"Video is: {video}")
+    return video, scene, imdb

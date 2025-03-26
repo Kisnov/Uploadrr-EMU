@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*- 
 import sys
+from src.args import Args
 from src.console import console, log
-from src.exceptions import *
 from src.trackers.PTP import PTP
 from src.trackers.BLU import BLU
 from src.trackers.HDB import HDB
@@ -10,11 +10,10 @@ from src.musicbrainz import MusicBrainzAPI
 from src.discparse import DiscParse
 from src.discogs import DiscogsAPI
 from src.screenshots import ScreenshotManager
-from src.databases import TMDbHandler, IMDbHandler, search_tvmaze
+from src.databases import TMDbHandler, IMDbHandler, search_tvmaze, is_scene
 
 try:
     import aiofiles
-    import aiohttp
     import anitopy
     import asyncio
     import base64
@@ -199,7 +198,7 @@ class Prep():
 
         # Process based on disc type
         if meta['is_disc'] == "BDMV":
-            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             try:
                 guess_name = bdinfo['title'].replace('-', ' ')
                 filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
@@ -215,7 +214,7 @@ class Prep():
 
         elif meta['is_disc'] == "DVD":
             disc_path = meta['discs'][0]['path']
-            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             guess_name = disc_path.replace('-', ' ')
             filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
             meta['search_year'] = guessit(video).get('year', "")
@@ -254,7 +253,7 @@ class Prep():
                 meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
 
         elif meta['is_disc'] == "HDDVD":
-            video, meta['scene'], meta['imdb'] = await self.is_scene(meta['path'], meta.get('imdb'))
+            video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             guess_name = meta['discs'][0]['path'].replace('-', '')
             filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
             meta['search_year'] = guessit(meta['discs'][0]['path']).get('year', "")
@@ -263,7 +262,7 @@ class Prep():
 
         else:  # Non-disc case
             videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
-            video, meta['scene'], meta['imdb'] = await self.is_scene(videopath, meta.get('imdb'))
+            video, meta['scene'], meta['imdb'] = await is_scene(videopath, meta.get('imdb'))
             guess_name = ntpath.basename(video).replace('-', ' ')
             filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get(
                 "title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"]
@@ -1207,37 +1206,6 @@ class Prep():
         return sd
 
     """
-    Is a scene release?
-    """
-    async def is_scene(self, video, imdb=None):
-        scene = False
-        base = os.path.splitext(os.path.basename(video))[0]
-        base = urllib.parse.quote(base)
-        urls = [
-            f"https://api.srrdb.com/v1/search/r:{base}",
-            f"https://api.srrdb.com/v1/imdb/{base}"
-        ]
-
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(urls[0], timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    data = await response.json()
-                    if int(data.get('resultsCount', 0)) > 0:
-                        video = f"{data['results'][0]['release']}.mkv"
-                        scene = True
-                        console.print(f"[green]SRRDB: Matched to {data['results'][0]['release']}")
-
-                        if imdb is None:
-                            async with session.get(urls[1]) as r:
-                                imdb_data = await r.json()
-                                if imdb_data.get('releases', []):
-                                    imdb = imdb_data['releases'][0].get('imdb', imdb)
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                console.print("[yellow]SRRDB: No match found, or request has timed out")
-        log.debug(f"Video is: {video}")
-        return video, scene, imdb
-
-    """
     Is a sports release?
     """
     def is_sports(self, name):
@@ -1265,7 +1233,7 @@ class Prep():
             # type = "ENCODE"
         elif "hdtv" in filename:
             type = "HDTV"
-        elif is_disc != None:
+        elif is_disc is not None:
             type = "DISC"
         else:
             type = "ENCODE"
@@ -1530,23 +1498,19 @@ class Prep():
         return tag
 
 
-    def get_source(self, type, video, path, is_disc, meta):
+    def get_source(self, type: str, video: str, path: str, is_disc: Optional[str], meta: dict):
         try:
-            try:
-                source = guessit(video)['source']
-            except:
+            source = meta.get('manual_source')
+            if not source:
                 try:
-                    source = guessit(path)['source']
-                except:
+                    source = guessit(video).get('source', guessit(path).get('source', "BluRay"))
+                except Exception:
                     source = "BluRay"
-            if meta.get('manual_source', None):
-                source = meta['manual_source']
             if source in ("Blu-ray", "Ultra HD Blu-ray", "BluRay", "BR") or is_disc == "BDMV":
-                if type == "DISC":
-                    source = "Blu-ray"
-                elif type in ('ENCODE', 'REMUX'):
-                    source = "BluRay"
-            if is_disc == "DVD" or source in ("DVD", "dvd"):
+                source = "Blu-ray" if type == "DISC" else "BluRay"
+
+            elif source in ("DVD", "dvd") or is_disc == "DVD":
+                system = ""
                 try:
                     if is_disc == "DVD":
                         mediainfo = MediaInfo.parse(f"{meta['discs'][0]['path']}/VTS_{meta['discs'][0]['main_set'][0][:2]}_0.IFO")
@@ -1554,105 +1518,89 @@ class Prep():
                         mediainfo = MediaInfo.parse(video)
                     for track in mediainfo.tracks:
                         if track.track_type == "Video":
-                            system = track.standard
-                    if system not in ("PAL", "NTSC"):
-                        raise WeirdSystem
-                except:
+                            system = track.standard or ""
+                            break
+                except Exception:
                     try:
-                        other = guessit(video)['other']
+                        other = guessit(video).get('other', [])
                         if "PAL" in other:
                             system = "PAL"
                         elif "NTSC" in other:
                             system = "NTSC"
-                    except:
+                    except Exception:
                         system = ""
-                finally:
-                    if system == None:
-                        system = ""        
-                    if type == "REMUX":
-                        system = f"{system} DVD".strip()
-                    source = system
-            if source in ("Web", "WEB"):
+                source = f"{system} DVD".strip() if type == "REMUX" else system
+        
+            elif source in ("Web", "WEB"):
                 if type == "ENCODE":
-                    type = "WEBRIP"
-            if source in ("HD-DVD", "HD DVD", "HDDVD"):
-                if is_disc == "HDDVD":
-                    source = "HD DVD"
-                if type in ("ENCODE", "REMUX"):
-                    source = "HDDVD"
-            if type in ("WEBDL", 'WEBRIP'):
-                source = "Web"
+                    type = "WEBRIP"           
+
+            elif source in ("HD-DVD", "HD DVD", "HDDVD"):
+                source = "HD DVD" if is_disc == "HDDVD" else "HDDVD"
+
+            if type in ("WEBDL", "WEBRIP"):
+                source = "Web"               
             if source == "Ultra HDTV":
                 source = "UHDTV"
-        except Exception:
-            console.print(traceback.format_exc())
+        except Exception as e:
+            print(f"Error in get_source: {str(e)}")
             source = "BluRay"
 
         return source, type
 
-    def get_uhd(self, type, guess, resolution, path):
+    def get_uhd(self, type: str, guess: dict, resolution: str, path: str) -> str:
         try:
-            source = guess['Source']
-            other = guess['Other']
-        except:
-            source = ""
-            other = ""
-        uhd = ""
-        if source == 'Blu-ray' and other == "Ultra HD" or source == "Ultra HD Blu-ray":
-            uhd = "UHD"
-        elif "UHD" in path:
-            uhd = "UHD"
-        elif type in ("DISC", "REMUX", "ENCODE", "WEBRIP"):
-            uhd = ""
+            source = guess.get('source', '')
+            other = guess.get('other', '')
             
-        if type in ("DISC", "REMUX", "ENCODE") and resolution == "2160p":
-            uhd = "UHD"
+            if (source == 'Blu-ray' and other == "Ultra HD") or source == "Ultra HD Blu-ray":
+                return "UHD"
+            if "UHD" in path:
+                return "UHD"
+            if type in ("DISC", "REMUX", "ENCODE") and resolution == "2160p":
+                return "UHD"
+            return ""
+        except Exception as e:
+            console.print(f"Error in get_uhd: {str(e)}")
+            return ""
 
-        return uhd
-
-    def get_hdr(self, mi, bdinfo):
-        hdr = ""
-        dv = ""
-        if bdinfo is not None: #Disks
-            hdr_mi = bdinfo['video'][0]['hdr_dv']
-            if "HDR10+" in hdr_mi:
-                hdr = "HDR10+"
-            elif hdr_mi == "HDR10":
-                hdr = "HDR"
-            try:
-                if bdinfo['video'][1]['hdr_dv'] == "Dolby Vision":
-                    dv = "DV"
-            except:
-                pass
-        else: 
-            video_track = mi['media']['track'][1]
-            try:
-                hdr_mi = video_track['colour_primaries']
-                if hdr_mi in ("BT.2020", "REC.2020"):
-                    hdr = ""
-                    hdr_format_string = video_track.get('HDR_Format_Compatibility', video_track.get('HDR_Format_String', video_track.get('HDR_Format', "")))
-                    if "HDR10" in hdr_format_string:
-                        hdr = "HDR"
-                    if "HDR10+" in hdr_format_string:
-                        hdr = "HDR10+"
-                    if hdr_format_string == "" and "PQ" in (video_track.get('transfer_characteristics'), video_track.get('transfer_characteristics_Original', None)):
-                        hdr = "PQ10"
-                    transfer_characteristics = video_track.get('transfer_characteristics_Original', None)
-                    if "HLG" in transfer_characteristics:
-                        hdr = "HLG"
-                    if hdr != "HLG" and "BT.2020 (10-bit)" in transfer_characteristics:
-                        hdr = "WCG"
-            except:
-                pass
-
-            try:
-                if "Dolby Vision" in video_track.get('HDR_Format', '') or "Dolby Vision" in video_track.get('HDR_Format_String', ''):
-                    dv = "DV"
-            except:
-                pass
-
-        hdr = f"{dv} {hdr}".strip()
-        return hdr
+    def get_hdr(self, mi: dict, bdinfo: Optional[dict]) -> str:
+        try:
+            hdr = ""
+            dv = ""
+            
+            if bdinfo: #BDMV
+                hdr_info = bdinfo['video'][0]['hdr_dv']
+                hdr = "HDR10+" if "HDR10+" in hdr_info else "HDR" if hdr_info == "HDR10" else ""
+                dv = "DV" if len(bdinfo['video']) > 1 and bdinfo['video'][1].get('hdr_dv') == "Dolby Vision" else ""
+            else:  # File-based media
+                video_track = mi['media']['track'][1]
+                try:
+                    if video_track.get('colour_primaries') in ("BT.2020", "REC.2020"):
+                        hdr_format = video_track.get('HDR_Format_Compatibility', 
+                                                video_track.get('HDR_Format_String', 
+                                                                video_track.get('HDR_Format', "")))
+                        if "HDR10+" in hdr_format:
+                            hdr = "HDR10+"
+                        elif "HDR10" in hdr_format:
+                            hdr = "HDR"
+                        elif not hdr_format and "PQ" in (video_track.get('transfer_characteristics'), 
+                                                    video_track.get('transfer_characteristics_Original')):
+                            hdr = "PQ10"
+                        elif "HLG" in video_track.get('transfer_characteristics_Original', ''):
+                            hdr = "HLG"
+                        elif "BT.2020 (10-bit)" in video_track.get('transfer_characteristics_Original', ''):
+                            hdr = "WCG"
+                except Exception:
+                    pass
+                    
+                dv = "DV" if "Dolby Vision" in video_track.get('HDR_Format', '') or \
+                            "Dolby Vision" in video_track.get('HDR_Format_String', '') else ""
+                
+            return f"{dv} {hdr}".strip()
+        except Exception as e:
+            console.print(f"Error in get_hdr: {str(e)}")
+            return ""
 
     def get_region(self, bdinfo, region=None):
             label = bdinfo.get('label', bdinfo.get('title', bdinfo.get('path', ''))).replace('.', ' ')
@@ -1770,7 +1718,7 @@ class Prep():
             title_normalized = re.sub(r'[.\-_!:]+', ' ', title.lower()).strip()
             title_pattern = re.escape(title_normalized).replace(' ', r'\s*')
             video_normalized = re.sub(rf"^{title_pattern}\s*", "", video_normalized.lower(), 1)
-        if tag := guess.get('release_group'):  # Python 3.8+ walrus operator
+        if tag := guess.get('release_group'): 
             video_normalized = video_normalized.replace(tag.lower(), '')
 
         CUTS = {
