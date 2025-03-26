@@ -23,11 +23,3 @@ class UploadException(Exception):
         else: # else, the exception was raised without arguments ...
                  # ... pass the default message to the super constructor
                  super().__init__(default_message, **kwargs)
-
-
-class XEMNotFound(Exception):
-    pass
-class WeirdSystem(Exception):
-    pass
-class ManualDateException(Exception):
-    pass
