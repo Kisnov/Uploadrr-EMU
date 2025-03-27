@@ -582,7 +582,6 @@ async def search_tvmaze(filename, year, imdbID, tvdbID):
 
 async def is_scene(video, imdb=None):
     scene = False
-    console.print(f"Video is: {video}")
     base = os.path.splitext(os.path.basename(video))[0]
     base = urllib.parse.quote(base)
     urls = [
@@ -612,5 +611,4 @@ async def is_scene(video, imdb=None):
             console.print("[yellow]SRRDB: No match found, or request has timed out")
             log.debug(f"Exception occurred: {e}")
     
-    log.debug(f"Video is: {video}")
     return video, scene, imdb
