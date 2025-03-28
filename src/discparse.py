@@ -1,232 +1,209 @@
+import asyncio
+from pathlib import Path
 import os
 import shutil
 import traceback
 import sys
-import asyncio
 from glob import glob
+from typing import List, Dict, Tuple, Optional
+import xml.etree.ElementTree as ET
 from pymediainfo import MediaInfo
 from collections import OrderedDict
 import json
 
 from src.console import console, log
 
-class DiscParse():
+
+class DiscParse:
     def __init__(self):
         pass
 
-    """
-    Get and parse bdinfo
-    """
-    async def get_bdinfo(self, discs, folder_id, base_dir, meta_discs):
-        save_dir = f"{base_dir}/tmp/{folder_id}"
-        if not os.path.exists(save_dir):
-            os.mkdir(save_dir)
+    async def get_bdinfo(self, discs: List[Dict], folder_id: str, base_dir: str, meta_discs: List[Dict]) -> Tuple[List[Dict], Dict]:
+        save_dir = Path(base_dir) / "tmp" / folder_id
+        save_dir.mkdir(parents=True, exist_ok=True)
         
-        for i in range(len(discs)):
+        for i, disc in enumerate(discs):
             bdinfo_text = None
-            path = os.path.abspath(discs[i]['path'])
+            path = Path(disc['path']).resolve()
+            summary_file = save_dir / f"BD_SUMMARY_{str(i).zfill(2)}.txt"
+            full_file = save_dir / f"BD_FULL_{str(i).zfill(2)}.txt"
 
-            # Check if BD summary or BD full files already exist before proceeding
-            for file in os.listdir(save_dir):
-                if file == f"BD_SUMMARY_{str(i).zfill(2)}.txt":
-                    bdinfo_text = save_dir + "/" + file
-            if bdinfo_text == None or meta_discs == []:
-                if os.path.exists(f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt"):
-                    bdinfo_text = os.path.abspath(f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt")
-
-                else:
-                    bdinfo_text = ""                
-                    if sys.platform.startswith('darwin'):
-                        await self.remove_system_files(path)
-
-                    await self.run_bdinfo(path, save_dir, base_dir)
-
-                while True:
-                    try:
-                        if bdinfo_text == "":
-                            for file in os.listdir(save_dir):
-                                if file.startswith(f"BDINFO"):
-                                    bdinfo_text = save_dir + "/" + file
-                        with open(bdinfo_text, 'r') as f:
-                            text = f.read()
-                            result = text.split("QUICK SUMMARY:", 2)
-                            files = result[0].split("FILES:", 2)[1].split("CHAPTERS:", 2)[0].split("-------------")
-                            result2 = result[1].rstrip(" \n")
-                            result = result2.split("********************", 1)
-                            bd_summary = result[0].rstrip(" \n")
-                            f.close()
-                        with open(bdinfo_text, 'r') as f: # parse extended BDInfo
-                            text = f.read()
-                            result = text.split("[code]", 3)
-                            result2 = result[2].rstrip(" \n")
-                            result = result2.split("FILES:", 1)
-                            ext_bd_summary = result[0].rstrip(" \n")
-                            f.close()
-                        try:
-                            shutil.copyfile(bdinfo_text, f"{save_dir}/BD_FULL_{str(i).zfill(2)}.txt")
-                            os.remove(bdinfo_text)
-                        except shutil.SameFileError:
-                            pass
-                    except Exception:
-                        console.print(traceback.format_exc())
-                        await asyncio.sleep(5)
-                        continue
-                    break
-                with open(f"{save_dir}/BD_SUMMARY_{str(i).zfill(2)}.txt", 'w') as f:
-                    f.write(bd_summary.strip())
-                    f.close()
-                with open(f"{save_dir}/BD_SUMMARY_EXT.txt", 'w') as f: # write extended BDInfo file
-                    f.write(ext_bd_summary.strip())
-                    f.close()
+            if summary_file.exists():
+                bdinfo_text = summary_file
+            elif not meta_discs and full_file.exists():
+                bdinfo_text = full_file
+            else:
+                bdinfo_text = await self._process_bdinfo(path, save_dir, base_dir)
                 
-                bdinfo = self.parse_bdinfo(bd_summary, files[1], path)
-        
-                discs[i]['summary'] = bd_summary.strip()
-                discs[i]['bdinfo'] = bdinfo
-                # shutil.rmtree(f"{base_dir}/tmp")
+            if bdinfo_text:
+                try:
+                    bd_summary, ext_bd_summary, files_section = await self._extract_bdinfo_sections(bdinfo_text)
+                    
+                    async with asyncio.Lock():  # Ensure file writing is thread-safe
+                        await asyncio.to_thread(summary_file.write_text, bd_summary.strip(), encoding='utf-8')
+                        await asyncio.to_thread((save_dir / "BD_SUMMARY_EXT.txt").write_text, ext_bd_summary.strip(), encoding='utf-8')
+                    
+                    bdinfo = await self.parse_bdinfo(bd_summary, files_section, path)
+                    if bdinfo.get('title') is None or not bdinfo.get('title'):
+                        bdinfo['title'] = await self._get_title_from_xml(path)
+                        
+                    disc['summary'] = bd_summary.strip()
+                    disc['bdinfo'] = bdinfo
+                    
+                    if bdinfo_text != full_file:
+                        await asyncio.to_thread(shutil.copyfile, bdinfo_text, full_file)
+                        bdinfo_text.unlink()
+                        
+                except Exception as e:
+                    console.print(f"Error processing BDInfo: {traceback.format_exc()}")
+                    await asyncio.sleep(5)
+                    continue
             else:
                 discs = meta_discs
-        
+                
         return discs, discs[0]['bdinfo']
 
-    async def remove_system_files(self, path):
-        for dirpath, dirnames, filenames in os.walk(path):
-            for filename in filenames:
+    async def _process_bdinfo(self, path: Path, save_dir: Path, base_dir: str) -> Optional[Path]:
+        """Process BDInfo execution and return output file path."""
+        if sys.platform.startswith('darwin'):
+            await self.remove_system_files(path)
+        await self.run_bdinfo(path, save_dir, base_dir)
+        
+        for file in await asyncio.to_thread(list, save_dir.iterdir()):
+            if file.name.startswith("BDINFO"):
+                return file
+        return None
+
+    async def _extract_bdinfo_sections(self, bdinfo_text: Path) -> Tuple[str, str, str]:
+        """Extract relevant sections from BDInfo text."""
+        text = await asyncio.to_thread(bdinfo_text.read_text, encoding='utf-8')
+        main_sections = text.split("QUICK SUMMARY:", 2)
+        files_section = main_sections[0].split("FILES:", 2)[1].split("CHAPTERS:", 2)[0].split("-------------")[1]
+        quick_summary = main_sections[1].split("********************", 1)[0].rstrip()
+        
+        ext_sections = text.split("[code]", 3)
+        ext_bd_summary = ext_sections[2].split("FILES:", 1)[0].rstrip()
+        
+        return quick_summary, ext_bd_summary, files_section
+
+    async def remove_system_files(self, path: Path) -> None:
+        """Removes macOS indexing (spotlight) files starting with '._' """
+        async def remove_file(file_path: Path):
+            try:
+                file_path.unlink()
+                log.debug(f"Removed system file: {file_path}")
+            except Exception as e:
+                log.error(f"Error removing {file_path}: {e}")
+
+        tasks = []
+        for root, dirs, files in await asyncio.to_thread(path.walk):
+            for filename in files:
                 if filename.startswith('._'):
-                    system_file_path = os.path.join(dirpath, filename)
-                    try:
-                        os.remove(system_file_path)  # Remove system file
-                        log.debug(f"Removed system file: {system_file_path}")
-                    except Exception as e:
-                        log.error(f"Error removing {system_file_path}: {e}")
+                    file_path = Path(root) / filename
+                    tasks.append(remove_file(file_path))
+        
+        if tasks:
+            await asyncio.gather(*tasks)
 
-    async def run_bdinfo(self, path, save_dir, base_dir):
-        if sys.platform.startswith('linux') or sys.platform.startswith('darwin'): #Linux / MacOS
-            try:
+    async def run_bdinfo(self, path: Path, save_dir: Path, base_dir: str) -> None:
+        """Run BDInfo executable based on platform."""
+        bdinfo_path = Path(base_dir) / "bin" / "BDInfo" / "BDInfo.exe"
+        args = ['-w', str(path), str(save_dir)]
+        
+        try:
+            if sys.platform.startswith(('linux', 'darwin')):
                 log.info(f"Scanning {path}")
-                proc = await asyncio.create_subprocess_exec(
-                    'mono', f"{base_dir}/bin/BDInfo/BDInfo.exe", '-w', path, save_dir
-                )
-                await proc.wait()
-            except Exception as e:
-                log.error(f"[bold red]Error running Mono: {e}")
-                return None
-        elif sys.platform.startswith('win32'):  # Windows
-            try:
+                proc = await asyncio.create_subprocess_exec('mono', str(bdinfo_path), *args)
+            elif sys.platform.startswith('win32'):
                 console.print(f"[bold green]Scanning {path} for BDInfo.")
-                proc = await asyncio.create_subprocess_exec(
-                    f"{base_dir}/bin/BDInfo/BDInfo.exe", "-w", path, save_dir
-                )
-                await proc.wait()
-            except Exception as e:
-                log.error(f"[bold red ]Error running BDInfo: {e}")
-                return None   
- 
+                proc = await asyncio.create_subprocess_exec(str(bdinfo_path), *args)
+            await proc.wait()
+        except Exception as e:
+            log.error(f"[bold red]Error running BDInfo: {e}")
 
-    def parse_bdinfo(self, bdinfo_input, files, path):
-        bdinfo = dict()
-        bdinfo['video'] = list()
-        bdinfo['audio'] = list()
-        bdinfo['subtitles'] = list()
-        bdinfo['path'] = path
-        lines = bdinfo_input.splitlines()
-        for l in lines:
-            line = l.strip().lower()
-            if line.startswith("*"):
-                line = l.replace("*", "").strip().lower()
-            if line.startswith("playlist:"):
-                playlist = l.split(':', 1)[1]
-                bdinfo['playlist'] = playlist.split('.',1)[0].strip()
-            if line.startswith("disc size:"):
-                size = l.split(':', 1)[1]
-                size = size.split('bytes', 1)[0].replace(',','')
-                size = float(size)/float(1<<30)
+    async def _get_title_from_xml(self, path: Path) -> Optional[str]:
+        """Extract title from bdmt_*.xml file if available."""
+        xml_files = [f for f in (path / "META" / "DL").glob("bdmt_*.xml")]
+        if not xml_files:
+            log.debug(f"No bdmt_*.xml file found in {path / 'META' / 'DL'}")
+            return ''
+            
+        try:
+            xml_content = await asyncio.to_thread(Path(xml_files[0]).read_text, encoding='utf-8')
+            root = ET.fromstring(xml_content)
+            namespace = {'di': 'urn:BDA:bdmv;discinfo'}
+            title_elem = root.find('.//di:title/di:name', namespace)
+            return title_elem.text if title_elem is not None else ''
+        except (ET.ParseError, IndexError) as e:
+            log.error(f"Error parsing XML for title: {e}")
+            return ''
+
+    async def parse_bdinfo(self, bdinfo_input: str, files: str, path: Path) -> Dict:
+        """Parse BDInfo data into structured dictionary."""
+        bdinfo = {
+            'video': [],
+            'audio': [],
+            'subtitles': [],
+            'path': str(path),
+            'title': None  # Default to None
+        }
+        
+        for line in bdinfo_input.splitlines():
+            line_lower = line.strip().lower()
+            if line_lower.startswith("*"):
+                line_lower = line_lower[1:].strip()
+                
+            if line_lower.startswith("playlist:"):
+                bdinfo['playlist'] = line.split(':', 1)[1].split('.', 1)[0].strip()
+            elif line_lower.startswith("disc size:"):
+                size = float(line.split(':', 1)[1].split('bytes', 1)[0].replace(',', '')) / (1 << 30)
                 bdinfo['size'] = size
-            if line.startswith("length:"):
-                length = l.split(':', 1)[1]
-                bdinfo['length'] = length.split('.',1)[0].strip()
-            if line.startswith("video:"):
-                split1 = l.split(':', 1)[1]
-                split2 = split1.split('/', 12)
-                while len(split2) != 9:
-                    split2.append("")
-                n=0
-                if "Eye" in split2[2].strip():
-                    n = 1
-                    three_dim = split2[2].strip()
-                else:
-                    three_dim = ""
-                try:
-                    bit_depth = split2[n+6].strip()
-                    hdr_dv = split2[n+7].strip()
-                    color = split2[n+8].strip()
-                except:
-                    bit_depth = ""
-                    hdr_dv = ""
-                    color = ""
+            elif line_lower.startswith("length:"):
+                bdinfo['length'] = line.split(':', 1)[1].split('.', 1)[0].strip()
+            elif line_lower.startswith("video:"):
+                video_data = line.split(':', 1)[1].split('/', 12)
+                video_data.extend([""] * (9 - len(video_data)))
+                n = 1 if "Eye" in video_data[2].strip() else 0
                 bdinfo['video'].append({
-                    'codec': split2[0].strip(), 
-                    'bitrate': split2[1].strip(), 
-                    'res': split2[n+2].strip(), 
-                    'fps': split2[n+3].strip(), 
-                    'aspect_ratio' : split2[n+4].strip(),
-                    'profile': split2[n+5].strip(),
-                    'bit_depth' : bit_depth,
-                    'hdr_dv' : hdr_dv, 
-                    'color' : color,
-                    '3d' : three_dim,
-                    })
-            elif line.startswith("audio:"):
-                if "(" in l:
-                    l = l.split("(")[0]
-                l = l.strip()
-                split1 = l.split(':', 1)[1]
-                split2 = split1.split('/')
-                n = 0
-                if "Atmos" in split2[2].strip():
-                    n = 1
-                    fuckatmos = split2[2].strip()
-                else:
-                    fuckatmos = ""
-                try:
-                    bit_depth = split2[n+5].strip()
-                except:
-                    bit_depth = ""
+                    'codec': video_data[0].strip(),
+                    'bitrate': video_data[1].strip(),
+                    'res': video_data[n+2].strip(),
+                    'fps': video_data[n+3].strip(),
+                    'aspect_ratio': video_data[n+4].strip(),
+                    'profile': video_data[n+5].strip(),
+                    'bit_depth': video_data[n+6].strip(),
+                    'hdr_dv': video_data[n+7].strip(),
+                    'color': video_data[n+8].strip(),
+                    '3d': video_data[2].strip() if n else ""
+                })
+            elif line_lower.startswith("audio:"):
+                audio_line = line.split("(")[0].strip()
+                audio_data = audio_line.split(':', 1)[1].split('/')
+                n = 1 if "Atmos" in audio_data[2].strip() else 0
                 bdinfo['audio'].append({
-                    'language' : split2[0].strip(), 
-                    'codec' : split2[1].strip(), 
-                    'channels' : split2[n+2].strip(), 
-                    'sample_rate' : split2[n+3].strip(), 
-                    'bitrate' : split2[n+4].strip(), 
-                    'bit_depth' : bit_depth, # Also DialNorm, but is not in use anywhere yet
-                    'atmos_why_you_be_like_this': fuckatmos,
-                    })
-            elif line.startswith("disc title:"):
-                title = l.split(':', 1)[1]
-                bdinfo['title'] = title
-            elif line.startswith("disc label:"):
-                label = l.split(':', 1)[1]
-                bdinfo['label'] = label
-            elif line.startswith('subtitle:'):
-                split1 = l.split(':', 1)[1]
-                split2 = split1.split('/')
-                bdinfo['subtitles'].append(split2[0].strip())
-        files = files.splitlines()
-        bdinfo['files'] = []
-        for line in files:
-            try:
-                stripped = line.split()
-                m2ts = {}
-                bd_file = stripped[0]
-                time_in = stripped[1]
-                bd_length = stripped[2]
-                bd_size = stripped[3]
-                bd_bitrate = stripped[4]
-                m2ts['file'] = bd_file
-                m2ts['length'] = bd_length
-                bdinfo['files'].append(m2ts)
-            except:
-                pass
+                    'language': audio_data[0].strip(),
+                    'codec': audio_data[1].strip(),
+                    'channels': audio_data[n+2].strip(),
+                    'sample_rate': audio_data[n+3].strip(),
+                    'bitrate': audio_data[n+4].strip(),
+                    'bit_depth': audio_data[n+5].strip() if n+5 < len(audio_data) else "",
+                    'atmos_why_you_be_like_this': audio_data[2].strip() if n else ""
+                })
+            elif line_lower.startswith("disc title:"):
+                bdinfo['title'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith("disc label:"):
+                bdinfo['label'] = line.split(':', 1)[1].strip()
+            elif line_lower.startswith("subtitle:"):
+                bdinfo['subtitles'].append(line.split(':', 1)[1].split('/')[0].strip())
+        
+        bdinfo['files'] = [
+            {
+                'file': parts[0],
+                'length': parts[2],
+            } for parts in (line.split() for line in files.splitlines() if line.strip())
+            if len(parts) >= 3
+        ]
+        
         return bdinfo
 
 
