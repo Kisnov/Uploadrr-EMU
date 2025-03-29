@@ -7,34 +7,34 @@ class NameGenerator:
     NAMING_TEMPLATES = {
         "MOVIE": {
             "DISC": {
-                "BDMV": "{title} {alt_title} {year} {three_d} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}",
-                "DVD": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}",
-                "HDDVD": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}"
+                "BDMV": "{title} {aka} {year} {3D} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}",
+                "DVD": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}",
+                "HDDVD": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}"
             },
             "REMUX": {
-                "BluRay": "{title} {alt_title} {year} {three_d} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
-                "HDDVD": "{title} {alt_title} {year} {three_d} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
-                "DVD": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {source} REMUX {audio}"
+                "BluRay": "{title} {aka} {year} {3D} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
+                "HDDVD": "{title} {aka} {year} {3D} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
+                "DVD": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {source} REMUX {audio}"
             },
-            "ENCODE": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}",
-            "WEBDL": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}",
-            "WEBRIP": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}",
-            "HDTV": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}"
+            "ENCODE": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}",
+            "WEBDL": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}",
+            "WEBRIP": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}",
+            "HDTV": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}"
         },
         "TV": {
             "DISC": {
-                "BDMV": "{title} {year} {alt_title} {season}{episode} {three_d} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}",
-                "DVD": "{title} {alt_title} {season}{episode} {three_d} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}",
-                "HDDVD": "{title} {alt_title} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}"
+                "BDMV": "{title} {year} {aka} {season}{episode} {3D} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}",
+                "DVD": "{title} {aka} {season}{episode} {3D} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}",
+                "HDDVD": "{title} {aka} {year} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}"
             },
             "REMUX": {
-                "BluRay": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {three_d} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
-                "DVD": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {source} REMUX {audio}"
+                "BluRay": "{title} {year} {aka} {season}{episode} {episode_title} {part} {3D} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}",
+                "DVD": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {source} REMUX {audio}"
             },
-            "ENCODE": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}",
-            "WEBDL": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}",
-            "WEBRIP": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}",
-            "HDTV": "{title} {year} {alt_title} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}"
+            "ENCODE": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}",
+            "WEBDL": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}",
+            "WEBRIP": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}",
+            "HDTV": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}"
         },
         "MUSIC": {
             "ALAC": "{artist} - {album} ({year}) {edition} [{source}{type} {bit_depth}bit]",
@@ -71,7 +71,7 @@ class NameGenerator:
         if processed.get("no_year", False):
             processed["year"] = ""
         if processed.get("no_aka", False):
-            processed["alt_title"] = ""
+            processed["aka"] = ""
         if processed.get("resolution") == "OTHER":
             processed["resolution"] = ""
         if processed["category"] == "TV" and processed.get("search_year", "") != "":
@@ -134,7 +134,7 @@ class NameGenerator:
             name = name_notag + tag
 
             # Use manual name if provided
-            name = meta.get("manual_name", name)
+            name = meta.get("manual_name") if meta.get("manual_name") is not None else name
             clean_name = self.clean_filename(name)
 
             return name_notag, name, clean_name, potential_missing
