@@ -74,6 +74,9 @@ class TMDbHandler:
 
     @cached(ttl=180)
     async def get_tmdb_id(self, filename, search_year, meta, category, untouched_filename="", attempted=0):
+        if meta['is_disc'] == 'BDMV' and meta['discs'][0]['bdinfo'].get('title') not in (None, ''):
+            title = meta['discs'][0]['bdinfo']['title']
+            filename = re.sub(r'Blu-ray™|-\s*|Vol\.\s*\d+', '', title).strip()
         log.debug(f"Searching TMDb: filename={filename}, year={search_year}, category={category}, attempt={attempted}")
         try:
             await self.rate_limit()
@@ -246,7 +249,7 @@ class TMDbHandler:
                 })
 
                 if not meta.get('anime', False):
-                    meta['mal_id'], meta['aka'], meta['anime'] = self.get_anime(data, meta)
+                    meta['mal_id'], meta['aka'], meta['anime'] = await self.get_anime(data, meta)
 
                 # Poster, Logo, and Backdrop
                 poster_path = data.get('poster_path', '')
@@ -292,7 +295,7 @@ class TMDbHandler:
     def _normalize_imdb_id(self, imdb_id):
         return str(int(imdb_id.replace('tt', ''))).zfill(7) if imdb_id and imdb_id != "0" else '0'
 
-    def get_anime(self, response, meta):
+    async def get_anime(self, response, meta):
         tmdb_name = meta['title']
         alt_name = meta.get('aka', "")
         anime = False
