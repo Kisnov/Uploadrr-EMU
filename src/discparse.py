@@ -20,40 +20,64 @@ class DiscParse:
 
     async def get_bdinfo(self, discs: List[Dict], folder_id: str, base_dir: str, meta_discs: List[Dict]) -> Tuple[List[Dict], Dict]:
         save_dir = Path(base_dir) / "tmp" / folder_id
-        save_dir.mkdir(parents=True, exist_ok=True)
         
         for i, disc in enumerate(discs):
-            bdinfo_text = None
             path = Path(disc['path']).resolve()
             summary_file = save_dir / f"BD_SUMMARY_{str(i).zfill(2)}.txt"
             full_file = save_dir / f"BD_FULL_{str(i).zfill(2)}.txt"
+            ext_file = save_dir / "BD_SUMMARY_EXT.txt"
 
-            if summary_file.exists():
+            bdinfo_text = None
+            title_from_xml = None
+
+            # Check existing summary file
+            if summary_file.exists() and summary_file.stat().st_size > 0:
                 bdinfo_text = summary_file
-            elif not meta_discs and full_file.exists():
-                bdinfo_text = full_file
+                summary_content = await asyncio.to_thread(summary_file.read_text, encoding='utf-8')
+                if summary_content.startswith("Title: "):
+                    title_from_xml = summary_content.splitlines()[0].replace("Title: ", "").strip()
+                    log.debug(f"Using existing title from {summary_file}: {title_from_xml}")
             else:
+                # Get title from XML if no valid summary
+                title_from_xml = await self._get_title_from_xml(path)
+                log.debug(f"Extracted title from XML: {title_from_xml}")
+
+            # Use full file if no summary or meta_discs is empty
+            if not bdinfo_text and (not meta_discs and full_file.exists() and full_file.stat().st_size > 0):
+                bdinfo_text = full_file
+
+            # Process BDInfo if no valid existing data
+            if not bdinfo_text:
                 bdinfo_text = await self._process_bdinfo(path, save_dir, base_dir)
-                
+
             if bdinfo_text:
                 try:
                     bd_summary, ext_bd_summary, files_section = await self._extract_bdinfo_sections(bdinfo_text)
                     
-                    async with asyncio.Lock():  # Ensure file writing is thread-safe
-                        await asyncio.to_thread(summary_file.write_text, bd_summary.strip(), encoding='utf-8')
-                        await asyncio.to_thread((save_dir / "BD_SUMMARY_EXT.txt").write_text, ext_bd_summary.strip(), encoding='utf-8')
+                    async with asyncio.Lock():
+                        if not summary_file.exists() or summary_file.stat().st_size == 0:
+                            summary_content = f"Title: {title_from_xml or 'Unknown'}\n{bd_summary.strip()}"
+                            await asyncio.to_thread(summary_file.write_text, summary_content, encoding='utf-8')
+                            log.debug(f"Wrote new {summary_file} with title: {title_from_xml}")
+                        if not ext_file.exists() or ext_file.stat().st_size == 0:
+                            await asyncio.to_thread(ext_file.write_text, ext_bd_summary.strip(), encoding='utf-8')
                     
                     bdinfo = await self.parse_bdinfo(bd_summary, files_section, path)
                     if bdinfo.get('title') is None or not bdinfo.get('title'):
-                        bdinfo['title'] = await self._get_title_from_xml(path)
-                        
+                        bdinfo['title'] = title_from_xml
+                    elif title_from_xml and bdinfo.get('title') != title_from_xml:
+                        log.debug(f"BDInfo title '{bdinfo['title']}' overridden by XML title '{title_from_xml}'")
+                        bdinfo['title'] = title_from_xml
+
                     disc['summary'] = bd_summary.strip()
                     disc['bdinfo'] = bdinfo
                     
-                    if bdinfo_text != full_file:
+                    if bdinfo_text != full_file and bdinfo_text != summary_file:
                         await asyncio.to_thread(shutil.copyfile, bdinfo_text, full_file)
-                        bdinfo_text.unlink()
-                        
+                        if bdinfo_text.exists():
+                            bdinfo_text.unlink()
+                            log.debug(f"Removed temporary file: {bdinfo_text}")
+                            
                 except Exception as e:
                     console.print(f"Error processing BDInfo: {traceback.format_exc()}")
                     await asyncio.sleep(5)
@@ -75,15 +99,42 @@ class DiscParse:
         return None
 
     async def _extract_bdinfo_sections(self, bdinfo_text: Path) -> Tuple[str, str, str]:
-        """Extract relevant sections from BDInfo text."""
+        """Extract relevant sections from BDInfo text asynchronously with fallback."""
         text = await asyncio.to_thread(bdinfo_text.read_text, encoding='utf-8')
-        main_sections = text.split("QUICK SUMMARY:", 2)
-        files_section = main_sections[0].split("FILES:", 2)[1].split("CHAPTERS:", 2)[0].split("-------------")[1]
-        quick_summary = main_sections[1].split("********************", 1)[0].rstrip()
         
-        ext_sections = text.split("[code]", 3)
-        ext_bd_summary = ext_sections[2].split("FILES:", 1)[0].rstrip()
+        # Handle case where file might be just the summary or malformed
+        files_section = ""
+        quick_summary = ""
+        ext_bd_summary = ""
         
+        if "QUICK SUMMARY:" in text:
+            main_sections = text.split("QUICK SUMMARY:", 2)
+            if "FILES:" in main_sections[0]:
+                files_parts = main_sections[0].split("FILES:", 2)
+                if len(files_parts) > 1 and "CHAPTERS:" in files_parts[1]:
+                    files_section = files_parts[1].split("CHAPTERS:", 2)[0].split("-------------")[-1]
+                elif len(files_parts) > 1:
+                    files_section = files_parts[1]
+            if len(main_sections) > 1:
+                quick_summary = main_sections[1].split("********************", 1)[0].rstrip()
+        else:
+            quick_summary = text.split("********************", 1)[0].rstrip()
+
+        if "[code]" in text:
+            ext_sections = text.split("[code]", 3)
+            if len(ext_sections) > 2 and "FILES:" in ext_sections[2]:
+                ext_bd_summary = ext_sections[2].split("FILES:", 1)[0].rstrip()
+            elif len(ext_sections) > 2:
+                ext_bd_summary = ext_sections[2].rstrip()
+        
+        # Fallback if sections are empty
+        if not files_section:
+            files_section = "No files section found"
+        if not quick_summary:
+            quick_summary = "No quick summary found"
+        if not ext_bd_summary:
+            ext_bd_summary = "No extended summary found"
+            
         return quick_summary, ext_bd_summary, files_section
 
     async def remove_system_files(self, path: Path) -> None:
