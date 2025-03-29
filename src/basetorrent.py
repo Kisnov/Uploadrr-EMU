@@ -317,10 +317,10 @@ class TorrentMaker:
             k: v for k, v in base_torrent.metainfo['info'].items()
             if k in valid_info_keys
         }
-        base_torrent.metainfo = {
-            k: v for k, v in base_torrent.metainfo.items()
-            if k in valid_meta_keys
-        }
+        
+        for key in list(base_torrent.metainfo.keys()):
+            if key not in valid_meta_keys:
+                del base_torrent.metainfo[key]
         
         output_path = Path(base_dir) / "tmp" / uuid / "BASE.torrent"
         await asyncio.to_thread(base_torrent.write, str(output_path), overwrite=True)
