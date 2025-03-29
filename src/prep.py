@@ -75,7 +75,7 @@ class Prep():
                                              
     def __init__(self, config: Dict):
         self.config = config
-        self.screenshot_manager = ScreenshotManager(config=self.config, base_dir=self.base_dir)
+        self.screenshot_manager = ScreenshotManager(config=config, base_dir=self.base_dir)
         tmdb.API_KEY = config['DEFAULT']['tmdb_api']
         self._regions = None
         self._distributor_list = None
@@ -207,9 +207,7 @@ class Prep():
                 guess_name = bdinfo['label'].replace('-', ' ')
                 filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
                 meta['search_year'] = guessit(bdinfo['label']).get('year', "")
-            meta['resolution'] = self.mi_resolution(
-                bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0
-            )
+            meta['resolution'] = self.mi_resolution(bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0)
             meta['bdinfo'] = bdinfo
 
         elif meta['is_disc'] == "DVD":
@@ -301,7 +299,7 @@ class Prep():
             if not meta.get('imdb') and meta.get('imdb_id'):
                 meta['imdb'] = f"tt{meta['imdb_id']}"
             if not meta.get('tmdb') and not meta.get('imdb'):
-                meta['category'], meta['tmdb'], meta['imdb'] = self.get_tmdb_imdb_from_mediainfo(
+                meta['category'], meta['tmdb'], meta['imdb'] = await self.TMDb.get_tmdb_imdb_from_mediainfo(
                     mi, meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb']
                 )
             if not meta.get('tmdb') and not meta.get('imdb'):
@@ -341,7 +339,8 @@ class Prep():
             meta['tag'] = ""
         meta['3D'] = self.is_3d(mi, bdinfo)
         meta['source'], meta['type'] = self.get_source(meta['type'], video, meta['path'], meta['is_disc'], meta)
-        meta['service'], meta['service_longname'] = self.get_service(video, meta.get('tag', ''), meta['audio'], meta['filename']) if meta.get('service') in (None, '') else (meta['service'], meta['service_longname'])
+        if meta['type'] in ('WEBDL', 'WEBRIP', 'HDTV'):
+            meta['service'], meta['service_longname'] = self.get_service(video, meta.get('tag', ''), meta['audio'], meta['filename']) if meta.get('service') in (None, '') else (meta['service'], meta['service_longname'])
         meta['uhd'] = self.get_uhd(meta['type'], guessit(meta['path']), meta['resolution'], meta['path'])
         meta['hdr'] = self.get_hdr(mi, bdinfo)
         meta['distributor'] = self.get_distributor(meta['distributor'])
@@ -1148,7 +1147,6 @@ class Prep():
         return res
 
     def mi_resolution(self, res, guess, width, scan, height, actual_height):
-        # Primary resolution mapping
         RESOLUTION_MAP = {
             "15360x8640p": "8640p",
             "7680x4320p": "4320p",
@@ -1189,15 +1187,29 @@ class Prep():
         if resolution:
             return resolution
 
+        if res in RESOLUTION_MAP.values():
+            return res
+
         try:
-            return guess['screen_size']
+            resolution = guess['screen_size']
+            if resolution in RESOLUTION_MAP.values():
+                return resolution
         except (KeyError, TypeError):
+            pass
+
+        try:
+            width = int(width)
+        except (ValueError, TypeError):
+            width = None
+
+        if width:
             width_mapping = WIDTH_FALLBACK.get(width, "OTHER")
             if isinstance(width_mapping, dict):
                 return width_mapping.get(scan, "OTHER")
             return width_mapping
 
-           
+        return "OTHER"
+     
     def is_sd(self, resolution):
         if resolution in ("480i", "480p", "576i", "576p", "540p"):
             sd = 1
@@ -1804,16 +1816,16 @@ class Prep():
         else:
             # Anime processing
             parsed = anitopy.parse(Path(video).name)
-            romaji, mal_id, _, season_year, anilist_episodes = self.get_romaji(parsed['anime_title'], meta.get('mal'))
+            romaji, mal_id, _, season_year, anilist_episodes = await self.TMDb.get_romaji(parsed['anime_title'], meta.get('mal'))
             
             if mal_id:
                 meta['mal_id'] = mal_id
                 
             if not meta.get('tmdb_manual'):
                 year = parsed.get('anime_year', str(season_year))
-                meta = await self.get_tmdb_id(parsed['anime_title'], year, meta, 'TV')
+                meta = await self.TMDb.get_tmdb_id(parsed['anime_title'], year, meta, 'TV')
             
-            meta = await self.tmdb_other_meta(meta)
+            meta = await self.TMDb.tmdb_other_meta(meta)
             if meta['category'] != 'TV':
                 return meta
                 
@@ -1900,8 +1912,7 @@ class Prep():
     def get_service(self, video, tag, audio, guess_title):
         service = guessit(video).get('streaming_service', "")
         video_name = re.sub("[.()]", " ", video.replace(tag, '').replace(guess_title, ''))
-        if "DTS-HD MA" in audio:
-            video_name = video_name.replace("DTS-HD.MA.", "").replace("DTS-HD MA ", "")
+        video_name = video_name.replace("DTS-HD.MA.", "").replace("DTS-HD MA ", "")
         
         # Iterate over service codes and their alias lists
         for service_code, aliases in self.services.items():
