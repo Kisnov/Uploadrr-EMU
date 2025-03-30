@@ -1,12 +1,28 @@
+from argparse import ArgumentParser, ArgumentTypeError
 from typing import Dict, List, Optional, Tuple, Any
 import argparse
 import urllib.parse
 import os
 import datetime
 import re
-from argparse import ArgumentParser
 
 from src.console import console
+
+
+class ChoiceValidator:
+    """Case-insensitive argument validator for specific choices."""
+    def __init__(self, valid_choices: List[str]):
+        self.valid_choices = {choice.lower(): choice for choice in valid_choices}
+        self.original_choices = valid_choices  # For error message 
+
+    def __call__(self, value: str) -> str:
+        lower_value = value.lower()
+        if lower_value not in self.valid_choices:
+            raise ArgumentTypeError(
+                f"invalid choice: '{value}' (choose from {', '.join(self.original_choices)})"
+            )
+        return value 
+
 
 class Args:
     uuid_pattern = r'^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'
@@ -32,27 +48,33 @@ class Args:
         parser.add_argument('-s', '--screens', type=int, required=False, help="Number of screenshots", 
                             default=int(self.config.get('SCREENS', {}).get('screens', 3)))
 
-        # Common arguments with choices
+        # Validators for choices
+        validators = {
+            'category': ChoiceValidator(['movie', 'tv', 'fanres']),
+            'type': ChoiceValidator(['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv']),
+            'manual_source': ChoiceValidator(['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV']),
+            'resolution': ChoiceValidator(['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other']),
+            'imghost': ChoiceValidator(['imgbb', 'ptpimg', 'imgbox', 'pixhost', 'lensdump', 'ptscreens', 'oeimg']),
+            'torrent_creation': ChoiceValidator(['torf', 'torrenttools', 'mktorrent'])
+        }
+
+        # Define Choices
         arg_choices = {
-            'category': {'flags': ('-c', '--category'), 'nargs': '*', 'choices': ['movie', 'tv', 'fanres'],
+            'category': {'flags': ('-c', '--category'), 'type': validators['category'],
                          'help': "Category [MOVIE, TV, FANRES]"},
-            'type': {'flags': ('-t', '--type'), 'nargs': '*',
-                     'choices': ['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv'],
+            'type': {'flags': ('-t', '--type'), 'type': validators['type'],
                      'help': "Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]"},
-            'manual_source': {'flags': ('--source',), 'nargs': '*',
-                              'choices': ['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV'],
+            'manual_source': {'flags': ('--source',), 'type': validators['manual_source'],
                               'help': "Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]"},
-            'resolution': {'flags': ('-res', '--resolution'), 'nargs': '*',
-                           'choices': ['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other'],
+            'resolution': {'flags': ('-res', '--resolution'), 'type': validators['resolution'],
                            'help': "Resolution [2160p, 1080p, etc.]"},
-            'imghost': {'flags': ('-ih', '--imghost'), 'nargs': '*',
-                        'choices': ['imgbb', 'ptpimg', 'imgbox', 'pixhost', 'lensdump', 'ptscreens', 'oeimg'],
+            'imghost': {'flags': ('-ih', '--imghost'), 'type': validators['imghost'],
                         'help': "Image host", 'default': self.config['SCREENS'].get('img_host_1', 'imgbox')},
-            'piece_size_max': {'flags': ('-ps', '--piece-size-max'), 'nargs': '*', 'type': int,
+            'piece_size_max': {'flags': ('-ps', '--piece-size-max'), 'type': int,
                                'choices': [1, 2, 4, 8, 16], 'help': "Maximum piece size in MiB"},
-            'torrent_creation': {'flags': ('-tc', '--torrent-creation'), 'nargs': '*',
-                                 'choices': ['torf', 'torrenttools', 'mktorrent'],
-                                 'help': "Tool to create base .torrent"}
+            'torrent_creation': {'flags': ('-tc', '--torrent-creation'), 'type': validators['torrent_creation'],
+                                 'help': "Tool to create base .torrent",
+                                 'default': self.config['DEFAULT'].get('torrent_creation', 'torf')}
         }
 
         for name, spec in arg_choices.items():
@@ -98,7 +120,7 @@ class Args:
             ('--no-season', 'no_season', "Remove Season from title"),  
             ('--no-tag', 'no_tag', "Remove Group Tag from title"),            
             ('--no-year', 'no_year', "Remove Year from title"),
-            ('-pr --personal-release', 'personal_release', "Personal Release"),
+            ('-pr --personal-release', 'personalrelease', "Personal Release"),
             ('-random --random', 'random', "Randomize queue order"),
             ('-reconfig --reconfig', 'reconfig', "Auto update config"),
             ('-rh --rehash', 'rehash', "Force hash .torrent"),
@@ -146,16 +168,7 @@ class Args:
         return parser.parse_known_args(args)
 
     def _process_arguments(self, args: Dict[str, Any], before_args: List[str], meta: Dict[str, Any]) -> Dict[str, Any]:
-        """Process parsed arguments and update the meta dictionary.
-
-        Args:
-            args: Dictionary of parsed arguments.
-            before_args: List of unparsed arguments.
-            meta: Dictionary to store processed values.
-
-        Returns:
-            Updated meta dictionary.
-        """
+        """Process parsed arguments and update the meta dictionary."""
         # Handle full-auto mode
         if args.get('full_auto', False):
             args['unattended'] = args['auto_desc'] = True
@@ -171,7 +184,13 @@ class Args:
 
         # Process each argument
         value_processors = {
-            'type': lambda v: v.upper().replace('-', ''),
+            'category': lambda v: v.upper() if v else None,
+            'type': lambda v: v.upper().replace('-', '') if v else None,
+            'manual_source': lambda v: "BluRay" if v.lower() == 'bluray' else "Blu-ray" if v.lower() == 'blu-ray' else v.upper() if v else None,
+            'resolution': lambda v: v.lower() if v else None,
+            'imghost': lambda v: v.lower() if v else None,
+            'piece_size_max': lambda v: v,
+            'torrent_creation': lambda v: v.lower() if v else None,
             'tag': lambda v: f"-{v}",
             'screens': int,
             'season': lambda v: ('manual_season', v),
