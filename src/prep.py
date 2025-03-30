@@ -1,68 +1,39 @@
-# -*- coding: utf-8 -*- 
+import asyncio
+import json
+import itertools
+import ntpath
+import os
+import re
+import shutil
 import sys
+import time
+import traceback
+import urllib
+import urllib.parse
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import aiofiles
+import anitopy
+import requests
+import tmdbsimple as tmdb
+from guessit import guessit
+from pymediainfo import MediaInfo
+from tinytag import TinyTag
+
 from src.args import Args
 from src.console import console, log
-from src.trackers.PTP import PTP
-from src.trackers.BLU import BLU
-from src.trackers.HDB import HDB
-from src.trackers.COMMON import COMMON
-from src.musicbrainz import MusicBrainzAPI
-from src.discparse import DiscParse
+from src.databases import IMDbHandler, TMDbHandler, is_scene, search_tvmaze
 from src.discogs import DiscogsAPI
+from src.discparse import DiscParse
+from src.musicbrainz import MusicBrainzAPI
 from src.screenshots import ScreenshotManager
-from src.databases import TMDbHandler, IMDbHandler, search_tvmaze, is_scene
-
-try:
-    import aiofiles
-    import anitopy
-    import asyncio
-    import base64
-    import ffmpeg
-    import glob
-    import itertools
-    import json
-    import langcodes
-    import logging
-    import math
-    import multiprocessing
-    import nest_asyncio
-    import ntpath
-    import os
-    import platform
-    import pyimgbox
-    import random
-    import re
-    import requests
-    import shutil
-    import subprocess
-    import time
-    import traceback
-    import tmdbsimple as tmdb
-    import urllib
-    import urllib.parse
-    from datetime import datetime
-    from difflib import SequenceMatcher
-    from guessit import guessit
-    from imdb import Cinemagoer
-    from pathlib import Path
-    from pymediainfo import MediaInfo
-    from rich.prompt import Prompt
-    from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn
-    from rich.traceback import install, Traceback
-    from requests.exceptions import HTTPError
-    from torf import Torrent
-    from tinytag import TinyTag
-    from typing import Dict, Any, Optional
+from src.trackers.BLU import BLU
+from src.trackers.COMMON import COMMON
+from src.trackers.HDB import HDB
+from src.trackers.PTP import PTP
 
 
-except ModuleNotFoundError:
-    console.print(traceback.print_exc())
-    console.print('[bold red]Missing Module Found. Please reinstall required dependencies.')
-    console.print('[yellow]pip3 install --user -U -r requirements.txt')
-    exit()
-except KeyboardInterrupt:
-    exit()
-install ()
 class Prep():
     """
     Prepare for upload:
@@ -82,7 +53,6 @@ class Prep():
         self._services = None
         self.TMDb = TMDbHandler(config)
         self.IMDb = IMDbHandler()
-        self.tasks = []
 
     async def gather_prep(self, meta, mode):
         #Initialize gather
@@ -200,7 +170,9 @@ class Prep():
         if meta['is_disc'] == "BDMV":
             video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             try:
-                guess_name = bdinfo['title'].replace('-', ' ')
+                title = meta['discs'][0]['bdinfo']['title']
+                guess_name = re.sub(r'Blu-ray™|-\s*|Vol\.\s*\d+', '', title).strip()
+                log.debug(f"guess_name: {guess_name}")
                 filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
                 meta['search_year'] = guessit(bdinfo['title']).get('year', "")
             except Exception:
@@ -281,9 +253,8 @@ class Prep():
         meta['mediainfo'] = mi
         meta['filename'] = filename.split(' AKA ')[0] if " AKA " in filename.replace('.', ' ') else filename
 
-        mi = meta.get('mediainfo')
-        bdinfo = meta.get('bdinfo', {})
-        video = meta.get('video')
+        bdinfo = meta['bdinfo']
+        video = meta['video']
         filename = meta['filename']
 
         # Tracker API integrations
@@ -299,7 +270,7 @@ class Prep():
             if not meta.get('imdb') and meta.get('imdb_id'):
                 meta['imdb'] = f"tt{meta['imdb_id']}"
             if not meta.get('tmdb') and not meta.get('imdb'):
-                meta['category'], meta['tmdb'], meta['imdb'] = await self.TMDb.get_tmdb_imdb_from_mediainfo(
+                meta['category'], meta['tmdb'], meta['imdb'] = self.get_tmdb_imdb_from_mediainfo(
                     mi, meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb']
                 )
             if not meta.get('tmdb') and not meta.get('imdb'):
@@ -506,7 +477,7 @@ class Prep():
                     }
                     discs.append(disc)
         if is_disc == "BDMV":
-            if meta.get('edit', False) == False:
+            if meta.get('edit', False) is False:
                 discs, bdinfo = await parse.get_bdinfo(discs, meta['uuid'], meta['base_dir'], meta.get('discs', []))
             else:
                 discs, bdinfo = await parse.get_bdinfo(meta['discs'], meta['uuid'], meta['base_dir'], meta['discs'])
@@ -1089,7 +1060,7 @@ class Prep():
                 clean_path = media_info.replace(str(tmp_dir), folder_id) if dvd_patch else media_info.replace(media_path, basename)
                 async with aiofiles.open(tmp_dir / "MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
                     await export.write(clean_path)
-                console.print("[bold green]MediaInfo text Exported.]") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
+                console.print("[bold green]MediaInfo text Exported.") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
 
             # JSON output
             if not (tmp_dir / "MediaInfo.json").exists() or dvd_patch: #TODO alter LDU name logic for DVD's. MediaInfo.txt should suffice
@@ -1236,20 +1207,17 @@ class Prep():
     def get_type(self, video, scene, is_disc):
         filename = os.path.basename(video).lower()
         if "remux" in filename:
-            type = "REMUX"
-        elif any(word in filename for word in [" web ", ".web.", "web-dl"]):
-            type = "WEBDL"
+            return "REMUX"
+        elif any(word in filename for word in [" web ", ".web.", "web-dl", "webdl"]):
+            return "WEBDL"
         elif "webrip" in filename:
-            type = "WEBRIP"
-        # elif scene == True:
-            # type = "ENCODE"
+            return "WEBRIP"
         elif "hdtv" in filename:
-            type = "HDTV"
+            return "HDTV"
         elif is_disc is not None:
-            type = "DISC"
+            return "DISC"
         else:
-            type = "ENCODE"
-        return type
+            return "ENCODE"
 
     def get_cat(self, video):
         category = guessit(video.replace('1.0', ''))['type']
@@ -1301,13 +1269,13 @@ class Prep():
             extra = dual = ""
             has_commentary = False
             #Get formats
-            if bdinfo != None: #Disks
+            if bdinfo is not None: #Disks
                 format_settings = ""
                 format = bdinfo['audio'][0]['codec']
                 commercial = format
                 try:
                     additional = bdinfo['audio'][0]['atmos_why_you_be_like_this']
-                except:
+                except KeyError:
                     additional = ""
                 #Channels
                 chan = bdinfo['audio'][0]['channels']
@@ -1330,32 +1298,25 @@ class Prep():
                 try:
                     additional = mi['media']['track'][track_num]['Format_AdditionalFeatures']
                     # format = f"{format} {additional}"
-                except:
+                except KeyError:
                     additional = ""
                 try:
                     format_settings = mi['media']['track'][track_num]['Format_Settings']
                     if format_settings in ['Explicit']:
                         format_settings = ""
-                except:
+                except KeyError:
                     format_settings = ""
-                #Channels
+                # Channels
                 channels = mi['media']['track'][track_num].get('Channels_Original', mi['media']['track'][track_num]['Channels'])
                 if not str(channels).isnumeric():
                     channels = mi['media']['track'][track_num]['Channels']
-                try:
-                    channel_layout = mi['media']['track'][track_num]['ChannelLayout']
-                except:
-                    try:
-                        channel_layout = mi['media']['track'][track_num]['ChannelLayout_Original']
-                    except:
-                        channel_layout = ""
+
+                channel_layout = mi['media']['track'][track_num].get('ChannelLayout', mi['media']['track'][track_num].get('ChannelLayout_Original', ''))
+
                 if "LFE" in channel_layout:
                     chan = f"{int(channels) - 1}.1"
-                elif channel_layout == "":
-                    if int(channels) <= 2:
-                        chan = f"{int(channels)}.0"
-                    else:
-                        chan = f"{int(channels) - 1}.1"
+                elif not channel_layout:
+                    chan = f"{int(channels)}.0" if int(channels) <= 2 else f"{int(channels) - 1}.1"
                 else:
                     chan = f"{channels}.0"
                 
@@ -1486,16 +1447,13 @@ class Prep():
         if bdinfo is not None:
             if bdinfo['video'][0]['3d'] != "":
                 return "3D"
-            else:
-                return ""
-        else:
             return ""
 
     def get_tag(self, video, meta):
         try:
             tag = guessit(video)['release_group']
             tag = f"-{tag}"
-        except:
+        except Exception:
             tag = ""
         
         # Adjust to only keep the last part after the last dash
@@ -1776,7 +1734,7 @@ class Prep():
 
     async def get_season_episode(self, video: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         filelist = meta['filelist']
-        meta.update({'tv_pack': 0, 'episode_title_storage': ''})
+        meta.update({'tv_pack': 0, 'episode_title_storage': '', 'episode_title' : ''})
         
         if not meta.get('anime', False):
             # Regular TV processing
