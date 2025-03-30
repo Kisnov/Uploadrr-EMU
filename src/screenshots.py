@@ -1,6 +1,6 @@
 import asyncio
-import base64
 import glob
+import importlib
 import json
 import os
 import random
@@ -9,16 +9,15 @@ import signal
 from functools import partial
 from concurrent.futures import ProcessPoolExecutor
 
-import aiofiles
 import ffmpeg
 import httpx
 import oxipng
 import psutil
-import pyimgbox
 from rich.live import Live
 from rich.spinner import Spinner
 
-from src.console import console, log
+from .console import console, log
+from .imghosts.base import BaseImageHost  # noqa: F401
 
 
 class ScreenshotManager:
@@ -470,8 +469,11 @@ class ScreenshotGenerator:
         valid_images = [img for img in images if img and os.path.exists(img)]
         if not valid_images or self._interrupted:
             return images
+        threads = self.config['DEFAULT'].get('threads', 4)
+        if threads == 'max':
+            threads = os.cpu_count()
 
-        num_workers = min(self.config['DEFAULT'].get('threads', 4), len(valid_images))
+        num_workers = min(threads, len(valid_images))
         if debug:
             log.debug(f"Optimizing {len(valid_images)} images with {num_workers} workers")
 
@@ -550,6 +552,15 @@ class ScreenshotUploadrr:
         if self.client and not self.client.is_closed:
             await self.client.aclose()
 
+    def _load_host(self, host_name):
+        try:
+            module = importlib.import_module(f"src.imghosts.{host_name}")
+            host_class = getattr(module, host_name.upper())
+            return host_class(self.config)
+        except (ImportError, AttributeError) as e:
+            log.warning(f"Failed to load host '{host_name}': {str(e)}")
+            return None
+
     async def upload_screenshots(self, meta, screens, img_path=None):
         img_host = meta.get('imghost')
         max_retries = 3
@@ -569,7 +580,6 @@ class ScreenshotUploadrr:
             if len(existing) >= screens:
                 log.debug(f"All {len(existing)} screenshots already uploaded")
                 return existing
-
             to_upload = [
                 img for img in images
                 if img not in [e.get('local_file') for e in existing]
@@ -584,12 +594,14 @@ class ScreenshotUploadrr:
         log.debug(f"Starting upload of {len(to_upload)} screenshots")
         async with self:
             with Live(Spinner("dots", text="Uploading screenshots..."), transient=True):
+                # Try preferred host
                 if img_host:
                     log.debug(f"Attempting preferred host: {img_host}")
                     uploaded_images = await self._upload_with_retries(img_host, to_upload, max_retries)
                     if uploaded_images:
                         log.debug(f"Uploaded {len(uploaded_images)} images to '{img_host}'")
 
+                # Fallback to configured hosts
                 if not uploaded_images and not self._interrupted:
                     i = 1
                     while f'img_host_{i}' in self.config['SCREENS'] and not uploaded_images:
@@ -601,6 +613,11 @@ class ScreenshotUploadrr:
                                 log.debug(f"Uploaded {len(uploaded_images)} images to '{next_host}'")
                         i += 1
 
+                # Final fallback to imgbox
+                if not uploaded_images and not self._interrupted:
+                    log.debug("Falling back to imgbox")
+                    uploaded_images = await self._upload_with_retries("imgbox", to_upload, max_retries)
+
                 if not uploaded_images and not self._interrupted:
                     log.debug("All host attempts failed, no screenshots uploaded")
 
@@ -609,13 +626,17 @@ class ScreenshotUploadrr:
                 log.debug(f"Completed upload: {len(uploaded_images)} new screenshots")
                 return updated_list
 
-    async def _upload_with_retries(self, host, images, max_retries):
+    async def _upload_with_retries(self, host_name, images, max_retries):
+        host = self._load_host(host_name)
+        if not host:
+            return []
+
         for attempt in range(1, max_retries + 1):
             if self._interrupted:
-                log.debug(f"Interrupted during attempt {attempt} for '{host}'")
+                log.debug(f"Interrupted during attempt {attempt} for '{host_name}'")
                 return []
 
-            log.debug(f"Attempt {attempt}/{max_retries} for '{host}' with {len(images)} images")
+            log.debug(f"Attempt {attempt}/{max_retries} for '{host_name}' with {len(images)} images")
             uploaded_images = await self._upload_to_host(host, images)
             
             if uploaded_images:
@@ -625,199 +646,31 @@ class ScreenshotUploadrr:
                     log.debug(f"Full success: {len(uploaded_images)} images uploaded")
                     return uploaded_images
             else:
-                log.debug(f"All uploads failed for '{host}' on attempt {attempt}")
+                log.debug(f"All uploads failed for '{host_name}' on attempt {attempt}")
                 if attempt == 1:
-                    log.debug(f"Systemic failure assumed for '{host}', moving to next host")
+                    log.debug(f"Systemic failure assumed for '{host_name}', moving to next host")
                     return []
-                log.debug(f"Retrying '{host}'")
+                log.debug(f"Retrying '{host_name}'")
 
         return uploaded_images
 
     async def _upload_to_host(self, host, images):
-        if host == "imgbox":
-            return await self._upload_imgbox(images)
-        else:
-            tasks = [self._upload_image(img, host) for img in images]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            uploaded_images = []
-            for result, img in zip(results, images):
-                if self._interrupted:
-                    break
-                if isinstance(result, dict):
-                    uploaded_images.append({
-                        'img_url': result['img_url'],
-                        'raw_url': result['raw_url'],
-                        'web_url': result['web_url'],
-                        'local_file': img
-                    })
-                elif isinstance(result, Exception):
-                    log.debug(f"Upload failed for {img} to {host}: {str(result)}")
-            return uploaded_images
-
-    async def _upload_image(self, image, host):
-        if self._interrupted:
-            return None
-        try:
-            async with aiofiles.open(image, 'rb') as f:
-                data = await f.read()
-
-            if host == "imgbb":
-                api_key = self.config['SCREENS'].get('imgbb_api')
-                if not api_key:
-                    raise KeyError("API key 'imgbb_api' not found in config['SCREENS']")
-                files = {
-                    'key': (None, api_key, 'text/plain'),
-                    'image': (None, base64.b64encode(data).decode('utf8'), 'text/plain')
-                }
-                resp = await self.client.post("https://api.imgbb.com/1/upload", files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"imgbb upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if result.get('success'):
-                    return {
-                        'img_url': result['data'].get('medium', result['data']['image'])['url'],
-                        'raw_url': result['data']['image']['url'],
-                        'web_url': result['data']['url_viewer']
-                    }
-                raise ValueError(f"imgbb upload failed: {result.get('error', 'Unknown error')}")
-
-            elif host == "oeimg":
-                api_key = self.config['SCREENS'].get('oeimg_api')
-                if not api_key:
-                    raise KeyError("API key 'oeimg_api' not found in config['SCREENS']")
-                files = {
-                    'key': (None, api_key, 'text/plain'),
-                    'image': (None, base64.b64encode(data).decode('utf8'), 'text/plain')
-                }
-                resp = await self.client.post("https://imgoe.download/api/1/upload", files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"oeimg upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if result.get('status_code') == 200:
-                    return {
-                        'img_url': result['data'].get('medium', result['data']['image'])['url'],
-                        'raw_url': result['data']['image']['url'],
-                        'web_url': result['data']['url_viewer']
-                    }
-                raise ValueError(f"oeimg upload failed: {result.get('error', 'Unknown error')}")
-
-            elif host == "ptscreens":
-                api_key = self.config['SCREENS'].get('ptscreens_api')
-                if not api_key:
-                    raise KeyError("API key 'ptscreens_api' not found in config['SCREENS']")
-                files = {
-                    'key': (None, api_key, 'text/plain'),
-                    'image': (None, base64.b64encode(data).decode('utf8'), 'text/plain')
-                }
-                resp = await self.client.post("https://ptscreens.com/api/1/upload", files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"ptscreens upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if result.get('status_code') == 200:
-                    return {
-                        'img_url': result['data'].get('medium', result['data']['image'])['url'],
-                        'raw_url': result['data']['image']['url'],
-                        'web_url': result['data']['url_viewer']
-                    }
-                raise ValueError(f"ptscreens upload failed: {result.get('error', 'Unknown error')}")
-
-            elif host == "pixhost":
-                files = {
-                    'content_type': (None, '0', 'text/plain'),
-                    'max_th_size': (None, '350', 'text/plain'),
-                    'img': (image, data, 'image/png')
-                }
-                resp = await self.client.post("https://api.pixhost.to/images", files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"pixhost upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if 'th_url' in result:
-                    return {
-                        'img_url': result['th_url'],
-                        'raw_url': result['th_url'].replace('https://t', 'https://img').replace('/thumbs/', '/images/'),
-                        'web_url': result['show_url']
-                    }
-                raise ValueError(f"pixhost upload failed: {result.get('error', 'Unknown error')}")
-
-            elif host == "ptpimg":
-                api_key = self.config['SCREENS'].get('ptpimg_api')
-                if not api_key:
-                    raise KeyError("API key 'ptpimg_api' not found in config['SCREENS']")
-                headers = {'referer': 'https://ptpimg.me/index.php'}
-                files = {
-                    'api_key': (None, api_key, 'text/plain'),
-                    'file-upload[0]': (image, data, 'image/png')
-                }
-                resp = await self.client.post("https://ptpimg.me/upload.php", headers=headers, files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"ptpimg upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if not result or 'code' not in result[0]:
-                    raise ValueError(f"ptpimg upload failed: {result.get('error', 'Unknown error')}")
-                ptpimg_code = result[0]['code']
-                ptpimg_ext = result[0]['ext']
-                img_url = f"https://ptpimg.me/{ptpimg_code}.{ptpimg_ext}"
-                return {
-                    'img_url': img_url,
-                    'raw_url': img_url,
-                    'web_url': img_url
-                }
-
-            elif host == "lensdump":
-                api_key = self.config['SCREENS'].get('lensdump_api')
-                if not api_key:
-                    raise KeyError("API key 'lensdump_api' not found in config['SCREENS']")
-                headers = {'X-API-Key': api_key}
-                files = {
-                    'image': (None, base64.b64encode(data).decode('utf8'), 'text/plain')
-                }
-                resp = await self.client.post("https://lensdump.com/api/1/upload", headers=headers, files=files)
-                if resp.status_code != 200:
-                    raise ValueError(f"lensdump upload failed: {resp.status_code} - {resp.text[:200]}...")
-                result = resp.json()
-                if result.get('status_code') == 200:
-                    return {
-                        'img_url': result['data'].get('medium', result['data']['image'])['url'],
-                        'raw_url': result['data']['image']['url'],
-                        'web_url': result['data']['url_viewer']
-                    }
-                raise ValueError(f"lensdump upload failed: {result.get('error', 'Unknown error')}")
-
-            else:
-                log.warning(f"Unsupported host: {host}")
-                return None
-
-        except KeyError as e:
-            log.error(f"Configuration error for {host}: {str(e)}")
-            return e
-        except asyncio.CancelledError:
-            log.debug(f"Upload task for {image} cancelled")
-            raise
-        except Exception as e:
-            log.error(f"Failed to upload {image} to {host}: {str(e)}")
-            return e
-
-    async def _upload_imgbox(self, images):
-        if self._interrupted:
-            return []
-        try:
-            uploaded_images = []
-            async with pyimgbox.Gallery(thumb_width=350, square_thumbs=False) as gallery:
-                async for submission in gallery.add(images):
-                    if not submission['success']:
-                        log.debug(f"Imgbox failed for {submission['filename']}: {submission['error']}")
-                        continue
-                    uploaded_images.append({
-                        'img_url': submission['thumbnail_url'],
-                        'raw_url': submission['image_url'],
-                        'web_url': submission['web_url'],
-                        'local_file': submission['filename']
-                    })
-            return uploaded_images
-        except Exception as e:
-            log.error(f"Imgbox upload failed: {str(e)}")
-            return []
-
+        tasks = [host.upload(self.client, img) for img in images]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        uploaded_images = []
+        for result, img in zip(results, images):
+            if self._interrupted:
+                break
+            if isinstance(result, dict):
+                uploaded_images.append({
+                    'img_url': result['img_url'],
+                    'raw_url': result['raw_url'],
+                    'web_url': result['web_url'],
+                    'local_file': img
+                })
+            elif isinstance(result, Exception):
+                log.debug(f"Upload failed for {img}: {str(result)}")
+        return uploaded_images
 
     async def upload_proof_or_cover(self, meta, image_key, file_key, file_exts=('.jpg', '.jpeg')):
         if image_key in meta and meta[image_key]:
