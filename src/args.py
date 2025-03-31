@@ -10,7 +10,7 @@ from src.console import console
 
 
 class ChoiceValidator:
-    """Case-insensitive argument validator for specific choices."""
+    """Argument validator for specific choices. (case-insensitive)"""
     def __init__(self, valid_choices: List[str]):
         self.valid_choices = {choice.lower(): choice for choice in valid_choices}
         self.original_choices = valid_choices  # For error message 
@@ -50,25 +50,24 @@ class Args:
 
         # Validators for choices
         validators = {
-            'category': ChoiceValidator(['movie', 'tv', 'fanres']),
+            'category': ChoiceValidator(['movie', 'tv', 'fanres', 'sports', 'music']),
             'type': ChoiceValidator(['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv']),
             'manual_source': ChoiceValidator(['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV']),
             'resolution': ChoiceValidator(['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other']),
-            'imghost': ChoiceValidator(['imgbb', 'ptpimg', 'imgbox', 'pixhost', 'lensdump', 'ptscreens', 'oeimg']),
             'torrent_creation': ChoiceValidator(['torf', 'torrenttools', 'mktorrent'])
         }
 
         # Define Choices
         arg_choices = {
             'category': {'flags': ('-c', '--category'), 'type': validators['category'],
-                         'help': "Category [MOVIE, TV, FANRES]"},
+                         'help': "Category [MOVIE, TV, FANRES, SPORTS, MUSIC]"},
             'type': {'flags': ('-t', '--type'), 'type': validators['type'],
                      'help': "Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]"},
             'manual_source': {'flags': ('--source',), 'type': validators['manual_source'],
                               'help': "Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]"},
             'resolution': {'flags': ('-res', '--resolution'), 'type': validators['resolution'],
                            'help': "Resolution [2160p, 1080p, etc.]"},
-            'imghost': {'flags': ('-ih', '--imghost'), 'type': validators['imghost'],
+            'imghost': {'flags': ('-ih', '--imghost'), 'type': str,
                         'help': "Image host", 'default': self.config['SCREENS'].get('img_host_1', 'imgbox')},
             'piece_size_max': {'flags': ('-ps', '--piece-size-max'), 'type': int,
                                'choices': [1, 2, 4, 8, 16], 'help': "Maximum piece size in MiB"},
