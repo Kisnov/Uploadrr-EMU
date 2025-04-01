@@ -15,11 +15,12 @@ import requests
 import tmdbsimple as tmdb
 from guessit import guessit
 from pymediainfo import MediaInfo
+from rich.traceback import install
 from tinytag import TinyTag
 
 from src.args import Args
 from src.console import console, log
-from src.databases import IMDbHandler, TMDbHandler, is_scene, search_tvmaze
+from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze
 from src.discogs import DiscogsAPI
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
@@ -30,6 +31,7 @@ from src.trackers.COMMON import COMMON
 from src.trackers.HDB import HDB
 from src.trackers.PTP import PTP
 
+install()
 
 class Prep():
     """
@@ -44,7 +46,6 @@ class Prep():
     def __init__(self, config: Dict):
         self.config = config
         self.screenshot_manager = ScreenshotManager(config=config, base_dir=self.base_dir)
-        tmdb.API_KEY = config['DEFAULT']['tmdb_api']
         self._regions = None
         self._distributor_list = None
         self._services = None
@@ -80,6 +81,7 @@ class Prep():
             meta = await self._process_single_file(meta, mode)
 
         if meta['is_music']:
+            console.print('[red]Processing as music')
             meta = await self.gen_desc(meta)
             return meta
 
@@ -91,24 +93,30 @@ class Prep():
         return meta
 
     async def _process_directory(self, meta, mode):
-        """Process directory contents recursively."""
+        """Process directory contents recursively with video priority."""
         def collect_files_recursive(directory, meta):
-            return {
+            # Collect all files recursively, sorted alphabetically
+            files = {
                 f"{path.parent.name}/{path.name}" if path.parent.name != meta['uuid'] else f"BASE/{path.name}": str(path)
-                for path in Path(directory).rglob('*')
+                for path in sorted(Path(directory).rglob('*'), key=str)
                 if path.is_file() and not path.name.startswith('._')
             }
+            return files
 
         try:
             all_files = await asyncio.to_thread(collect_files_recursive, meta['path'], meta)
             base_name = os.path.basename(meta['path'])
             nfo_candidates = []
+            video_files = []
+            music_files = []
 
+            # Categorize files
             for file_name, full_path in all_files.items():
                 ext = os.path.splitext(file_name)[1].lower()
-                if ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
-                    meta['filelist'][file_name] = full_path
-                    meta['is_music'] = True
+                if ext in ['.mkv', '.mp4', '.ts']:
+                    video_files.append((file_name, full_path))
+                elif ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
+                    music_files.append((file_name, full_path))
                 elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
                     meta['user_images'].append(full_path)
                 elif ext == '.nfo':
@@ -116,6 +124,22 @@ class Prep():
                 elif ext == '.log':
                     meta['log_files'].append(full_path)
 
+            # Prioritize video if in base directory or dominant
+            base_video = any(f.startswith('BASE/') for f, _ in video_files)
+            video_count = len(video_files)
+            music_count = len(music_files)
+            log.debug(f"Found {video_count} video files, {music_count} music files")
+
+            if video_count > 0 and (base_video or video_count > music_count * 2 or not meta.get('is_music')):
+                meta['is_video'] = True
+                meta['filelist'] = {f: p for f, p in video_files}
+            elif music_count > 0:
+                meta['is_music'] = True
+                meta['filelist'] = {f: p for f, p in music_files}
+                console.print('[red]Processing as music')
+                await self.get_music(meta, mode)
+
+            # Handle NFO files
             if nfo_candidates:
                 for file_name, full_path in nfo_candidates:
                     if file_name == f"{base_name}.nfo":
@@ -124,27 +148,16 @@ class Prep():
                 else:
                     meta['nfo_file'] = nfo_candidates[0][1]
 
-            if not meta['is_music']:
-                video_extensions = ['.mkv', '.mp4', '.ts']
-                meta['is_video'] = any(full_path.lower().endswith(tuple(video_extensions)) for full_path in all_files.values())
-
-            if meta['is_music']:
-                console.print('[red]Processing as music')
-                await self.get_music(meta, mode)
-
         except Exception as e:
             log.error(f"Error processing directory: {e}")
         return meta
 
     async def _process_single_file(self, meta, mode):
-        """Process a single file."""
+        """Process a single file with video priority."""
         file_extension = os.path.splitext(meta['path'])[1].lower()
-        if file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
-            meta['is_music'] = True
-            console.print('[red]Processing as music')
-            await self.process_single_music_file(meta, mode)
-        elif file_extension in ['.mkv', '.mp4', '.ts']:
+        if file_extension in ['.mkv', '.mp4', '.ts']:
             meta['is_video'] = True
+            meta['filelist'] = {"BASE/" + os.path.basename(meta['path']): meta['path']}
             base_name = os.path.splitext(meta['path'])[0]
             match_nfo = f"{base_name}.nfo"
             if await asyncio.to_thread(os.path.exists, match_nfo):
@@ -154,8 +167,12 @@ class Prep():
                 nfo_files = await asyncio.to_thread(lambda: [f for f in os.listdir(directory) if f.endswith('.nfo')])
                 if nfo_files:
                     meta['nfo_file'] = os.path.join(directory, nfo_files[0])
+        elif file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
+            if meta.get('is_music'):  # Only process as music if explicitly set
+                meta['is_music'] = True
+                console.print('[red]Processing as music')
+                await self.process_single_music_file(meta, mode)
         return meta
-
 
     async def _process_video_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         """Orchestrate video metadata processing."""
@@ -1401,16 +1418,15 @@ class Prep():
         else:
             # Anime processing
             parsed = anitopy.parse(Path(video).name)
-            romaji, mal_id, _, season_year, anilist_episodes = await self.TMDb.get_romaji(parsed['anime_title'], meta.get('mal'))
-            
-            if mal_id:
-                meta['mal_id'] = mal_id
+            if not meta.get('mal_id'):
+                romaji, mal_id, _, season_year, anilist_episodes = await AniListHandler().get_romaji(parsed['anime_title'], meta.get('mal'))
+                if mal_id:
+                    meta['mal_id'] = mal_id
                 
-            if not meta.get('tmdb_manual'):
+            if not meta.get('tmdb_manual') and not meta.get('tmdb'):
                 year = parsed.get('anime_year', str(season_year))
                 meta = await self.TMDb.get_tmdb_id(parsed['anime_title'], year, meta, 'TV')
             
-            meta = await self.TMDb.tmdb_other_meta(meta)
             if meta['category'] != 'TV':
                 return meta
                 
