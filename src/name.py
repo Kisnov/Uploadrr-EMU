@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, List
 import json
 
-from src.console import console, log
+from src.console import log
 
 class NameGenerator:
     NAMING_TEMPLATES = {
@@ -104,7 +104,7 @@ class NameGenerator:
         return name.strip()
 
     async def get_name(self, meta: Dict) -> Tuple[str, str, str, List[str]]:
-        """Generate the name based on metadata."""
+        """Generate the name based on metadata"""
         meta = self.preprocess_meta(meta)
         category, type_ = meta["category"], meta.get("type", "")
         source, is_disc = meta.get("source", ""), meta.get("is_disc", "")
@@ -121,28 +121,33 @@ class NameGenerator:
         if category == "MUSIC":
             edition = meta.get("manual_edition", meta.get("edition", ""))
             meta["edition"] = f"[{edition}]" if edition else ""
-            meta["bit_depth"] = f"{meta.get('bit_depth', '')}bit" if meta.get("bit_depth") else ""
+            meta["bit_depth"] = f"{meta.get('bit_depth', '')}bit" if meta.get('bit_depth') else ""
             meta["source"] = f"{source} " if source else ""
 
-        try:
-            # Generate base name
-            name_notag = template.format(**meta)
-            name_notag = " ".join(name_notag.split())
 
-            # Add tag if applicable
-            tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
-            name = name_notag + tag
+        placeholder_keys = [part.split("}")[0] for part in template.split("{")[1:]]
+        safe_meta = {key: str(meta.get(key, "")) if meta.get(key) is not None else "" for key in placeholder_keys}
+        name_notag = template
+        for key in safe_meta:
+            placeholder = f"{{{key}}}"
+            value = safe_meta[key]
+            name_notag = name_notag.replace(placeholder, value)
+        
+        # Clean up multiple spaces and strip
+        name_notag = " ".join(name_notag.split())
 
-            # Use manual name if provided
-            name = meta.get("manual_name") if meta.get("manual_name") is not None else name
-            clean_name = self.clean_filename(name)
+        # Add tag if applicable
+        tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
+        name = name_notag + tag
 
-            return name_notag, name, clean_name, potential_missing
+        # Use manual name if provided and not None, otherwise use generated name
+        name = meta.get("manual_name") if meta.get("manual_name") is not None else name
+        clean_name = self.clean_filename(name)
 
-        except Exception as e:
-            console.print(f"[bold red]Error generating name: {e}")
-            console.print(f"--category [yellow]{category}")
-            console.print(f"--type [yellow]{type_}")
-            console.print(f"--source [yellow]{source}")
-            return "Error in Name Generation", "", "", []
+        # Log if no meaningful name was generated
+        if not name_notag or name_notag.isspace():
+            log.warning(f"[yellow]Generated name is empty for category: {category}, type: {type_}, source: {source}")
+            return "Unnamed", name, clean_name, potential_missing
+
+        return name_notag, name, clean_name, potential_missing
 
