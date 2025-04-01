@@ -1,7 +1,17 @@
-from .tmdb import TMDbHandler
-from .imdb import IMDbHandler
-from .tvmaze import search_tvmaze
-from .srrdb import is_scene
 from .anilist import AniListHandler
+from .discogs import DiscogsAPI
+from .imdb import IMDbHandler
+from .musicbrainz import MusicBrainzAPI
+from .srrdb import is_scene
+from .tmdb import TMDbHandler
+from .tvmaze import search_tvmaze
 
-__all__ = ['TMDbHandler', 'IMDbHandler', 'search_tvmaze', 'is_scene', 'AniListHandler']
+__all__ = [
+    "AniListHandler",
+    "DiscogsAPI",
+    "IMDbHandler",
+    "MusicBrainzAPI",
+    "TMDbHandler",
+    "is_scene",
+    "search_tvmaze",
+]

@@ -12,7 +12,6 @@ from typing import Any, Dict, Optional
 
 import anitopy
 import requests
-import tmdbsimple as tmdb
 from guessit import guessit
 from pymediainfo import MediaInfo
 from rich.traceback import install
@@ -20,11 +19,9 @@ from tinytag import TinyTag
 
 from src.args import Args
 from src.console import console, log
-from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze
-from src.discogs import DiscogsAPI
+from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze, MusicBrainzAPI, DiscogsAPI
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
-from src.musicbrainz import MusicBrainzAPI
 from src.screenshots import ScreenshotManager
 from src.trackers.BLU import BLU
 from src.trackers.COMMON import COMMON
