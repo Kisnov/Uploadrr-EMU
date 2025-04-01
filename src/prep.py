@@ -4,16 +4,12 @@ import itertools
 import ntpath
 import os
 import re
-import shutil
-import sys
 import time
-import traceback
 import urllib
 import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import aiofiles
 import anitopy
 import requests
 import tmdbsimple as tmdb
@@ -26,6 +22,7 @@ from src.console import console, log
 from src.databases import IMDbHandler, TMDbHandler, is_scene, search_tvmaze
 from src.discogs import DiscogsAPI
 from src.discparse import DiscParse
+from src.mediainfo import MediaInfoHandler
 from src.musicbrainz import MusicBrainzAPI
 from src.screenshots import ScreenshotManager
 from src.trackers.BLU import BLU
@@ -42,7 +39,7 @@ class Prep():
         Database Identifiers (TMDB/IMDB/MAL/etc)
         Create Name
     """
-    base_dir=os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    base_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
                                              
     def __init__(self, config: Dict):
         self.config = config
@@ -53,6 +50,7 @@ class Prep():
         self._services = None
         self.TMDb = TMDbHandler(config)
         self.IMDb = IMDbHandler()
+        self.mihandle = MediaInfoHandler(self.base_dir)
 
     async def gather_prep(self, meta, mode):
         #Initialize gather
@@ -158,175 +156,218 @@ class Prep():
                     meta['nfo_file'] = os.path.join(directory, nfo_files[0])
         return meta
 
-    async def _process_video_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
-        """Process video-specific metadata"""
-        # Get disc info
-        meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.get_disc(meta)
-        meta['filelist'] = []
-        meta['bdinfo'] = video = videopath = filename = mi = None
-        meta['is_sports'] = False
 
-        # Process based on disc type
+    async def _process_video_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Orchestrate video metadata processing."""
+        # Initial setup
+        meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.get_disc(meta)
+        meta.update({
+            'filelist': [],
+            'bdinfo': bdinfo,
+            'video': None,
+            'is_sports': False,
+            'mediainfo': None
+        })
+
+        # Process disc type and set initial metadata
+        meta = await self._process_disc_type(meta, videoloc)
+
+        # Assign common metadata in parallel where possible
+        meta = await self._assign_common_metadata(meta)
+
+        # Tracker API integrations
+        await self._integrate_tracker_apis(meta)
+
+        # Finalize category-specific metadata
+        meta = await self._finalize_metadata(meta)
+
+        return meta
+
+    async def _process_disc_type(self, meta: Dict[str, Any], videoloc: str) -> Dict[str, Any]:
+        """Handle video processing based on disc type and set initial metadata."""
+        guess = None
         if meta['is_disc'] == "BDMV":
             video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
+            meta['video'] = video
             try:
                 title = meta['discs'][0]['bdinfo']['title']
                 guess_name = re.sub(r'Blu-ray™|-\s*|Vol\.\s*\d+', '', title).strip()
-                log.debug(f"guess_name: {guess_name}")
                 filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                meta['search_year'] = guessit(bdinfo['title']).get('year', "")
+                meta['search_year'] = guessit(meta['bdinfo']['title']).get('year', "")
             except Exception:
-                guess_name = bdinfo['label'].replace('-', ' ')
+                guess_name = meta['bdinfo']['label'].replace('-', ' ')
                 filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]})['title']
-                meta['search_year'] = guessit(bdinfo['label']).get('year', "")
-            meta['resolution'] = self.mi_resolution(bdinfo['video'][0]['res'], guessit(video), width="OTHER", scan="p", height="OTHER", actual_height=0)
-            meta['bdinfo'] = bdinfo
+                meta['search_year'] = guessit(meta['bdinfo']['label']).get('year', "")
+            meta['resolution'] = self.mihandle._map_resolution(
+                meta['bdinfo']['video'][0]['res'], guessit(video), "OTHER", "p", "OTHER", 0
+            )
+            meta['filename'] = filename.split(' AKA ')[0] if " AKA " in filename.replace('.', ' ') else filename
+            meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
 
         elif meta['is_disc'] == "DVD":
             disc_path = meta['discs'][0]['path']
             video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             guess_name = disc_path.replace('-', ' ')
-            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+            meta['filename'] = guessit(guess_name, {"excludes": ["country", "language"]})['title']
             meta['search_year'] = guessit(video).get('year', "")
-            
+            meta['video'] = video
             if not meta.get('edit', False):
-                tmp_dir = Path(meta['base_dir']) / 'tmp' / meta['uuid']
                 title_set = meta['discs'][0]['main_set'][0][:2]
                 vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
-                ifo_path = f"{disc_path}/VTS_{title_set}_0.IFO"
-                ifo_tmp = tmp_dir / f"VTS_{title_set}_0.IFO"
-
-                mi = await self.exportInfo(vob_path, False, meta['uuid'], meta['base_dir'], export_text=True)
-
-                # DVD version check and patch if not already done
-                text_file = tmp_dir / "MEDIAINFO.txt"
-                version = "Unknown"
-                if text_file.exists() and not ifo_tmp.exists():
-                    with open(text_file, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                        if lines:
-                            last_line = lines[-1].strip()
-                            match = re.search(r'MediaInfoLib - v(\d+\.\d+)', last_line)
-                            if match:
-                                version = match.group(1)
-                                log.debug(f"Detected MediaInfoLib version: {version}")
-
-                if version != "Unknown":
-                    major, minor = map(int, version.split('.'))
-                    if (major > 23) or (major == 23 and minor > 6) and os.path.exists(ifo_path):
-                        try:
-                            shutil.copy2(ifo_path, ifo_tmp)
-                            log.debug("[bold green]DVD Language Patched - Using IFO for text output")
-                            mi = await self.exportInfo(ifo_tmp, False, meta['uuid'], meta['base_dir'], export_text=True, dvd_patch=True)
-                        except Exception as e:
-                            log.error(f"[bold red]Failed to copy IFO file {ifo_path}: {e}")
-                meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
+                meta['mediainfo'] = await self.mihandle.exportInfo(
+                    media_path=vob_path,
+                    is_dir=False,
+                    folder_id=meta['uuid'],
+                    export_text=True
+                )
+            meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
+            meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
 
         elif meta['is_disc'] == "HDDVD":
             video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
             guess_name = meta['discs'][0]['path'].replace('-', '')
-            filename = guessit(guess_name, {"excludes": ["country", "language"]})['title']
+            meta['filename'] = guessit(guess_name, {"excludes": ["country", "language"]})['title']
             meta['search_year'] = guessit(meta['discs'][0]['path']).get('year', "")
+            meta['video'] = video
             if not meta.get('edit', False):
-                mi = await self.exportInfo(video, False, meta['uuid'], meta['base_dir'], export_text=False)
+                meta['mediainfo'] = await self.mihandle.exportInfo(
+                    media_path=video,
+                    is_dir=False,
+                    folder_id=meta['uuid'],
+                    export_text=False
+                )
+            meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
 
         else:  # Non-disc case
             videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
             video, meta['scene'], meta['imdb'] = await is_scene(videopath, meta.get('imdb'))
             guess_name = ntpath.basename(video).replace('-', ' ')
-            filename = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get(
+            meta['filename'] = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get(
                 "title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"]
             )
             meta['search_year'] = guessit(video).get('year', "")
+            meta['video'] = videopath
             if not meta.get('edit', False):
-                mi = await self.exportInfo(videopath, meta.get('isdir', False), meta['uuid'], meta['base_dir'], export_text=True)
+                meta['mediainfo'] = await self.mihandle.exportInfo(
+                    media_path=videopath,
+                    is_dir=meta.get('isdir', False),
+                    folder_id=meta['uuid'],
+                    export_text=True
+                )
+            meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
 
-        # Common processing
-        meta['video'] = video
-        meta['resolution'] = meta.get('resolution') or self.get_resolution(guessit(meta['video']), meta['uuid'], meta['base_dir'])
-        meta['sd'] = self.is_sd(meta['resolution'])
-
+        guess = guess or guessit(meta['video'])
+        meta['category'] = self.get_cat(meta['video']) or guess.get('type', 'MOVIE').upper()
         if self.is_sports(meta['uuid']):
             meta['is_sports'] = True
             meta['category'] = 'SPORTS'
-        
-        meta['mediainfo'] = mi
-        meta['filename'] = filename.split(' AKA ')[0] if " AKA " in filename.replace('.', ' ') else filename
 
-        bdinfo = meta['bdinfo']
-        video = meta['video']
-        filename = meta['filename']
+        return meta
 
-        # Tracker API integrations
-        await self._integrate_tracker_apis(meta)
+    async def _assign_common_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Assign common metadata attributes"""
+        async def fetch_resolution():
+            return self.mihandle.get_resolution(guessit(meta['video']), meta['uuid'])
 
-        if not meta['category']:
-            meta['category'] = self.get_cat(video)
+        async def fetch_audio():
+            return self.mihandle.get_audio(meta.get('mediainfo'), meta, meta.get('bdinfo'))
 
+        async def fetch_3d():
+            return self.is_3d(meta.get('mediainfo'), meta.get('bdinfo'))
+
+        async def fetch_source():
+            return self.get_source(meta['type'], meta['video'], meta['path'], meta['is_disc'], meta)
+
+        async def fetch_uhd():
+            return self.get_uhd(meta['type'], guessit(meta['path']), meta['resolution'], meta['path'])
+
+        async def fetch_hdr():
+            return self.get_hdr(meta.get('mediainfo'), meta.get('bdinfo'))
+
+        async def fetch_video_encode():
+            if meta['is_disc'] != "BDMV":
+                return self.mihandle.get_video_encode(meta.get('mediainfo'), meta['type'], meta.get('bdinfo'))
+            return None, None, False, '0'
+
+        results = await asyncio.gather(
+            fetch_resolution(),
+            fetch_audio(),
+            fetch_3d(),
+            fetch_source(),
+            fetch_uhd(),
+            fetch_hdr(),
+            fetch_video_encode()
+        )
+
+        meta['resolution'] = meta.get('resolution') or results[0]
+        meta['sd'] = 1 if meta['resolution'] in ("480i", "480p", "576i", "576p", "540p") else 0
+        meta['audio'], meta['channels'], meta['has_commentary'] = results[1]
+        meta['3D'] = results[2]
+        meta['source'], meta['type'] = results[3]
+        meta['uhd'] = results[4]
+        meta['hdr'] = results[5]
+
+        if meta['is_disc'] == "BDMV":
+            meta['region'] = self.get_region(meta.get('bdinfo'), meta.get('region'))
+            meta['video_codec'] = self.midhandle.get_video_codec(meta['bdinfo'])
+        else:
+            meta['video_encode'], meta['video_codec'], meta['has_encode_settings'], meta['bit_depth'] = results[6]
+
+        return meta
+
+    async def _finalize_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Finalize metadata based on category and additional processing."""
         if meta['category'] in ("TV", "MOVIE"):
-            meta['tmdb'] = meta.get('tmdb_manual', meta.get('tmdb'))  # Use tmdb_manual if available
-            meta['type'] = meta.get('type') or self.get_type(video, meta['scene'], meta['is_disc'])
-
+            meta['tmdb'] = meta.get('tmdb_manual', meta.get('tmdb'))
             if not meta.get('imdb') and meta.get('imdb_id'):
                 meta['imdb'] = f"tt{meta['imdb_id']}"
             if not meta.get('tmdb') and not meta.get('imdb'):
                 meta['category'], meta['tmdb'], meta['imdb'] = self.get_tmdb_imdb_from_mediainfo(
-                    mi, meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb']
+                    meta.get('mediainfo'), meta['category'], meta['is_disc'], meta['tmdb'], meta['imdb']
                 )
             if not meta.get('tmdb') and not meta.get('imdb'):
                 meta = await self.TMDb.get_tmdb_id(meta['filename'], meta['search_year'], meta, meta['category'], meta['filename'])
-
             elif meta.get('imdb') and not meta.get('tmdb_manual'):
                 meta['imdb_id'] = str(meta['imdb']).replace('tt', '')
                 meta = await self.TMDb.get_tmdb_from_imdb(meta, meta['filename'])
-
             else:
                 meta['tmdb_manual'] = meta.get('tmdb')
 
-            # If unattended mode is on, and TMDb ID is missing or invalid
             if meta.get('unattended') and (meta.get('tmdb') is None or int(meta['tmdb']) == 0):
                 meta['tmdb_not_found'] = True
                 console.print(f"[red]Unable to find TMDb match for {Path(meta['uuid']).stem}")
                 return meta
 
             meta = await (self.IMDb.imdb_other_meta(meta) if int(meta['tmdb']) == 0 else self.TMDb.tmdb_other_meta(meta))
-            meta['tvmaze_id'], meta['imdb_id'], meta['tvdb_id'] = await search_tvmaze(meta['filename'], meta['search_year'], meta.get('imdb_id', '0'), meta.get('tvdb_id', 0))
-            meta['imdb_id'] = meta.get('imdb_id') or await self.IMDb.search_imdb(meta['filename'], meta['search_year'])
+            meta['tvmaze_id'], meta['imdb_id'], meta['tvdb_id'] = await search_tvmaze(
+                meta['filename'], meta['search_year'], meta.get('imdb_id', '0'), meta.get('tvdb_id', 0)
+            )
+            if not meta.get('imdb_id'):
+                meta['imdb_id'] = await self.IMDb.search_imdb(meta['filename'], meta['search_year'])
             if not meta.get('imdb_info') and int(meta['imdb_id']) != 0:
                 meta['imdb_info'] = await self.IMDb.get_imdb_info(meta['imdb_id'], meta)
 
-        meta['tag'] = meta.get('tag') or self.get_tag(video, meta)
+        meta['tag'] = meta.get('tag') or self.get_tag(meta['video'], meta)
         if meta['tag'] and not meta['tag'].startswith('-'):
             meta['tag'] = f"-{meta['tag']}"
-        if meta['category'] == 'TV':    
-            meta = await self.get_season_episode(video, meta)
+        if meta['category'] == 'TV':
+            meta = await self.get_season_episode(meta['video'], meta)
         meta = await self.tag_override(meta)
 
-        meta['video'] = video
-        meta['audio'], meta['channels'], meta['has_commentary'] = self.get_audio_v2(mi, meta, bdinfo)
+        # Additional cleanup
         if meta['tag'][1:].startswith(meta['channels']):
             meta['tag'] = meta['tag'].replace(f"-{meta['channels']}", '')
         if meta.get('no_tag', False):
             meta['tag'] = ""
-        meta['3D'] = self.is_3d(mi, bdinfo)
-        meta['source'], meta['type'] = self.get_source(meta['type'], video, meta['path'], meta['is_disc'], meta)
         if meta['type'] in ('WEBDL', 'WEBRIP', 'HDTV'):
-            meta['service'], meta['service_longname'] = self.get_service(video, meta.get('tag', ''), meta['audio'], meta['filename']) if meta.get('service') in (None, '') else (meta['service'], meta['service_longname'])
-        meta['uhd'] = self.get_uhd(meta['type'], guessit(meta['path']), meta['resolution'], meta['path'])
-        meta['hdr'] = self.get_hdr(mi, bdinfo)
-        meta['distributor'] = self.get_distributor(meta['distributor'])
-        if meta.get('is_disc') == "BDMV":
-            meta['region'] = self.get_region(bdinfo, meta.get('region'))
-            meta['video_codec'] = self.get_video_codec(bdinfo)
-        else:
-            meta['video_encode'], meta['video_codec'], meta['has_encode_settings'], meta['bit_depth'] = self.get_video_encode(mi, meta['type'], bdinfo)
-        if meta['category'] == 'SPORTS':
-            if meta['scene']:
-                meta['name'] = meta['title'] = Path(video).stem
-            else:
-                meta['name'] = meta['title'] = Path(meta['uuid']).stem
+            meta['service'], meta['service_longname'] = self.get_service(
+                meta['video'], meta.get('tag', ''), meta['audio'], meta['filename']
+            ) if meta.get('service') in (None, '') else (meta['service'], meta['service_longname'])
 
-        meta['edition'], meta['repack'], meta['cut'], meta['ratio'] = self.get_edition(meta['title'], meta['path'], bdinfo, meta['filelist'], meta.get('manual_edition'))
+        meta['distributor'] = self.get_distributor(meta['distributor'])
+        meta['edition'], meta['repack'], meta['cut'], meta['ratio'] = self.get_edition(
+            meta.get('title', ''), meta['path'], meta.get('bdinfo'), meta['filelist'], meta.get('manual_edition')
+        )
         if "REPACK" in meta.get('edition', ""):
             meta['repack'] = re.search(r"REPACK[\d]?", meta['edition'])[0]
             meta['edition'] = re.sub(r"REPACK[\d]?", "", meta['edition']).strip().replace('  ', ' ')
@@ -334,7 +375,11 @@ class Prep():
         meta['stream'] = self.stream_optimized(meta.get('stream', False))
         meta['anon'] = self.is_anon(meta.get('anon', False))
 
+        if meta['category'] == 'SPORTS':
+            meta['name'] = meta['title'] = Path(meta['video']).stem if meta['scene'] else Path(meta['uuid']).stem
+
         return meta
+
 
     def get_tmdb_imdb_from_mediainfo(self, mediainfo, category, is_disc, tmdbid, imdbid):
             """Extract TMDb and IMDb IDs from mediainfo metadata."""
@@ -715,7 +760,7 @@ class Prep():
         #INITIALIZE META 
         log.debug('About to first_audio_file')
         first_audio_file = tracks[0][2]
-        mi = self.exportInfo(first_audio_file, meta['isdir'], meta['uuid'], self.base_dir, export_text=True)
+        mi = self.mihandle.exportInfo(first_audio_file, meta['isdir'], meta['uuid'], self.base_dir, export_text=True)
         meta.update(
             is_disc=False,
             screens=0,
@@ -1043,152 +1088,6 @@ class Prep():
 
 
     """
-    Get and parse mediainfo
-    """
-    async def exportInfo(self, media_path, isdir, folder_id, base_dir, export_text=True, dvd_patch=False):
-        media_path = os.path.normpath(media_path)
-        tmp_dir = Path(base_dir) / 'tmp' / folder_id
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        basename = os.path.basename(str(media_path))
-
-        try:
-            # Text output
-            if export_text and (dvd_patch or not (tmp_dir / "MEDIAINFO.txt").exists()):
-                console.print("[bold yellow]Exporting MediaInfo...")
-                os.chdir(os.path.dirname(media_path))
-                media_info = MediaInfo.parse(media_path, output="STRING", full=False, mediainfo_options={'inform_version': '1'})
-                clean_path = media_info.replace(str(tmp_dir), folder_id) if dvd_patch else media_info.replace(media_path, basename)
-                async with aiofiles.open(tmp_dir / "MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
-                    await export.write(clean_path)
-                console.print("[bold green]MediaInfo text Exported.") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
-
-            # JSON output
-            if not (tmp_dir / "MediaInfo.json").exists() or dvd_patch: #TODO alter LDU name logic for DVD's. MediaInfo.txt should suffice
-                media_info = MediaInfo.parse(media_path, output="JSON", mediainfo_options={'inform_version': '1'})
-                async with aiofiles.open(tmp_dir / "MediaInfo.json", 'w', encoding='utf-8') as export:
-                    await export.write(media_info)
-                console.print("[bold green]MediaInfo JSON Exported.")
-
-            async with aiofiles.open(tmp_dir / "MediaInfo.json", 'r', encoding='utf-8') as f:
-                return json.loads(await f.read())
-
-        except FileNotFoundError:
-            console.print(f"[bold red]File not found: {media_path}")
-            sys.exit()
-        except Exception as e:
-            log.error(f"[bold red]Error processing MediaInfo for {media_path}: {e}")
-            raise
-
-
-    """
-    Get Resolution
-    """
-
-    def get_resolution(self, guess, folder_id, base_dir):
-        with open(f'{base_dir}/tmp/{folder_id}/MediaInfo.json', 'r', encoding='utf-8') as f:
-            mi = json.load(f)
-            try:
-                width = mi['media']['track'][1]['Width']
-                height = mi['media']['track'][1]['Height']
-            except (KeyError, IndexError):
-                width = 0
-                height = 0
-            scan = mi['media']['track'][1].get('ScanType', 'Progressive')       
-            scan = "p" if scan == "Progressive" else "i"
-            width_list = [3840, 2560, 1920, 1280, 1024, 854, 720, 15360, 7680, 0]
-            height_list = [2160, 1440, 1080, 720, 576, 540, 480, 8640, 4320, 0]
-            width = self.closest(width_list, int(width))
-            actual_height = int(height)
-            height = self.closest(height_list, int(height))
-            res = f"{width}x{height}{scan}"
-            resolution = self.mi_resolution(res, guess, width, scan, height, actual_height)
-        return resolution
-
-    def closest(self, lst, K):
-        # Get closest, but not over
-        lst = sorted(lst)
-        mi_input = K
-        res = 0
-        for each in lst:
-            if mi_input > each:
-                pass
-            else:
-                res = each
-                break
-        return res
-
-    def mi_resolution(self, res, guess, width, scan, height, actual_height):
-        RESOLUTION_MAP = {
-            "15360x8640p": "8640p",
-            "7680x4320p": "4320p",
-            "3840x2160p": "2160p",
-            "2560x1440p": "1440p",
-            "1920x1080p": "1080p",
-            "1920x1080i": "1080i",
-            "1280x720p": "720p",
-            "1280x540p": "720p",
-            "1280x576p": "720p",
-            "1024x576p": "576p",
-            "1024x576i": "576i",
-            "720x576p": "576p",
-            "720x576i": "576i",
-            "854x480p": "480p",
-            "854x480i": "480i",
-            "720x480p": "480p",
-            "720x480i": "480i",
-            "OTHER": "OTHER"
-        }
-
-        WIDTH_FALLBACK = {
-            15360: "8640p",
-            7680: "4320p",
-            3840: "2160p",
-            2560: "1440p",
-            1920: {"p": "1080p", "i": "1080i"},
-            1280: "720p",
-            1024: {"p": "576p", "i": "576i"},
-            854: {"p": "480p", "i": "480i"},
-            720: {"p": "576p", "i": "576i"}
-        }
-
-        if actual_height == 540:
-            return "OTHER"
-
-        resolution = RESOLUTION_MAP.get(res)
-        if resolution:
-            return resolution
-
-        if res in RESOLUTION_MAP.values():
-            return res
-
-        try:
-            resolution = guess['screen_size']
-            if resolution in RESOLUTION_MAP.values():
-                return resolution
-        except (KeyError, TypeError):
-            pass
-
-        try:
-            width = int(width)
-        except (ValueError, TypeError):
-            width = None
-
-        if width:
-            width_mapping = WIDTH_FALLBACK.get(width, "OTHER")
-            if isinstance(width_mapping, dict):
-                return width_mapping.get(scan, "OTHER")
-            return width_mapping
-
-        return "OTHER"
-     
-    def is_sd(self, resolution):
-        if resolution in ("480i", "480p", "576i", "576p", "540p"):
-            sd = 1
-        else:
-            sd = 0
-        return sd
-
-    """
     Is a sports release?
     """
     def is_sports(self, name):
@@ -1229,218 +1128,45 @@ class Prep():
             category = "MOVIE"
         return category
 
-    """
-    Mediainfo/Bdinfo > meta
-    """
-    def get_audio_v2(self, mi, meta, bdinfo):
-        if meta.get('is_music', False):  
-            if not mi or 'media' not in mi or 'track' not in mi.get('media', {}):
-                return "Unknown", "Unknown", False
 
-            audio_tracks = mi['media'].get('track', [])
-            if not audio_tracks:
-                return "No Audio", "Unknown", False
 
-            track = audio_tracks[0]
-            format = track.get('Format', 'Unknown')
-            channels = track.get('Channels', 'Unknown')
-            if channels.isdigit():
-                channels = f"{channels}.0"
-
-            if track.get('Language', '') == "zxx":
-                meta['silent'] = True
-
-            # Simple codec mapping for music
-            codec_map = {
-                "DTS": "DTS",
-                "AAC": "AAC",
-                "AC-3": "DD",
-                "E-AC-3": "DD+",
-                "MLP FBA": "TrueHD",
-                "FLAC": "FLAC",
-                "Opus": "Opus",
-                "Vorbis": "Vorbis",
-                "PCM": "LPCM",
-            }
-            codec = codec_map.get(format, format)
-
-            return f"{codec} {channels}", channels, False
-        else:
-            extra = dual = ""
-            has_commentary = False
-            #Get formats
-            if bdinfo is not None: #Disks
-                format_settings = ""
-                format = bdinfo['audio'][0]['codec']
-                commercial = format
+    def get_hdr(self, mi: dict, bdinfo: Optional[dict]) -> str:
+        try:
+            hdr = ""
+            dv = ""
+            
+            if bdinfo: #BDMV
+                hdr_info = bdinfo['video'][0]['hdr_dv']
+                hdr = "HDR10+" if "HDR10+" in hdr_info else "HDR" if hdr_info == "HDR10" else ""
+                dv = "DV" if len(bdinfo['video']) > 1 and bdinfo['video'][1].get('hdr_dv') == "Dolby Vision" else ""
+            else:  # File-based media
+                video_track = mi['media']['track'][1]
                 try:
-                    additional = bdinfo['audio'][0]['atmos_why_you_be_like_this']
-                except KeyError:
-                    additional = ""
-                #Channels
-                chan = bdinfo['audio'][0]['channels']
-
-
-            else: 
-                track_num = 2
-                for i in range(len(mi['media']['track'])):
-                    t = mi['media']['track'][i]
-                    if t['@type'] != "Audio":
-                        pass
-                    else: 
-                        if t.get('Language', "") == meta.get('original_language') and "commentary" not in t.get('Title', '').lower():
-                            track_num = i
-                            break
-                format = mi['media']['track'][track_num]['Format']
-                commercial = mi['media']['track'][track_num].get('Format_Commercial', '')
-                if mi['media']['track'][track_num].get('Language', '') == "zxx":
-                    meta['silent'] = True
-                try:
-                    additional = mi['media']['track'][track_num]['Format_AdditionalFeatures']
-                    # format = f"{format} {additional}"
-                except KeyError:
-                    additional = ""
-                try:
-                    format_settings = mi['media']['track'][track_num]['Format_Settings']
-                    if format_settings in ['Explicit']:
-                        format_settings = ""
-                except KeyError:
-                    format_settings = ""
-                # Channels
-                channels = mi['media']['track'][track_num].get('Channels_Original', mi['media']['track'][track_num]['Channels'])
-                if not str(channels).isnumeric():
-                    channels = mi['media']['track'][track_num]['Channels']
-
-                channel_layout = mi['media']['track'][track_num].get('ChannelLayout', mi['media']['track'][track_num].get('ChannelLayout_Original', ''))
-
-                if "LFE" in channel_layout:
-                    chan = f"{int(channels) - 1}.1"
-                elif not channel_layout:
-                    chan = f"{int(channels)}.0" if int(channels) <= 2 else f"{int(channels) - 1}.1"
-                else:
-                    chan = f"{channels}.0"
+                    if video_track.get('colour_primaries') in ("BT.2020", "REC.2020"):
+                        hdr_format = video_track.get('HDR_Format_Compatibility', 
+                                                video_track.get('HDR_Format_String', 
+                                                                video_track.get('HDR_Format', "")))
+                        if "HDR10+" in hdr_format:
+                            hdr = "HDR10+"
+                        elif "HDR10" in hdr_format:
+                            hdr = "HDR"
+                        elif not hdr_format and "PQ" in (video_track.get('transfer_characteristics'), 
+                                                    video_track.get('transfer_characteristics_Original')):
+                            hdr = "PQ10"
+                        elif "HLG" in video_track.get('transfer_characteristics_Original', ''):
+                            hdr = "HLG"
+                        elif "BT.2020 (10-bit)" in video_track.get('transfer_characteristics_Original', ''):
+                            hdr = "WCG"
+                except Exception:
+                    pass
+                    
+                dv = "DV" if "Dolby Vision" in video_track.get('HDR_Format', '') or \
+                            "Dolby Vision" in video_track.get('HDR_Format_String', '') else ""
                 
-                if meta.get('original_language') != 'en':
-                    eng, orig = False, False
-                    try:
-                        for t in mi['media']['track']:
-                            if t['@type'] != "Audio":
-                                pass
-                            else: 
-                                audio_language = t.get('Language', '')
-                                # Check for English Language Track
-                                if audio_language == "en" and "commentary" not in t.get('Title', '').lower():
-                                    eng = True
-                                # Check for original Language Track
-                                if audio_language == meta.get('original_language') and "commentary" not in t.get('Title', '').lower():
-                                    orig = True
-                                # Catch Chinese / Norwegian variants
-                                variants = ['zh', 'cn', 'cmn', 'no', 'nb']
-                                if audio_language in variants and meta.get('original_language') in variants:
-                                    orig = True
-                                # Check for additional, bloated Tracks
-                                if audio_language != meta.get('original_language') and audio_language != "en":
-                                    if meta['original_language'] not in variants and audio_language not in variants:
-                                        audio_language = "und" if audio_language == "" else audio_language
-                                        console.print(f"[bold red]This release has a(n) {audio_language} audio track, and may be considered bloated")
-                                        time.sleep(5)
-                        if eng and orig:
-                            dual = "Dual-Audio"
-                        elif eng and not orig and meta.get('original_language') not in ['zxx', 'xx', None] and not meta.get('no_dub', False):
-                            dual = "Dubbed"
-                    except Exception:
-                        console.print(traceback.print_exc())
-                        pass
-                         
-                for t in mi['media']['track']:
-                    if t['@type'] != "Audio":
-                        pass
-                    else: 
-                        if "commentary" in t.get('Title', '').lower():
-                            has_commentary = True
-            
-            
-            #Convert commercial name to naming conventions
-            audio = {
-                #Format
-                "DTS": "DTS",
-                "AAC": "AAC",
-                "AAC LC": "AAC",
-                "AC-3": "DD",
-                "E-AC-3": "DD+",
-                "MLP FBA": "TrueHD",
-                "FLAC": "FLAC",
-                "Opus": "Opus",
-                "Vorbis": "Vorbis",
-                "PCM": "LPCM",
-
-                #BDINFO AUDIOS
-                "LPCM Audio" : "LPCM",
-                "Dolby Digital Audio" : "DD",
-                "Dolby Digital Plus Audio" : "DD+",
-                # "Dolby TrueHD" : "TrueHD",
-                "Dolby TrueHD Audio" : "TrueHD",
-                "DTS Audio" : "DTS", 
-                "DTS-HD Master Audio" : "DTS-HD MA",
-                "DTS-HD High-Res Audio" : "DTS-HD HRA",
-                "DTS:X Master Audio" : "DTS:X"
-            }
-            audio_extra = {
-                "XLL": "-HD MA",
-                "XLL X": ":X",
-                "ES": "-ES",
-            }
-            format_extra = {
-                "JOC": " Atmos",
-                "16-ch": " Atmos",
-                "Atmos Audio": " Atmos",
-            }
-            format_settings_extra = {
-                "Dolby Surround EX" : "EX"
-            }
-
-            commercial_names = {
-                "Dolby Digital" : "DD",
-                "Dolby Digital Plus" : "DD+",
-                "Dolby TrueHD" : "TrueHD",
-                "DTS-ES" : "DTS-ES",
-                "DTS-HD High" : "DTS-HD HRA",
-                "Free Lossless Audio Codec" : "FLAC",
-                "DTS-HD Master Audio" : "DTS-HD MA"
-                }
-
-            
-            search_format = True
-            for key, value in commercial_names.items():
-                if key in commercial:
-                    codec = value
-                    search_format = False
-                if "Atmos" in commercial or format_extra.get(additional, "") == " Atmos":
-                    extra = " Atmos"
-            if search_format:
-                codec = audio.get(format, "") + audio_extra.get(additional, "")
-                extra = format_extra.get(additional, "")
-            format_settings = format_settings_extra.get(format_settings, "")
-            if format_settings == "EX" and chan == "5.1":
-                format_settings = "EX"
-            else:
-                format_settings = ""
-
-            if codec == "":
-                codec = format
-            
-            if format.startswith("DTS"):
-                if additional.endswith("X"):
-                    codec = "DTS:X"
-                    chan = f"{int(channels) - 1}.1"
-            if format == "MPEG Audio":
-                codec = mi['media']['track'][2].get('CodecID_Hint', '')
-
-            
-
-            audio = f"{dual} {codec} {format_settings} {chan}{extra}"
-            audio = ' '.join(audio.split())
-            return audio, chan, has_commentary
+            return f"{dv} {hdr}".strip()
+        except Exception as e:
+            log.error(f"Error in get_hdr: {str(e)}")
+            return ""
 
 
     def is_3d(self, mi, bdinfo):
@@ -1534,43 +1260,7 @@ class Prep():
             console.print(f"Error in get_uhd: {str(e)}")
             return ""
 
-    def get_hdr(self, mi: dict, bdinfo: Optional[dict]) -> str:
-        try:
-            hdr = ""
-            dv = ""
-            
-            if bdinfo: #BDMV
-                hdr_info = bdinfo['video'][0]['hdr_dv']
-                hdr = "HDR10+" if "HDR10+" in hdr_info else "HDR" if hdr_info == "HDR10" else ""
-                dv = "DV" if len(bdinfo['video']) > 1 and bdinfo['video'][1].get('hdr_dv') == "Dolby Vision" else ""
-            else:  # File-based media
-                video_track = mi['media']['track'][1]
-                try:
-                    if video_track.get('colour_primaries') in ("BT.2020", "REC.2020"):
-                        hdr_format = video_track.get('HDR_Format_Compatibility', 
-                                                video_track.get('HDR_Format_String', 
-                                                                video_track.get('HDR_Format', "")))
-                        if "HDR10+" in hdr_format:
-                            hdr = "HDR10+"
-                        elif "HDR10" in hdr_format:
-                            hdr = "HDR"
-                        elif not hdr_format and "PQ" in (video_track.get('transfer_characteristics'), 
-                                                    video_track.get('transfer_characteristics_Original')):
-                            hdr = "PQ10"
-                        elif "HLG" in video_track.get('transfer_characteristics_Original', ''):
-                            hdr = "HLG"
-                        elif "BT.2020 (10-bit)" in video_track.get('transfer_characteristics_Original', ''):
-                            hdr = "WCG"
-                except Exception:
-                    pass
-                    
-                dv = "DV" if "Dolby Vision" in video_track.get('HDR_Format', '') or \
-                            "Dolby Vision" in video_track.get('HDR_Format_String', '') else ""
-                
-            return f"{dv} {hdr}".strip()
-        except Exception as e:
-            console.print(f"Error in get_hdr: {str(e)}")
-            return ""
+
 
     def get_region(self, bdinfo, region=None):
             label = bdinfo.get('label', bdinfo.get('title', bdinfo.get('path', ''))).replace('.', ' ')
@@ -1598,69 +1288,6 @@ class Prep():
         }
         codec = codecs.get(bdinfo['video'][0]['codec'], "")
         return codec
-
-    def get_video_encode(self, mi, type, bdinfo):
-        video_encode = ""
-        codec = ""
-        bit_depth = '0'
-        has_encode_settings = False
-        try:
-            format = mi['media']['track'][1]['Format']
-            format_profile = mi['media']['track'][1].get('Format_Profile', format)
-            if mi['media']['track'][1].get('Encoded_Library_Settings', None):
-                has_encode_settings = True
-            bit_depth = mi['media']['track'][1].get('BitDepth', '0')
-        except KeyError:
-            format = bdinfo['video'][0]['codec']
-            format_profile = bdinfo['video'][0]['profile']
-
-        # Determine codec based on type and format
-        if type in ("ENCODE", "WEBRIP"):  # ENCODE or WEBRIP
-            if format == 'AVC':
-                codec = 'x264'
-            elif format == 'HEVC':
-                codec = 'x265'
-        elif type in ('WEBDL', 'HDTV'):  # WEB-DL or HDTV
-            if format == 'AVC':
-                codec = 'H.264'
-            elif format == 'HEVC':
-                codec = 'H.265'
-            if type == 'HDTV' and has_encode_settings:
-                codec = codec.replace('H.', 'x')
-        elif format == "VP9":
-            codec = "VP9"
-        elif format == "VC-1":
-            codec = "VC-1"
-        elif format == "AV1":
-            codec = "AV1"
-
-        # Determine profile
-        if format_profile == 'High 10':
-            profile = "Hi10P"
-        else:
-            profile = ""
-
-        # Format video_encode based on codec and profile
-        if profile:
-            if codec:
-                if profile != codec:
-                    video_encode = f"{profile} {codec}"
-                else:
-                    video_encode = codec
-            else:
-                video_encode = profile
-        else:
-            if codec:
-                video_encode = codec
-            else:
-                video_encode = format
-
-        # Handle special case for MPEG Video
-        video_codec = format
-        if video_codec == "MPEG Video":
-            video_codec = f"MPEG-{mi['media']['track'][1].get('Format_Version')}"
-
-        return video_encode, video_codec, has_encode_settings, bit_depth
 
     def get_edition(self, title, video, bdinfo, filelist, manual_edition):
         video = video.lower().startswith('dc') and video.replace('dc', '', 1) or video
