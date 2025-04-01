@@ -1,40 +1,47 @@
 import importlib
-from src.console import log
+from src.console import console, log
 
 MODULE_TO_PIP = {
+    "bencode": "bencode.py",
+    "bs4": "beautifulsoup4",
+    "deluge_client": "deluge-client",
     "ffmpeg": "ffmpeg-python",
-    "cinemagoer": "IMDbPY",
+    "imdb": "IMDbPY",
+    "jinja2": "Jinja2",
+    "oxipng": "pyoxipng",
+    "qbittorrentapi": "qbittorrent-api",
+    "yaml": "PyYAML",
 }
 
 REQUIRED_MODULES = [
+    "aiocache",
     "aiofiles",
     "anitopy",
-    "beautifulsoup4",
-    "bencode.py",
-    "cinemagoer",
-    "deluge-client",
+    "bencode",
+    "bs4",
+    "deluge_client",
     "ffmpeg",
     "guessit",
     "httpx",
     "imdb",
-    "Jinja2",
+    "jinja2",
     "langcodes",
     "nest_asyncio",
+    "oxipng",
     "packaging",
     "pathlib",
     "pymediainfo",
     "pyimgbox",
     "pyotp",
-    "pyoxipng",
     "pyrobase",
-    "pyyaml",
-    "qbittorrent-api",
+    "qbittorrentapi",
     "requests",
     "rich",
     "tinytag",
-    "torf",
     "tmdbsimple",
+    "torf",
     "unidecode",
+    "yaml",
 ]
 
 def check_imports():
@@ -46,10 +53,10 @@ def check_imports():
             missing_modules.append(MODULE_TO_PIP.get(module, module))  # Use pip package name if mapped
 
     if missing_modules:
-        log.error("\n[bold red]Missing required modules:[/bold red]")
-        log.error(" ".join(missing_modules))
+        log.error("\n[bold red]Missing modules found:[/bold red]")
+        console.print(" ".join(missing_modules))
         log.error("\nPlease install them with:")
-        log.error(f"\n    pip install {' '.join(missing_modules)}\n")
-        exit(1)  # Exit with an error code
-
+        console.print(f"\n   [magenta] pip install {' '.join(missing_modules)}\n")
+        exit(1)
+        
 check_imports()
