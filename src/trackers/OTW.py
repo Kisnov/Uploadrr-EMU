@@ -14,7 +14,7 @@ class OTW():
         self.config = config
         self.type = 'unit3d'
         self.tracker = 'OTW'
-        self.source_flag = 'OLD'
+        self.source_flag = 'OTW'
         self.upload_url = 'https://oldtoons.world/api/torrents/upload'
         self.search_url = 'https://oldtoons.world/api/torrents/filter'
         self.signature = None
@@ -49,6 +49,7 @@ class OTW():
             'WEBRIP': '5', 
             'HDTV': '6',
             'ENCODE': '3'
+            'UPSCALE': '16'
             }.get(type, '0')
         return type_id
 
