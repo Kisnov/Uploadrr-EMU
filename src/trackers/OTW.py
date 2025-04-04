@@ -48,7 +48,7 @@ class OTW():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
             'UPSCALE': '16'
             }.get(type, '0')
         return type_id
