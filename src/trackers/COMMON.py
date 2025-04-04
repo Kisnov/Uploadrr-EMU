@@ -5,7 +5,7 @@ import requests
 import re
 import json
 import aiofiles
-from tinytag import TinyTag
+from urllib.parse import urlparse
 from src.bbcode import BBCODE
 from src.console import console, log
 from rich import print
@@ -51,113 +51,132 @@ class COMMON():
         except Exception as e:
             return f"Error reading log file: {str(e)}"
 
-    async def unit3d_edit_desc(self, meta, tracker, comparison=False, desc_header=""):
+    async def unit3d_edit_desc(self, meta, tracker, comparison=False, desc_header="", whitelist=None):
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8') as basefile:
-            base = await basefile.read() 
+            base = await basefile.read()
 
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
-            if desc_header != "":
+            if desc_header:
                 await descfile.write(desc_header)
 
             bbcode = BBCODE()
-            if meta.get('discs', []):
-                discs = meta['discs']
-                if discs[0]['type'] == "DVD":
-                    await descfile.write(f"[spoiler=VOB MediaInfo][code]{discs[0]['vob_mi']}[/code][/spoiler]\n")
-                    await descfile.write("\n")
-                if len(discs) >= 2:
-                    for each in discs[1:]:
-                        if each['type'] == "BDMV":
-                            await descfile.write(f"[spoiler={each.get('name', 'BDINFO')}][code]{each['summary']}[/code][/spoiler]\n")
-                            await descfile.write("\n")
-                        elif each['type'] == "DVD":
-                            await descfile.write(f"{each['name']}:\n")
-                            await descfile.write(f"[spoiler={os.path.basename(each['vob'])}][code][{each['vob_mi']}[/code][/spoiler] [spoiler={os.path.basename(each['ifo'])}][code][{each['ifo_mi']}[/code][/spoiler]\n")
-                            await descfile.write("\n")
-                        elif each['type'] == "HDDVD":
-                            await descfile.write(f"{each['name']}:\n")
-                            await descfile.write(f"[spoiler={os.path.basename(each['largest_evo'])}][code][{each['evo_mi']}[/code][/spoiler]\n")
-                            await descfile.write("\n")
+            await self._write_disc_info(descfile, meta.get('discs', []))
             
             # Process BBCode
             desc = bbcode.convert_pre_to_code(base)
             desc = bbcode.convert_hide_to_spoiler(desc)
             if tracker in ('LDU', 'BLU', 'LST', 'RHD', 'RF', 'AITHER'):
                 comparison = True
-
             if not comparison:
                 desc = bbcode.convert_comparison_to_collapse(desc, 1000)
 
-            # # Handle music-related content
             if meta.get('is_music', False):
                 await self.create_music_description(meta, tracker)
 
-            # Handle video trailers and logos
-            if tracker not in ('AITHER', 'CBR', 'OE'):
-                add_trailer_enabled = self.config["DEFAULT"].get("add_trailer", False)    
-                if add_trailer_enabled and meta.get("category") == "MOVIE":
-                    key = meta.get("youtube")
-                    if key:
-                        await descfile.write(f"[center][youtube]{key}[/youtube][/center]")
-
-            add_logo_enabled = self.config["DEFAULT"].get("add_logo", False)
-            if add_logo_enabled:
-                logo = meta.get('logo')
-                logo_size = self.config["DEFAULT"].get("logo_size", 420)
-                if logo:
-                    await descfile.write(f"[center][img={logo_size}]{logo}[/img][/center]")  
-
-            img_size = self.config["DEFAULT"].get("img_size", 500)
-            if tracker == "CBR":
-                img_size = 350
-            inline_imgs = self.config["DEFAULT"].get("inline_imgs", 0)
+            await self._write_media_elements(descfile, meta, tracker)
             await descfile.write(desc)
-            images = meta['image_list']
-            if images: 
-                await descfile.write(f"\n[center]")
-                for each in range(len(images[:int(meta['screens'])])):
-                    web_url = images[each]['web_url']
-                    raw_url = images[each]['raw_url']
-                    await descfile.write(f"[url={web_url}][img={img_size}]{raw_url}[/img][/url] ")
-                    if img_size and inline_imgs:
-                        try:
-                            inline_imgs = int(inline_imgs) 
-                            if each % inline_imgs == inline_imgs - 1:
-                                await descfile.write("\n")
-                        except ValueError:
-                            print("[bold][red]WARN[/red]: Invalid value given for inline_imgs in config.[/bold]")
-                await descfile.write("[/center]")
-
-            # Global signature handling
-            use_global_sigs = self.config["DEFAULT"].get("use_global_sigs", False)
-            if use_global_sigs:
-                signature = self.config["DEFAULT"].get("global_sig")
-                anon_signature = self.config["DEFAULT"].get("global_anon_sig")
-                pr_signature = self.config["DEFAULT"].get("global_pr_sig")
-                anon_pr_sig = self.config["DEFAULT"].get("global_anon_pr_sig")
-                if signature is None or anon_signature is None or pr_signature is None or anon_pr_sig is None:
-                    print("[bold][red]WARN[/red]: Global signatures are enabled but not provided in config.[/bold]")                
-            else:
-                signature = self.config["TRACKERS"][tracker].get("signature")
-                anon_signature = self.config["TRACKERS"][tracker].get("anon_signature")
-                pr_signature = self.config["TRACKERS"][tracker].get("pr_signature")
-                anon_pr_sig = self.config["TRACKERS"][tracker].get("anon_pr_signature")
-                if signature is None or anon_signature is None or pr_signature is None or anon_pr_sig is None:
-                    print("[bold][red]WARN[/red]: Global Signatures are turned off, but no signature is provided for selected tracker.[/bold]")
-
-        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'a', encoding='utf-8') as descfile:
-            if meta["personalrelease"]:
-                if meta["anon"] != 0 or self.config["TRACKERS"][tracker].get("anon", False):
-                    await descfile.write("\n" + anon_pr_sig)
-                elif meta["anon"] == 0:
-                    await descfile.write("\n" + pr_signature)
-            else:
-                if meta["anon"] != 0 or self.config["TRACKERS"][tracker].get("anon", False):
-                    await descfile.write("\n" + anon_signature)
-                elif meta["anon"] == 0:
-                    await descfile.write("\n" + signature)
+            await self._write_images(descfile, meta, tracker, whitelist)
+            await self._write_signature(descfile, meta, tracker)
 
         return
+
+    async def _write_disc_info(self, descfile, discs):
+        """Helper method to write disc information"""
+        if not discs:
+            return
+            
+        if discs[0]['type'] == "DVD":
+            await descfile.write(f"[spoiler=VOB MediaInfo][code]{discs[0]['vob_mi']}[/code][/spoiler]\n\n")
+        
+        if len(discs) >= 2:
+            for disc in discs[1:]:
+                if disc['type'] == "BDMV":
+                    await descfile.write(f"[spoiler={disc.get('name', 'BDINFO')}][code]{disc['summary']}[/code][/spoiler]\n\n")
+                elif disc['type'] == "DVD":
+                    await descfile.write(f"{disc['name']}:\n")
+                    await descfile.write(f"[spoiler={os.path.basename(disc['vob'])}][code][{disc['vob_mi']}[/code][/spoiler] "
+                                    f"[spoiler={os.path.basename(disc['ifo'])}][code][{disc['ifo_mi']}[/code][/spoiler]\n\n")
+                elif disc['type'] == "HDDVD":
+                    await descfile.write(f"{disc['name']}:\n")
+                    await descfile.write(f"[spoiler={os.path.basename(disc['largest_evo'])}][code][{disc['evo_mi']}[/code][/spoiler]\n\n")
+
+    async def _write_media_elements(self, descfile, meta, tracker):
+        """Helper method to write trailer and logo"""
+        if tracker not in ('AITHER', 'CBR', 'OE'):
+            if self.config["DEFAULT"].get("add_trailer", False) and meta.get("category") == "MOVIE":
+                if key := meta.get("youtube"):
+                    await descfile.write(f"[center][youtube]{key}[/youtube][/center]")
+
+        if self.config["DEFAULT"].get("add_logo", False):
+            if logo := meta.get('logo'):
+                logo_size = self.config["DEFAULT"].get("logo_size", 420)
+                await descfile.write(f"[center][img={logo_size}]{logo}[/img][/center]")
+
+    async def _get_valid_images(self, meta, tracker, whitelist=None):
+        whitelist = whitelist if whitelist is not None else []
+        num_screens = int(meta.get('screens', 0)) or None
+        
+        if not whitelist:
+            return meta.get('image_list', [])[:num_screens]
+
+        normalized_whitelist = {host.split('.')[0] if '.' in host else host for host in whitelist}
+        rehost_list = meta.get('rehost_list', {})
+        for host_key, images in rehost_list.items():
+            if host_key in normalized_whitelist:
+                return images[:num_screens]
+
+        # Fallback to image_list
+        valid_images = []
+        for image in meta.get('image_list', []):
+            domain = urlparse(image['web_url']).hostname or ''
+            domain_key = domain.split('.')[0] if domain else ''
+            if domain in whitelist or domain_key in normalized_whitelist:
+                valid_images.append(image)
+        
+        return valid_images[:num_screens]
+
+    async def _write_images(self, descfile, meta, tracker, whitelist=None):
+        images = await self._get_valid_images(meta, tracker, whitelist)
+        if not images:
+            return
+
+        img_size = 350 if tracker == "CBR" else self.config["DEFAULT"].get("img_size", 500)
+        inline_imgs = int(self.config["DEFAULT"].get("inline_imgs", 0)) or 0
+
+        await descfile.write("\n[center]")
+        for i, image in enumerate(images):
+            try:
+                await descfile.write(f"[url={image['web_url']}][img={img_size}]{image['raw_url']}[/img][/url] ")
+                if inline_imgs and i % inline_imgs == inline_imgs - 1:
+                    await descfile.write("\n")
+            except (KeyError, TypeError):
+                continue
+        await descfile.write("[/center]")
+
+    async def _write_signature(self, descfile, meta, tracker):
+        """Helper method to write signature"""
+        use_global_sigs = self.config["DEFAULT"].get("use_global_sigs", False)
+        config_section = "DEFAULT" if use_global_sigs else "TRACKERS"
+        sig_config = self.config[config_section].get(tracker, {}) if not use_global_sigs else self.config[config_section]
+
+        sig_types = {
+            "signature": sig_config.get("signature"),
+            "anon_signature": sig_config.get("anon_signature"),
+            "pr_signature": sig_config.get("pr_signature"),
+            "anon_pr_sig": sig_config.get("anon_pr_signature")
+        }
+        
+        if any(sig is None for sig in sig_types.values()):
+            print(f"[bold][red]WARN[/red]: {'Global signatures' if use_global_sigs else 'Tracker signatures'} "
+                "are enabled but not fully provided in config.")
+
+        is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"][tracker].get("anon", False)
+        is_pr = meta.get("personal_release", False)
+        sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
+        
+        if sig := sig_types.get(sig_key):
+            await descfile.write(f"\n{sig}")
+
 
     async def create_music_description(self, meta, tracker):
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
@@ -218,7 +237,7 @@ class COMMON():
 
                         log_file = meta.get('log_files', [])
                         if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
-                            log_contents = self.read_log_file(log_file[list(tracks.keys()).index(disc)])
+                            log_contents = await self.read_log_file(log_file[list(tracks.keys()).index(disc)])
                             if log_contents:
                                 await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
 
@@ -233,7 +252,7 @@ class COMMON():
 
                     log_file = meta.get('log_files', [])
                     if log_file:
-                        log_contents = self.read_log_file(log_file[0])
+                        log_contents = await self.read_log_file(log_file[0])
                         if log_contents:
                             await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
 
