@@ -218,7 +218,7 @@ class COMMON():
 
                         log_file = meta.get('log_files', [])
                         if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
-                            log_contents = self.read_log_file(log_file[list(tracks.keys()).index(disc)])
+                            log_contents = await self.read_log_file(log_file[list(tracks.keys()).index(disc)])
                             if log_contents:
                                 await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
 
@@ -233,7 +233,7 @@ class COMMON():
 
                     log_file = meta.get('log_files', [])
                     if log_file:
-                        log_contents = self.read_log_file(log_file[0])
+                        log_contents = await self.read_log_file(log_file[0])
                         if log_contents:
                             await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
 
