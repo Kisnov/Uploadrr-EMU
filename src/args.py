@@ -39,14 +39,14 @@ class Args:
 
     def _setup_parser(self) -> ArgumentParser:
         """Set up the ArgumentParser with all defined arguments."""
-        parser = ArgumentParser(description="Command-line argument parser for media uploads.")
+        parser = ArgumentParser(description="Command-line arguments for Uploadrr")
 
         # Core arguments
         parser.add_argument('path', nargs='*', help="Path to file/directory")
         parser.add_argument('-fd', '--full-directory', dest='full_dir', action='store_true',
                             help="Uploads folder and all content within"),
         parser.add_argument('-s', '--screens', type=int, required=False, help="Number of screenshots", 
-                            default=int(self.config.get('SCREENS', {}).get('screens', 3)))
+                            default=int(self.config.get('SCREENS', {}).get('screen_count', 3)))
 
         # Validators for choices
         validators = {
@@ -106,7 +106,7 @@ class Args:
 
             ('-a --anon', 'anon', "Upload anonymously"),
             ('-debug --debug', 'debug', "Debug mode with extra info"),
-            ('-ddebug --deep-debug', 'deep_debug', "Deep debug mode with connections"),
+            ('-ddebug --deep-debug', 'deep_debug', "Deep debug even more info, hopefully"),
             ('-dr --draft', 'draft', "Send to drafts (BHD)"),
             ('-ffdebug --ffdebug', 'ffdebug', "Show ffmpeg info during screenshots"),
             ('-hc --hardcoded-subs', 'hardcoded_subs', "Contains hardcoded subs"),
@@ -173,15 +173,21 @@ class Args:
             args['unattended'] = args['auto_desc'] = True
             args['auto_queue'] = args['full_auto']
 
-        # Validate and adjust path
-        if not args['path'] or not os.path.exists(self.list_to_string(args['path'])):
-            args['path'] = [p for p in before_args if os.path.exists(p)] or args['path']
+        if not args['path']:
+            valid_paths = [p for p in before_args if os.path.exists(p)]
+            args['path'] = valid_paths if valid_paths else args['path']
+        else:
+            args['path'] = [p for p in args['path'] if os.path.exists(p)]
+
+        if not args['path'] and not args.get('auto_queue'):
+            console.print("[red]No valid paths provided.[/red]")
+            args['path'] = []
 
         # Reset manual TMDb
         if meta.get('tmdb_manual'):
             meta['tmdb_manual'] = None
 
-        # Process each argument
+        # Process each argument (excluding 'path')
         value_processors = {
             'category': lambda v: v.upper() if v else None,
             'type': lambda v: v.upper().replace('-', '') if v else None,
@@ -203,7 +209,9 @@ class Args:
         }
 
         for key, value in args.items():
-            if value not in (None, []):
+            if key == 'path':
+                continue
+            elif value not in (None, []):
                 if key in value_processors:
                     result = value_processors[key](value)
                     if isinstance(result, tuple) and len(result) == 2:
@@ -218,7 +226,7 @@ class Args:
             elif key in ('manual_edition', 'freeleech'):
                 meta[key] = value if key != 'freeleech' else 100
             elif key == 'tag' and value == []:
-                meta[key] = ""
+                meta[key] = ""  # Empty tag list becomes empty string
             else:
                 meta[key] = meta.get(key, None)
 
