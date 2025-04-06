@@ -19,10 +19,9 @@ from tinytag import TinyTag
 
 from src.args import Args
 from src.console import console, log
-from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze, MusicBrainzAPI, DiscogsAPI
+from src.databases import AniListHandler, DiscogsAPI, IMDbHandler, MusicBrainzAPI, TMDbHandler, is_scene, search_tvmaze
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
-from src.screenshots import ScreenshotManager
 from src.trackers.BLU import BLU
 from src.trackers.COMMON import COMMON
 from src.trackers.HDB import HDB
@@ -42,7 +41,6 @@ class Prep():
                                              
     def __init__(self, config: Dict):
         self.config = config
-        self.screenshot_manager = ScreenshotManager(config=config, base_dir=self.base_dir)
         self._regions = None
         self._distributor_list = None
         self._services = None
@@ -186,9 +184,6 @@ class Prep():
         # Process disc type and set initial metadata
         meta = await self._process_disc_type(meta, videoloc)
 
-        # Assign common metadata in parallel where possible
-        meta = await self._assign_common_metadata(meta)
-
         # Tracker API integrations
         await self._integrate_tracker_apis(meta)
 
@@ -271,7 +266,7 @@ class Prep():
             meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
 
         guess = guess or guessit(meta['video'])
-        meta['category'] = self.get_cat(meta['video']) or guess.get('type', 'MOVIE').upper()
+        meta['category'] = self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
         if self.is_sports(meta['uuid']):
             meta['is_sports'] = True
             meta['category'] = 'SPORTS'
@@ -315,7 +310,7 @@ class Prep():
 
         meta['resolution'] = meta.get('resolution') or results[0]
         meta['sd'] = 1 if meta['resolution'] in ("480i", "480p", "576i", "576p", "540p") else 0
-        meta['audio'], meta['channels'], meta['has_commentary'] = results[1]
+        meta['audio'], meta['channels'], meta['has_commentary'], meta['is_silent'] = results[1]
         meta['3D'] = results[2]
         meta['source'], meta['type'] = results[3]
         meta['uhd'] = results[4]
@@ -366,9 +361,12 @@ class Prep():
             meta['tag'] = f"-{meta['tag']}"
         if meta['category'] == 'TV':
             meta = await self.get_season_episode(meta['video'], meta)
-        meta = await self.tag_override(meta)
+
+        # Assign common metadata 
+        meta = await self._assign_common_metadata(meta) #After TMDb for Dual/Dub
 
         # Additional cleanup
+        meta = await self.tag_override(meta)
         if meta['tag'][1:].startswith(meta['channels']):
             meta['tag'] = meta['tag'].replace(f"-{meta['channels']}", '')
         if meta.get('no_tag', False):
@@ -1132,15 +1130,16 @@ class Prep():
         else:
             return "ENCODE"
 
-    def get_cat(self, video):
+    def get_cat(self, video, is_disc, discs):
+        if is_disc and len(discs) > 2:
+            return "TV"
         category = guessit(video.replace('1.0', ''))['type']
         if category.lower() == "movie":
-            category = "MOVIE" #1
+            return "MOVIE" #1
         elif category.lower() in ("tv", "episode"):
-            category = "TV" #2
+            return "TV" #2
         else:
-            category = "MOVIE"
-        return category
+            return "MOVIE"
 
 
 
@@ -1281,7 +1280,7 @@ class Prep():
             if region is not None:
                 region = region.upper()
             else:
-                for key, value in self.regions.items(): 
+                for key, value in self._regions.items(): 
                     if f" {key} " in label:
                         region = value
                         break

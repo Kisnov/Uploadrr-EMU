@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 
 import aiofiles
 from pathlib import Path
@@ -123,8 +124,8 @@ class MediaInfoHandler:
             if channels.isdigit():
                 channels = f"{channels}.0"
 
-            if track.get('Language', '') == "zxx":
-                meta['silent'] = True
+            if track.get('Language', '').lower() == "zxx":
+                meta['instrumental'] = True
 
             CODEC_MAP = {
                 "DTS": "DTS", "AAC": "AAC", "AC-3": "DD", "E-AC-3": "DDP",
@@ -168,10 +169,28 @@ class MediaInfoHandler:
             else:
                 chan = f"{channels}.0" if int(channels) <= 2 else f"{int(channels) - 1}.1"
 
-            if track.get('Language', '') == "zxx":
-                meta['silent'] = True
+        # Handle Dual-Audio & Commentary/Silent Detection
 
-        # Handle Dual-Audio & Commentary Detection
+        soundmix = meta.get('imdb_info', {}).get('soundmix', [])
+        keywords = meta.get('keywords', '').lower().split(',')
+        release_date = meta.get('full_date', '')
+        year = meta.get('year', '')
+        try:
+            parsed_date = datetime.strptime(release_date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            parsed_date = None
+
+        is_silent = (
+            any('silent' in sm.lower() for sm in soundmix)
+            or 'silent film' in keywords
+            or (parsed_date and parsed_date < datetime(1927, 10, 1))
+            or (not parsed_date and year.isdigit() and int(year) <= 1926)
+            or all(
+                t.get('Language', '').lower() == 'zxx'
+                for t in tracks if t.get('@type') == "Audio"
+            )
+        )
+
         if meta.get('original_language') != 'en':
             eng, orig = False, False
             for t in tracks:
@@ -180,17 +199,21 @@ class MediaInfoHandler:
                 lang = t.get('Language', '')
                 title = t.get('Title', '').lower()
 
-                if lang == "en" and "commentary" not in title:
+                def ancillary_track(title: str) -> bool:
+                    return "commentary" in title or "review" in title
+
+                if lang == "en" and not ancillary_track(title):
                     eng = True
-                if lang == meta.get('original_language') and "commentary" not in title:
+                if lang == meta.get('original_language') and not ancillary_track(title):
                     orig = True
                 if lang in ['zh', 'cn', 'cmn', 'no', 'nb'] and meta.get('original_language') in ['zh', 'cn', 'cmn', 'no', 'nb']:
                     orig = True
 
-            if eng and orig:
-                dual = "Dual-Audio"
-            elif eng and not orig and meta.get('original_language') not in ['zxx', 'xx', None] and not meta.get('no_dub', False):
-                dual = "Dubbed"
+            if not is_silent:
+                if eng and orig:
+                    dual = "Dual-Audio"
+                elif eng and not orig and meta.get('original_language') not in ['zxx', 'xx', None] and not meta.get('no_dub', False):
+                    dual = "Dubbed"
 
         has_commentary = any("commentary" in t.get('Title', '').lower() for t in tracks if t.get('@type') == "Audio")
 
@@ -237,7 +260,8 @@ class MediaInfoHandler:
             codec = track.get('CodecID_Hint', '')
 
         audio = f"{dual} {codec} {format_settings} {chan}{extra}".strip()
-        return audio, chan, has_commentary
+        return audio, chan, has_commentary, is_silent
+
 
 
     def get_video_encode(self, mi: dict, type_: str, bdinfo=None) -> tuple[str, str, bool, str]:
