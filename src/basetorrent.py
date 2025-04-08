@@ -36,6 +36,13 @@ class TorrentMaker:
             output_path = Path(meta['base_dir']) / "tmp" / meta['uuid'] / f"{output_filename}.torrent"
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
+            log.debug(f"Path used for torrent: {path}")
+            log.debug(f"Exclude patterns: {exclude}")
+            log.debug(f"Include patterns: {include}")
+            log.debug(f"Output path: {output_path}")
+            log.debug(f"Using method: {torrent_creation}")
+
+
             await self._generate(torrent, path, output_path, piece_size, torrent_creation)
             
             console.print("[bold green].torrent created", end="\r")
@@ -126,7 +133,8 @@ class TorrentMaker:
                 if threads:
                     args.extend(['--threads', str(threads)])
                 for pattern in exclude_globs:
-                    args.extend(['--exclude', pattern])
+                    if pattern != '._*':
+                        args.extend(['--exclude', pattern])    
                 for pattern in include_globs:
                     args.extend(['--include', pattern])
                 args.append(str(path))
@@ -233,7 +241,9 @@ class TorrentMaker:
                 stdout, stderr = await process.communicate()               
                 end_time = time.time()
                 elapsed_time = end_time - start_time
-                log.debug(f" Hashed in {elapsed_time:.2f} seconds")
+                log.ddebug(f"{tool_name} stdout: {stdout.decode().strip()}")
+                log.ddebug(f"{tool_name} stderr: {stderr.decode().strip()}")
+                log.debug(f"Hashed in {elapsed_time:.2f} seconds")
 
                 if process.returncode != 0:
                     safe_args = args.copy()
