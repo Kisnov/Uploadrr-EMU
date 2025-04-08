@@ -581,7 +581,7 @@ class PTP():
         return desc
 
     async def edit_desc(self, meta):
-        from prep import Prep
+        from src.prep import Prep
         prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=self.config)
         base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding="utf-8").read()
         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding="utf-8") as desc:
@@ -763,8 +763,11 @@ class PTP():
             data["other_resolution"] = other_resolution
         if meta.get('personalrelease', False) == True:
             data["internalrip"] = "on"
-        # IF SPECIAL (idk how to check for this automatically)
-            # data["special"] = "on"
+
+        # Rifftrax and Extras uploads should be marked as special for PTP
+        elif "rifftrax" or "extras" in meta.get('edition', '').lower():
+            data["special"] = "on"
+
         if int(str(meta.get("imdb_id", "0")).replace('tt', '')) == 0:
             data["imdb"] = "0"
         else:
