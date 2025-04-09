@@ -181,7 +181,7 @@ class MediaInfoHandler:
             parsed_date = None
 
         is_silent = (
-            any('silent' in sm.lower() for sm in soundmix)
+            (soundmix and any('silent' in sm.lower() for sm in soundmix))
             or 'silent film' in keywords
             or (parsed_date and parsed_date < datetime(1927, 10, 1))
             or (not parsed_date and year.isdigit() and int(year) <= 1926)
