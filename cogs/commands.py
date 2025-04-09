@@ -1,4 +1,3 @@
-from discord.ext.commands.errors import CommandInvokeError
 from src.prep import Prep
 from src.args import Args
 from src.clients import Clients
@@ -16,7 +15,6 @@ import os
 from datetime import datetime
 import asyncio
 import json
-import shutil
 import multiprocessing
 from pathlib import Path
 from glob import glob
@@ -60,7 +58,7 @@ class Commands(commands.Cog):
             try:
                 args = (meta['path'],) + args + search_args
                 meta, help, before_args = parser.parse(args, meta)
-            except SystemExit as error:
+            except SystemExit:
                 await ctx.send(f"Invalid argument detected, use `{config['DISCORD']['command_prefix']}args` for list of valid args")
                 return
             if meta['imghost'] == None:
@@ -70,7 +68,7 @@ class Commands(commands.Cog):
             #     if str(ua).lower() == "true":
             #         meta['unattended'] = True
             prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=config)
-            preparing_embed = discord.Embed(title=f"Preparing to upload:", description=f"```{path}```", color=0xffff00)
+            preparing_embed = discord.Embed(title="Preparing to upload:", description=f"```{path}```", color=0xffff00)
             if message_id == 0:
                 message = await ctx.send(embed=preparing_embed)
                 meta['embed_msg_id'] = message.id
@@ -160,7 +158,7 @@ class Commands(commands.Cog):
         """
         if ctx.channel.id != int(config['DISCORD']['discord_channel_id']):
             return
-        if uuid == None:
+        if uuid is None:
             await ctx.send("Missing ID, please try again using the ID in the footer")
         parser = Args(config)
         base_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
@@ -205,14 +203,14 @@ class Commands(commands.Cog):
             args = args.replace(search_terms, '')
             while args.startswith(" "):
                 args = args[1:]
-        except SystemExit as error:
+        except SystemExit:
             await ctx.send(f"Invalid argument detected, use `{config['DISCORD']['command_prefix']}args` for list of valid args")
             return
 
         if ctx.channel.id != int(config['DISCORD']['discord_channel_id']):
             return
         search = Search(config=config)
-        if search_terms == None:
+        if search_terms is None:
             await ctx.send("Missing search term(s)")
             return
         files_total = await search.searchFile(search_terms)
@@ -265,14 +263,14 @@ class Commands(commands.Cog):
             args = args.replace(search_terms, '')
             while args.startswith(" "):
                 args = args[1:]
-        except SystemExit as error:
+        except SystemExit:
             await ctx.send(f"Invalid argument detected, use `{config['DISCORD']['command_prefix']}args` for list of valid args")
             return
 
         if ctx.channel.id != int(config['DISCORD']['discord_channel_id']):
             return
         search = Search(config=config)
-        if search_terms == None:
+        if search_terms is None:
             await ctx.send("Missing search term(s)")
             return
         folders_total = await search.searchFolder(search_terms)
@@ -322,7 +320,7 @@ class Commands(commands.Cog):
         prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=config)
         meta['name_notag'], meta['name'], meta['clean_name'], meta['potential_missing'] = await prep.get_name(meta)
         
-        if meta.get('uploaded_screens', False) == False:
+        if not meta.get('uploaded_screens', False):
             if meta.get('embed_msg_id', '0') != '0':
                 message = await ctx.fetch_message(meta['embed_msg_id'])
                 await message.edit(embed=discord.Embed(title="Uploading Screenshots", color=0xffff00))
@@ -334,7 +332,7 @@ class Commands(commands.Cog):
             return_dict = multiprocessing.Manager().dict()
             u = multiprocessing.Process(target = prep.upload_screens, args=(meta, meta['screens'], 1, 0, meta['screens'], [], return_dict))
             u.start()
-            while u.is_alive() == True:
+            while u.is_alive() is True:
                 await asyncio.sleep(3)
             meta['image_list'] = return_dict['image_list']
             if meta['debug']:
@@ -351,15 +349,15 @@ class Commands(commands.Cog):
                 message = await ctx.send(embed=discord.Embed(title="Creating .torrent", color=0xffff00))
                 meta['embed_msg_id'] = message.id
             channel = message.channel
-            if meta['nohash'] == False:
+            if not meta['nohash']:
                 if meta.get('torrenthash', None) != None:
-                    reuse_torrent = await client.find_existing_torrent(meta)
+                    reuse_torrent = await client.find_existing_torrent(meta)  # noqa: F821
                     if reuse_torrent != None:
                         prep.create_base_from_existing_torrent(reuse_torrent, meta['base_dir'], meta['uuid'])
 
                 p = multiprocessing.Process(target = prep.create_torrent, args=(meta, Path(meta['path'])))
                 p.start()
-                while p.is_alive() == True:
+                while p.is_alive() is True:
                     await asyncio.sleep(5)
 
                 if int(meta.get('randomized', 0)) >= 1:
@@ -391,7 +389,7 @@ class Commands(commands.Cog):
         embed.add_field(name="Links", value=f"[TMDB](https://www.themoviedb.org/{meta['category'].lower()}/{meta['tmdb']}){imdb}{tvdb}")
         embed.add_field(name=f"{res} / {meta['type']}{tag}", value=f"```{meta['name']}```", inline=False)
         if missing != []:
-            embed.add_field(name=f"POTENTIALLY MISSING INFORMATION:", value="\n".join(missing), inline=False)
+            embed.add_field(name="POTENTIALLY MISSING INFORMATION:", value="\n".join(missing), inline=False)
         embed.set_thumbnail(url=f"https://image.tmdb.org/t/p/original{meta['poster']}")
         embed.set_footer(text=meta['uuid'])
         embed.set_author(name="L4G's Upload Assistant", url="https://github.com/L4GSP1KE/Upload-Assistant", icon_url="https://images2.imgbox.com/6e/da/dXfdgNYs_o.png")
@@ -514,7 +512,7 @@ class Commands(commands.Cog):
                         await lcd.edit_desc(meta)                         
                 archive_url = await prep.package(meta)
                 upload_embed_description = upload_embed_description.replace('MANUAL', '~~MANUAL~~')
-                if archive_url == False:
+                if not archive_url:
                     upload_embed = discord.Embed(title=f"Uploaded `{meta['name']}` to:", description=upload_embed_description, color=0xff0000)
                     upload_embed.add_field(name="Unable to upload prep files", value=f"The files can be found at `tmp/{meta['title']}.tar`")
                     await msg.edit(embed=upload_embed)
@@ -526,7 +524,7 @@ class Commands(commands.Cog):
                 blu = BLU(config=config)
                 dupes = await blu.search_existing(meta)
                 meta = await self.dupe_embed(dupes, meta, tracker_emojis, channel)
-                if meta['upload'] == True:
+                if meta['upload']:
                     await blu.upload(meta)
                     await client.add_to_client(meta, "BLU")
                     upload_embed_description = upload_embed_description.replace('BLU', '~~BLU~~')
@@ -536,7 +534,7 @@ class Commands(commands.Cog):
                 bhd = BHD(config=config)
                 dupes = await bhd.search_existing(meta)
                 meta = await self.dupe_embed(dupes, meta, tracker_emojis, channel)
-                if meta['upload'] == True:
+                if meta['upload']:
                     await bhd.upload(meta)
                     await client.add_to_client(meta, "BHD")
                     upload_embed_description = upload_embed_description.replace('BHD', '~~BHD~~')
@@ -546,7 +544,7 @@ class Commands(commands.Cog):
                 aither = AITHER(config=config)
                 dupes = await aither.search_existing(meta)
                 meta = await self.dupe_embed(dupes, meta, tracker_emojis, channel)
-                if meta['upload'] == True:
+                if meta['upload']:
                     await aither.upload(meta)
                     await client.add_to_client(meta, "AITHER")
                     upload_embed_description = upload_embed_description.replace('AITHER', '~~AITHER~~')
@@ -556,7 +554,7 @@ class Commands(commands.Cog):
                 stc = STC(config=config)
                 dupes = await stc.search_existing(meta)
                 meta = await self.dupe_embed(dupes, meta, tracker_emojis, channel)
-                if meta['upload'] == True:
+                if meta['upload']:
                     await stc.upload(meta)
                     await client.add_to_client(meta, "STC")
                     upload_embed_description = upload_embed_description.replace('STC', '~~STC~~')
@@ -566,7 +564,7 @@ class Commands(commands.Cog):
                 lcd = LCD(config=config)
                 dupes = await lcd.search_existing(meta)
                 meta = await self.dupe_embed(dupes, meta, tracker_emojis, channel)
-                if meta['upload'] == True:
+                if meta['upload']:
                     await lcd.upload(meta)
                     await client.add_to_client(meta, "LCD")
                     upload_embed_description = upload_embed_description.replace('LCD', '~~LCD~~')
