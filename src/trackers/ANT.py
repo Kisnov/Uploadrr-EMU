@@ -1,25 +1,27 @@
 # -*- coding: utf-8 -*-
-import os
 import asyncio
 import requests
-import json
 import platform
 from pathlib import Path
 from pymediainfo import MediaInfo
 
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class ANT():
 
     def __init__(self, config):
         self.config = config
-        self.type = 'api'
+        self.type = 'api' # TODO gazelle
         self.tracker = 'ANT'
         self.source_flag = 'ANT'
-        self.search_url = 'https://anthelion.me/api.php'
-        self.upload_url = 'https://anthelion.me/api.php'
+        self.domain = 'https://anthelion.me'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"https://tracker.anthelion.me/{pid}/announce"
+        self.api_key = config['TRACKERS'][self.tracker]['api_key'].strip()
+        self.search_url = f'{self.domain}/api.php'
+        self.upload_url = f'{self.domain}/api.php'
         self.signature = None
         self.banned_groups = ['3LTON', '4yEo', 'ADE', 'AFG', 'AniHLS', 'AnimeRG', 'AniURL', 'AROMA', 'aXXo', 'Brrip', 'CHD', 'CM8', 
                             'CrEwSaDe', 'd3g', 'DDR', 'DNL', 'DeadFish', 'ELiTE', 'eSc', 'FaNGDiNG0', 'FGT', 'Flights', 'FRDS', 
@@ -58,7 +60,7 @@ class ANT():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         flags = await self.get_flags(meta)
         if meta['anon'] != 0 or self.config['TRACKERS'][self.tracker].get('anon', False):
             anon = 1
@@ -91,7 +93,7 @@ class ANT():
         open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
         files = {'file_input': open_torrent}
         data = {
-            'api_key': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
+            'api_key': self.api_key,
             'action': 'upload',
             'tmdbid': meta['tmdb'],
             'mediainfo': mi_dump,
@@ -143,7 +145,7 @@ class ANT():
         dupes = {}
         console.print("[yellow]Searching for existing torrents on site...")
         params = {
-            'apikey': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
+            'apikey': self.api_key,
             't': 'search',
             'o': 'json'
         }
@@ -152,7 +154,7 @@ class ANT():
         elif int(meta['imdb_id'].replace('tt', '')) != 0:
             params['imdb'] = meta['imdb_id']
         try:
-            response = requests.get(url='https://anthelion.me/api', params=params)
+            response = requests.get(url=self.search_url, params=params)
             response = response.json()
             for each in response['item']:
                 largest = each['files'][0]
@@ -164,7 +166,7 @@ class ANT():
                 dupes[result] = size
         ## CvT: I have no access to ANT and don't know why their sorting dupes by size. I merely adapted the code to produce the dictionary needed for printout, as well as size comparing.        
         except Exception as e:
-            console.print(f'[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect. Error: {e}')
+            log.error(f'[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect. Error: {e}')
             await asyncio.sleep(5)
 
         return dupes
