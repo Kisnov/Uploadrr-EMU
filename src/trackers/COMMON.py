@@ -5,35 +5,44 @@ import requests
 import re
 import json
 import aiofiles
+from pathlib import Path
 from urllib.parse import urlparse
 from src.bbcode import BBCODE
 from src.console import console, log
-from rich import print
+from dataclasses import dataclass
 
 class COMMON():
     def __init__(self, config):
         self.config = config
         pass
 
-    async def edit_torrent(self, meta, tracker, source_flag, torrent_filename="BASE"):
-        if os.path.exists(f"{meta['base_dir']}/tmp/{meta['uuid']}/{torrent_filename}.torrent"):
-            new_torrent = Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/{torrent_filename}.torrent")
-            for each in list(new_torrent.metainfo):
-                if each not in ('announce', 'comment', 'creation date', 'created by', 'encoding', 'info'):
-                    new_torrent.metainfo.pop(each, None)
-            new_torrent.metainfo['announce'] = self.config['TRACKERS'][tracker].get('announce_url', "https://fake.tracker").strip()
+    async def edit_torrent(self, meta, tracker, source_flag, announce_url): #TODO ADD announce_url everywhere
+        torrent_path = Path(meta['base_dir']) / "tmp" / meta['uuid']
+        base_torrent = torrent_path / "BASE.torrent"
+        if base_torrent.exists():
+            new_torrent = Torrent.read(base_torrent)
+            for key in list(new_torrent.metainfo):
+                if key not in ('announce', 'comment', 'creation date', 'created by', 'encoding', 'info'):
+                    new_torrent.metainfo.pop(key, None)
+                
+            new_torrent.metainfo['announce'] = announce_url.strip()
             new_torrent.metainfo['info']['source'] = source_flag
-            Torrent.copy(new_torrent).write(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]{meta['clean_name']}.torrent", overwrite=True)
 
-    # used to add tracker url, comment and source flag to torrent file
+            tracker_torrent = torrent_path / f"[{tracker}]{meta['clean_name']}.torrent"
+            Torrent.copy(new_torrent).write(tracker_torrent, overwrite=True)
+
+    # Add tracker url, comment + source flag (BHTV, HDT)
     async def add_tracker_torrent(self, meta, tracker, source_flag, new_tracker, comment):
-        if os.path.exists(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent"):
-            new_torrent = Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent")
+        base_path = Path(meta['base_dir']) / "tmp" / meta['uuid'] / "BASE.torrent"
+        if base_path.exists():
+            new_torrent = Torrent.read(base_path)
             new_torrent.metainfo['announce'] = new_tracker
             new_torrent.metainfo['comment'] = comment
             new_torrent.metainfo['info']['source'] = source_flag
-            Torrent.copy(new_torrent).write(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]{meta['clean_name']}.torrent", overwrite=True)
-    
+
+            out_path = Path(meta['base_dir']) / "tmp" / meta['uuid'] / f"[{tracker}]{meta['clean_name']}.torrent"
+            Torrent.copy(new_torrent).write(out_path, overwrite=True)
+
 
     async def read_log_file(self, log_file):
         try:
@@ -52,33 +61,60 @@ class COMMON():
             return f"Error reading log file: {str(e)}"
 
     async def unit3d_edit_desc(self, meta, tracker, comparison=False, desc_header="", whitelist=None):
+        # Read base description
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8') as basefile:
             base = await basefile.read()
 
+        # Parse control markers
+        control = DescControl()
+        for line in base.splitlines():
+            if line.strip().startswith("# USE:"):
+                control = DescControl.from_markers(line.strip())
+                base = "\n".join(l for l in base.splitlines() if not l.strip().startswith("# USE:"))
+                break
+
+        # Open output file
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
             if desc_header:
                 await descfile.write(desc_header)
 
             bbcode = BBCODE()
-            await self._write_disc_info(descfile, meta.get('discs', []))
-            
-            # Process BBCode
-            desc = bbcode.convert_pre_to_code(base)
-            desc = bbcode.convert_hide_to_spoiler(desc)
-            if tracker in ('LDU', 'BLU', 'LST', 'RHD', 'RF', 'AITHER'):
-                comparison = True
-            if not comparison:
-                desc = bbcode.convert_comparison_to_collapse(desc, 1000)
 
+            # Write disc info if enabled
+            if control.include_disc_info and not control.as_is:
+                await self._write_disc_info(descfile, meta.get('discs', []))
+
+            # Process base description
+            if control.as_is:
+                await descfile.write(base)
+            else:
+                desc = bbcode.convert_pre_to_code(base)
+                desc = bbcode.convert_hide_to_spoiler(desc)
+                if tracker in ('LDU', 'BLU', 'LST', 'RHD', 'RF', 'AITHER'):
+                    comparison = True
+                if not comparison:
+                    desc = bbcode.convert_comparison_to_collapse(desc, 1000)
+                await descfile.write(desc)
+
+            # Handle music description
             if meta.get('is_music', False):
                 await self.create_music_description(meta, tracker)
+                return  # Music has its own flow, skip further processing
 
-            await self._write_media_elements(descfile, meta, tracker)
-            await descfile.write(desc)
-            await self._write_images(descfile, meta, tracker, whitelist)
-            await self._write_signature(descfile, meta, tracker)
+            # Write media elements (trailer/logo)
+            if not control.as_is and (control.include_trailer or control.include_logo):
+                await self._write_media_elements(descfile, meta, tracker, control)
+
+            # Write images
+            if control.include_screens and not control.as_is:
+                await self._write_images(descfile, meta, tracker, whitelist, control)
+
+            # Write signature
+            if control.include_signature and not control.as_is:
+                await self._write_signature(descfile, meta, tracker)
 
         return
+
 
     async def _write_disc_info(self, descfile, discs):
         """Helper method to write disc information"""
@@ -100,14 +136,14 @@ class COMMON():
                     await descfile.write(f"{disc['name']}:\n")
                     await descfile.write(f"[spoiler={os.path.basename(disc['largest_evo'])}][code][{disc['evo_mi']}[/code][/spoiler]\n\n")
 
-    async def _write_media_elements(self, descfile, meta, tracker):
-        """Helper method to write trailer and logo"""
-        if tracker not in ('AITHER', 'CBR', 'OE'):
+    async def _write_media_elements(self, descfile, meta, tracker, control):
+        """Helper method to write trailer and logo based on control"""
+        if control.include_trailer and tracker not in ('AITHER', 'CBR', 'OE'):
             if self.config["DEFAULT"].get("add_trailer", False) and meta.get("category") == "MOVIE":
                 if key := meta.get("youtube"):
                     await descfile.write(f"[center][youtube]{key}[/youtube][/center]")
 
-        if self.config["DEFAULT"].get("add_logo", False):
+        if control.include_logo and self.config["DEFAULT"].get("add_logo", False):
             if logo := meta.get('logo'):
                 logo_size = self.config["DEFAULT"].get("logo_size", 420)
                 await descfile.write(f"[center][img={logo_size}]{logo}[/img][/center]")
@@ -135,18 +171,21 @@ class COMMON():
         
         return valid_images[:num_screens]
 
-    async def _write_images(self, descfile, meta, tracker, whitelist=None):
+    async def _write_images(self, descfile, meta, tracker, whitelist=None, control=None):
         images = await self._get_valid_images(meta, tracker, whitelist)
         if not images:
             return
 
         img_size = 350 if tracker == "CBR" else self.config["DEFAULT"].get("img_size", 500)
+        if not control.modify_img_size:
+            img_size = ""  # No size modification
         inline_imgs = int(self.config["DEFAULT"].get("inline_imgs", 0)) or 0
 
         await descfile.write("\n[center]")
         for i, image in enumerate(images):
             try:
-                await descfile.write(f"[url={image['web_url']}][img={img_size}]{image['raw_url']}[/img][/url] ")
+                img_tag = f"[img={img_size}]" if img_size else "[img]"
+                await descfile.write(f"[url={image['web_url']}]{img_tag}{image['raw_url']}[/img][/url] ")
                 if inline_imgs and i % inline_imgs == inline_imgs - 1:
                     await descfile.write("\n")
             except (KeyError, TypeError):
@@ -155,9 +194,19 @@ class COMMON():
 
     async def _write_signature(self, descfile, meta, tracker):
         """Helper method to write signature"""
-        use_global_sigs = self.config["DEFAULT"].get("use_global_sigs", False)
-        config_section = "DEFAULT" if use_global_sigs else "TRACKERS"
-        sig_config = self.config[config_section].get(tracker, {}) if not use_global_sigs else self.config[config_section]
+        use_global_sigs = self.config["SIGNATURES"].get("use_global_sigs", "default")
+        
+        if use_global_sigs is None:
+            return  # easy mode for NO SIGS!
+        elif use_global_sigs is True:
+            config_section = "DEFAULT"
+            sig_config = self.config[config_section]
+        elif use_global_sigs is False:
+            config_section = "TRACKERS"
+            sig_config = self.config[config_section].get(tracker, {})
+        else:  # Tracker Specific, falling back to Global
+            config_section = "TRACKERS"
+            sig_config = self.config[config_section].get(tracker, {}) if self.config[config_section].get(tracker) else self.config["DEFAULT"]
 
         sig_types = {
             "signature": sig_config.get("signature"),
@@ -165,103 +214,86 @@ class COMMON():
             "pr_signature": sig_config.get("pr_signature"),
             "anon_pr_sig": sig_config.get("anon_pr_signature")
         }
-        
-        if any(sig is None for sig in sig_types.values()):
-            print(f"[bold][red]WARN[/red]: {'Global signatures' if use_global_sigs else 'Tracker signatures'} "
-                "are enabled but not fully provided in config.")
 
-        is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"][tracker].get("anon", False)
+        is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"].get(tracker, {}).get("anon", False)
         is_pr = meta.get("personal_release", False)
         sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
         
+        # Write signature if it exists
         if sig := sig_types.get(sig_key):
             await descfile.write(f"\n{sig}")
 
-
     async def create_music_description(self, meta, tracker):
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
-            album_cover = meta.get('album_cover', None)
-            album_back = meta.get('album_back', None)
+            def center_img(url, size=120, link=None):
+                img = f"[img={size}]{url}[/img]" if size else f"[img]{url}[/img]"
+                return f"[center]{f'[url={link}]{img}[/url]' if link else img}[/center]\n\n"
+
+            album_cover = meta.get('album_cover')
+            album_back = meta.get('album_back')
             display_cover = self.config["DEFAULT"].get('album_covers', 2)
+
             if display_cover >= 1:
                 if album_cover:
-                    await descfile.write(f"[center][img]{album_cover}[/img]")
+                    img_line = f"[center][img]{album_cover}[/img]"
                     if display_cover >= 2 and album_back:
-                        await descfile.write(f" [img]{album_back}[/img]")
-                    await descfile.write("[/center]\n\n")
+                        img_line += f" [img]{album_back}[/img]"
+                    await descfile.write(img_line + "[/center]\n\n")
                 elif album_back:
-                    await descfile.write(f"[center][img]{album_back}[/img][/center]\n\n")
-            proof = meta.get('album_proof')
-            if proof:
-                await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
-            mbid = meta.get('mbid', False)
-            if mbid:
-                await descfile.write(f"[center][url=https://musicbrainz.org/release/{mbid}][img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img][/url][/center]")
-            discogs_id = meta.get('discogs_id', False)
-            discogs_url = meta.get('discogs_url', False)
-            if discogs_id:
-                discogs = f'https://www.discogs.com/release/{discogs_id}'
-            elif discogs_url:
-                discogs = discogs_url
-            else:
-                discogs = None
-            if discogs:
-                await descfile.write(f"[center][url={discogs}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png[/img][/url][/center]")
-            allmusic = meta.get('allmusic', False)
-            if allmusic:
-                await descfile.write(f"[center][url={allmusic}][img=120]https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png[/img][/url][/center]")
-            wikidata = meta.get('wikidata', False)
-            if wikidata:
-                await descfile.write(f"[center][url={wikidata}][img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url][/center]") 
-            genius = meta.get('genius', False)
-            if genius:
-                await descfile.write(f"[center][url={genius}][img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url][/center]")    
+                    await descfile.write(center_img(album_back, size=0))
 
+            if proof := meta.get('album_proof'):
+                await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
+
+            # Logos with URLs
+            logos = {
+                'mbid': ("https://musicbrainz.org/release/{}", r"https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg"),
+                'discogs_id': ("https://www.discogs.com/release/{}", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png"),
+                'discogs_url': ("{}", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png"),
+                'allmusic': ("{}", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/AllMusic_Text_Logo.svg/2880px-AllMusic_Text_Logo.svg.png"),
+                'wikidata': ("{}", "https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg"),
+                'genius': ("{}", "https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg")
+            }
+
+            for key, (url_tpl, img_url) in logos.items():
+                val = meta.get(key)
+                if val:
+                    url = url_tpl.format(val)
+                    await descfile.write(center_img(img_url, link=url))
+
+            # Tracklist and logs # TODO add on foo_DR + auCDtect
             tracks = meta.get('tracklist', {})
             if tracks:
                 await descfile.write("\n[code][h5]TRACKLIST[/h5]\n")
+
                 if len(tracks) > 1:
-                    for disc, disc_tracks in tracks.items():
+                    for idx, (disc, disc_tracks) in enumerate(tracks.items()):
                         await descfile.write(f"[u]{disc}[/u]\n")
-
-                        max_track_length = max(len(track) for track in disc_tracks)
-
+                        max_len = max(len(track) for track in disc_tracks)
                         for track, time in disc_tracks.items():
-                            track_length = len(track)
-                            padding_length = max(0, max_track_length - track_length + 2)
+                            await descfile.write(f"{track}{' ' * (max_len - len(track) + 2)}[{time}]\n")
 
-                            # Write the track name with appropriate padding
-                            await descfile.write(f"{track}")
-                            await descfile.write(" " * padding_length)
-                            await descfile.write(f"[{time}]\n")
-
-                        log_file = meta.get('log_files', [])
-                        if len(log_file) > 1 and len(log_file) >= list(tracks.keys()).index(disc) + 1:
-                            log_contents = await self.read_log_file(log_file[list(tracks.keys()).index(disc)])
-                            if log_contents:
-                                await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]\n")
-
-                        await descfile.write("\n")  # Add a newline for separation between discs
+                        log_files = meta.get('log_files', [])
+                        if len(log_files) > idx:
+                            log = await self.read_log_file(log_files[idx])
+                            if log:
+                                await descfile.write(f"\n[spoiler=log][code]{log}[/code][/spoiler]\n")
+                        await descfile.write("\n")
                 else:
-                    for track, time in next(iter(tracks.values())).items():
-                        track_length = len(track)
-                        length = max(0, 52 - track_length)
-                        await descfile.write(f"{track}")
-                        await descfile.write(" " * length)
-                        await descfile.write(f"[{time}]\n")
-
-                    log_file = meta.get('log_files', [])
-                    if log_file:
-                        log_contents = await self.read_log_file(log_file[0])
-                        if log_contents:
-                            await descfile.write(f"\n[spoiler=log][code]{log_contents}[/code][/spoiler]")
+                    disc_tracks = next(iter(tracks.values()))
+                    for track, time in disc_tracks.items():
+                        await descfile.write(f"{track}{' ' * (52 - len(track))}[{time}]\n")
+                    log_files = meta.get('log_files', [])
+                    if log_files:
+                        log = await self.read_log_file(log_files[0])
+                        if log:
+                            await descfile.write(f"\n[spoiler=log][code]{log}[/code][/spoiler]")
 
                 await descfile.write("[/code]\n")
 
-            if album_cover and tracker in ("LDU"):
-                await descfile.write(f"[url=torrent-cover={album_cover} ][/url]")  
+            if album_cover and tracker == "LDU":
+                await descfile.write(f"[url=torrent-cover={album_cover} ][/url]")
 
-            # return "\n".join(desc)
             return
 
     
@@ -473,3 +505,51 @@ class COMMON():
                 new_dupes[each] = dupes[each]
         return new_dupes
 
+@dataclass
+class DescControl:
+    '''Controller for description handling via comment'''
+    as_is: bool = False
+    include_screens: bool = True
+    include_logo: bool = True
+    include_trailer: bool = True
+    include_signature: bool = True
+    modify_img_size: bool = True
+    include_disc_info: bool = True
+
+    @staticmethod
+    def from_markers(marker_str: str) -> 'DescControl':
+        control = DescControl()
+        if not marker_str.startswith("# USE:"):
+            return control
+        
+        options = marker_str[len("# USE:"):].strip().split("+")
+        main_option = options[0].lower()
+
+        if main_option == "as-is":
+            control.as_is = True
+            control.include_screens = False
+            control.include_logo = False
+            control.include_trailer = False
+            control.include_signature = False
+            control.include_disc_info = False
+        elif main_option == "signature-only":
+            control.as_is = False
+            control.include_screens = False
+            control.include_logo = False
+            control.include_trailer = False
+            control.include_signature = True
+            control.include_disc_info = False
+        elif main_option == "full":
+            control.as_is = False
+        else:
+            control.as_is = False
+            control.include_screens = "screens" in options
+            control.include_logo = "logo" in options
+            control.include_trailer = "trailer" in options
+            control.include_signature = "signature" in options
+            control.include_disc_info = "disc" in options
+
+        if "no-imgsize" in marker_str.lower():
+            control.modify_img_size = False
+
+        return control
