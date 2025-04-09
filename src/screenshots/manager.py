@@ -132,13 +132,13 @@ class ScreenshotManager:
         self.uploader = ScreenshotUploader(config, base_dir)
         self.rehoster = RehostManager(config, base_dir, self.uploader)
 
-    async def handle_screenshots(self, meta: Dict, tracker_whitelists: Dict[str, List[str]] = None) -> Dict:
+    async def handle_screenshots(self, meta: Dict, tracker_whitelists: Dict[str, List[str]] = None, task_widget=None):
         """Handle screenshot generation and initial upload."""
         try:
             existing = meta.get('image_list', [])
 
-            if not meta.get('skip_screenshots', False):
-                screenshots = await self.generator.generate_screenshots(meta, meta['filename'], meta['uuid'])
+            if not meta.get('skip_screenshots', False) and not meta.get('is_music', False):
+                screenshots = await self.generator.generate_screenshots(meta, meta['filename'], meta['uuid'], task_widget=task_widget)
             else:
                 screenshots = existing
 
@@ -148,9 +148,16 @@ class ScreenshotManager:
                     log.error("No viable hosts for initial upload")
                     meta['image_list'] = existing or screenshots
                 else:
+                    if meta.get('is_music', False) and screenshots == []:
+                        if meta.get("user_cover") and not meta.get("album_cover"):
+                            screenshots.append(meta.get("user_cover"))
+                        if meta.get("back_cover") and not meta.ger("album_back"):
+                            screenshots.append(meta.get("back_cover"))
+                        if meta.get("user_proof"):
+                            screenshots.append(meta.get("user_proof"))  
                     log.debug(f"Initial upload to {viable_hosts[0]}")
                     uploaded = await self.uploader.upload_screenshots(
-                        meta, screens=screenshots, viable_hosts=viable_hosts
+                        meta, screens=screenshots, viable_hosts=viable_hosts , task_widget=task_widget
                     )
                     meta['image_list'] = uploaded if uploaded else (existing or screenshots)
             else:
@@ -177,7 +184,7 @@ class ScreenshotManager:
             if hostname == wl or hostname.endswith('.' + wl):
                 return base_name
         return ""
-
+        
     async def _cleanup(self):
         """Clean up child processes and resources."""
         current_process = psutil.Process()

@@ -3,9 +3,6 @@ import importlib
 
 from pathlib import Path
 import httpx
-from rich.console import Group
-from rich.live import Live
-from rich.spinner import Spinner
 
 from src.console import console, log
 
@@ -36,7 +33,7 @@ class ScreenshotUploader:
             log.warning(f"Failed to load host '{module_name}': {e}")
             return None
 
-    async def upload_screenshots(self, meta, screens, img_path=None, viable_hosts=None, rehost=False):
+    async def upload_screenshots(self, meta, screens, viable_hosts=None, rehost=False, task_widget=None):
         """Uploads screenshots to viable hosts"""
         max_retries = 3
         existing = meta.get('image_list', []) if not rehost else []
@@ -44,15 +41,16 @@ class ScreenshotUploader:
 
         if rehost and isinstance(screens, (list, tuple)):
             to_upload = screens
-        elif img_path:
-            img_path = Path(img_path)
-            if not (img_path.is_file() and img_path.stat().st_size >= self.min_image_size):
-                return []
-            to_upload = [str(img_path)]
+        elif isinstance(screens, (list, tuple)) and all(Path(s).is_file() for s in screens):
+            to_upload = [str(Path(s)) for s in screens]
         else:
             tmp_dir = self.base_dir / "tmp" / meta['uuid']
             images = [p for p in tmp_dir.glob("*.png")]
             if len(existing) >= screens_count and not rehost:
+                if task_widget:
+                    task_widget.text = f"Processing {meta.get('filename', 'screenshots')}: Reusing existing uploads"
+                else:
+                    console.print(f"[green]Reusing {len(existing)} existing uploads[/green]")
                 return existing
             to_upload = [
                 str(img) for img in images
@@ -61,19 +59,35 @@ class ScreenshotUploader:
             ][:screens_count - len(existing)]
 
         if not to_upload:
+            if task_widget:
+                task_widget.text = f"Processing {meta.get('filename', 'screenshots')}: No new screenshots to upload"
+            else:
+                console.print("[yellow]No new screenshots to upload[/yellow]")
             return existing if not rehost else []
 
         async with self:
-            spinner = Spinner("dots", text="Uploading screenshots...")
-            with Live(Group(spinner), console=console, transient=True, refresh_per_second=10):
-                for host in viable_hosts or []:
-                    if not host:
-                        continue
-                    uploaded_images = await self._upload_with_retries(host, to_upload, max_retries)
-                    if uploaded_images:
-                        return uploaded_images
-                log.debug("All viable hosts failed")
-                return existing if not rehost else []
+            if task_widget:
+                task_widget.text = f"Processing {meta.get('filename', 'screenshots')}: Uploading screenshots..."
+            else:
+                console.print(f"[yellow]Uploading {len(to_upload)} screenshots...[/yellow]")
+
+            for host in viable_hosts or []:
+                if not host:
+                    continue
+                uploaded_images = await self._upload_with_retries(host, to_upload, max_retries)
+                if uploaded_images:
+                    if task_widget:
+                        task_widget.text = f"Processing {meta.get('filename', 'screenshots')}: Uploaded to {host}"
+                    else:
+                        console.print(f"[green]Uploaded {len(uploaded_images)} screenshots to {host}[/green]")
+                    return uploaded_images
+
+            log.debug("All viable hosts failed")
+            if task_widget:
+                task_widget.text = f"Processing {meta.get('filename', 'screenshots')}: Upload failed"
+            else:
+                console.print("[red]Failed to upload screenshots to any host[/red]")
+            return existing if not rehost else []
 
     async def _upload_with_retries(self, host_name, images, max_retries):
         host = self._load_host(host_name)
