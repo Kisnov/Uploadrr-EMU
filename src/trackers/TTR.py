@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
 import platform
 import os
 import re
 import langcodes
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 from rich.pretty import Pretty
 
 class TTR():
@@ -17,8 +16,11 @@ class TTR():
         self.type = 'unit3d'
         self.tracker = 'TTR'
         self.source_flag = 'TTR'
-        self.upload_url = 'https://torrenteros.org/api/torrents/upload'
-        self.search_url = 'https://torrenteros.org/api/torrents/filter'
+        self.domain = 'https://torrenteros.org'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [""]
         pass
     
@@ -62,7 +64,7 @@ class TTR():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -113,7 +115,7 @@ class TTR():
             'sticky' : 0,
         }
         # Internal
-        if self.config['TRACKERS'][self.tracker].get('internal', False) == True:
+        if self.config['TRACKERS'][self.tracker].get('internal', False):
             if meta['tag'] != "" and (meta['tag'][1:] in self.config['TRACKERS'][self.tracker].get('internal_groups', [])):
                 data['internal'] = 1
                 
@@ -132,7 +134,7 @@ class TTR():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -281,11 +283,7 @@ class TTR():
         path = next(iter(meta['filelist']), meta['path'])
         return os.path.basename(path)
    
-    async def get_name(self, meta):
-        # Have to agree with whoever made HUNO's script
-        # was easier to rebuild name with Prep.get_name() and mofidy 
-        # than to attempt to edit the name thereafter - thanks for the tip
-
+    async def get_name(self, meta): #TODO replace with edit_name
         basename = self.get_basename(meta)
         type = meta.get('type', "")
         title = meta.get('title',"")
@@ -439,7 +437,7 @@ class TTR():
                     result = split_result[0] + split_result[1]
                 size = each['attributes']['size']
                 dupes[result] = size
-        except:
+        except Exception:
             console.print('[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect')
             await asyncio.sleep(5)
 

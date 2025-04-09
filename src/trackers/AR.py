@@ -26,6 +26,8 @@ class AR:
         self.source_flag = 'AlphaRatio'
         self.username = config['TRACKERS']['AR'].get('username', '').strip()
         self.password = config['TRACKERS']['AR'].get('password', '').strip()
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"http://tracker.alpharatio.cc:2710/{pid}/announce"
         self.login_url = 'https://alpharatio.cc/login.php'
         self.upload_url = 'https://alpharatio.cc/upload.php'
         self.search_url = 'https://alpharatio.cc/torrents.php'
@@ -298,7 +300,7 @@ class AR:
         if manual_name:
             return manual_name
 
-        type_ = meta.get('type', "")
+        media_type = meta.get('type', "")
         title = meta.get('title', "")
         artist = meta.get('artist', "")
         album = meta.get('album', "")
@@ -338,7 +340,7 @@ class AR:
             year = meta.get('year', meta.get('imdb_info', {}).get('year', "")) if not meta.get('no_year', False) else ""
 
         if meta.get('debug'):
-            log.debug(f"Category: {meta['category']}, Type: {meta['type']}")
+            log.debug(f"Category: {meta['category']}, Type: {media_type}")
             log.debug(f"Metadata: {meta}")
 
         naming_dict = {
@@ -373,22 +375,22 @@ class AR:
                 "HDTV": f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}"
             },
             "MUSIC": {
-                ("ALAC", "FLAC", "WAV"): f"{artist} {album} {year} [{'edition'}] {source}{type_} {bit_depth}bit {'' if tag == '-NOGRP' else tag}",
-                "default": f"{artist} {album} {year} [{'edition'}] {source}{type_} {bitrate} {'' if tag == '-NOGRP' else tag}"
+                ("ALAC", "FLAC", "WAV"): f"{artist} {album} {year} [{'edition'}] {source}{media_type} {bit_depth}bit {'' if tag == '-NOGRP' else tag}",
+                "default": f"{artist} {album} {year} [{'edition'}] {source}{media_type} {bitrate} {'' if tag == '-NOGRP' else tag}"
             }
         }
 
         if meta['category'] == "MUSIC":
             edition = meta.get('manual_edition', edition)
             source = f"{source} " if source else ""
-            name = naming_dict["MUSIC"][type_ if type_ in ('ALAC', 'FLAC', 'WAV') else "default"].format(edition=edition)
+            name = naming_dict["MUSIC"][media_type if media_type in ('ALAC', 'FLAC', 'WAV') else "default"].format(edition=edition)
         else:
-            if type_ == "DISC":
-                name = naming_dict[meta['category']][type_][meta.get('is_disc', "BDMV")]
-            elif type_ == "REMUX":
-                name = naming_dict[meta['category']][type_][tuple(k for k in naming_dict[meta['category']][type_] if source in k)[0]]
+            if media_type == "DISC":
+                name = naming_dict[meta['category']][media_type][meta.get('is_disc', "BDMV")]
+            elif media_type == "REMUX":
+                name = naming_dict[meta['category']][media_type][tuple(k for k in naming_dict[meta['category']][media_type] if source in k)[0]]
             else:
-                name = naming_dict[meta['category']][type_]
+                name = naming_dict[meta['category']][media_type]
 
         name = name.replace(':', '').replace("'", '').replace('DD+', 'DDP')
         return '.'.join(part for part in name.split() if part)
@@ -449,7 +451,7 @@ class AR:
 
     async def upload(self, meta: Dict):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         is_music = meta.get("is_music", False)
 

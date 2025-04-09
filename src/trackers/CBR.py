@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console, log
+from src.console import console
 
 
 class CBR():
@@ -16,35 +14,39 @@ class CBR():
         self.type = 'unit3d'
         self.tracker = 'CBR'
         self.source_flag = 'CapybaraBR'
-        self.upload_url = 'https://capybarabr.com/api/torrents/upload'
-        self.search_url = 'https://capybarabr.com/api/torrents/filter'
+        self.domain = 'https://capybarabr.com'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [
-    "3LTON", "4yEo", "ADE", "AFG", "AROMA", "AniHLS", "AniURL", "AnimeRG",
-    "BLUDV", "CHD", "CM8", "Comando", "CrEwSaDe", "DNL", "DeadFish", "ELiTE",
-    "FGT", "FRDS", "FUM", "FaNGDiNG0", "Flights", "HAiKU", "HD2DVD", "HDS",
-    "HDTime", "Hi10", "Hiro360", "ION10", "JIVE", "KiNGDOM", "LEGi0N", "LOAD",
-    "Lapumia", "Leffe", "MeGusta", "NOIVTC", "NhaNc3", "OFT", "Oj", "PRODJi",
-    "PiRaTeS", "PlaySD", "RAPiDCOWS", "RARBG", "RDN", "REsuRRecTioN", "RMTeam", "RetroPeeps",
-    "SANTi", "SPASM", "SPDVD", "STUTTERSHIT", "SicFoI", "TGx", "TM", "TRiToN",
-    "Telly", "UPiNSMOKE", "URANiME", "WAF", "XS", "YIFY", "ZKBL", "ZMNT",
-    "ZmN", "aXXo", "d3g", "eSc", "iPlanet", "mHD", "mSD", "nHD",
-    "nSD", "nikt0", "playXD", "x0r", "xRed"
-]
+                            "3LTON", "4yEo", "ADE", "AFG", "AROMA", "AniHLS", "AniURL", "AnimeRG",
+                            "BLUDV", "CHD", "CM8", "Comando", "CrEwSaDe", "DNL", "DeadFish", "ELiTE",
+                            "FGT", "FRDS", "FUM", "FaNGDiNG0", "Flights", "HAiKU", "HD2DVD", "HDS",
+                            "HDTime", "Hi10", "Hiro360", "ION10", "JIVE", "KiNGDOM", "LEGi0N", "LOAD",
+                            "Lapumia", "Leffe", "MeGusta", "NOIVTC", "NhaNc3", "OFT", "Oj", "PRODJi",
+                            "PiRaTeS", "PlaySD", "RAPiDCOWS", "RARBG", "RDN", "REsuRRecTioN", "RMTeam", "RetroPeeps",
+                            "SANTi", "SPASM", "SPDVD", "STUTTERSHIT", "SicFoI", "TGx", "TM", "TRiToN",
+                            "Telly", "UPiNSMOKE", "URANiME", "WAF", "XS", "YIFY", "ZKBL", "ZMNT",
+                            "ZmN", "aXXo", "d3g", "eSc", "iPlanet", "mHD", "mSD", "nHD",
+                            "nSD", "nikt0", "playXD", "x0r", "xRed"
+                        ]
         pass
     
     async def get_cat_id(self, category_name, keywords, anime):
+        keywords = list(map(str.strip, keywords.lower().split(',')))
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
             'Anime': '4'
             }.get(category_name, '0')
         if category_name == 'MOVIE':
-            if anime or ('anime' in map(str.strip, keywords.lower().split(','))):
+            if anime or 'anime' in keywords:
                  category_id = '4'
             else: 
                 category_id = '1'         
         elif category_name == 'TV':
-            if anime or ('anime' in map(str.strip, keywords.lower().split(','))):
+            if anime or 'anime' in keywords:
                  category_id = '4'
             else: 
                 category_id = '2'           
@@ -83,7 +85,7 @@ class CBR():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('anime', '')),
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -158,7 +160,7 @@ class CBR():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

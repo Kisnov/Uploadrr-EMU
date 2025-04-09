@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
 from guessit import guessit 
 
 from src.trackers.COMMON import COMMON
@@ -15,8 +14,11 @@ class NBL():
         self.type = "api"
         self.tracker = 'NBL'
         self.source_flag = 'NBL'
-        self.upload_url = 'https://nebulance.io/upload.php'
-        self.search_url = 'https://nebulance.io/api.php'
+        self.domain = 'https://nebulance.io'
+        pid = self.config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"https://tracker.nebulance.io/{pid}/announce"
+        self.upload_url = f'{self.domain}/upload.php'
+        self.search_url = f'{self.domain}api.php'
         self.api_key = self.config['TRACKERS'][self.tracker]['api_key'].strip()
         self.signature = None
         self.banned_groups = ['0neshot', '3LTON', '4yEo', '[Oj]', 'AFG', 'AkihitoSubs', 'AniHLS', 'Anime Time', 'AnimeRG', 'AniURL', 'ASW', 'BakedFish',
@@ -67,7 +69,7 @@ class NBL():
                 return False
             
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
 
         if meta['bdinfo'] != None:
             mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()

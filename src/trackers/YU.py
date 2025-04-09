@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class YU():
@@ -15,8 +13,11 @@ class YU():
         self.type = 'unit3d'
         self.tracker = 'YU'
         self.source_flag = 'YuScene'
-        self.upload_url = 'https://yu-scene.net/api/torrents/upload'
-        self.search_url = 'https://yu-scene.net/api/torrents/filter'
+        self.domain = 'https://yu-scene.net'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [
             "3LTON", "$andra", "ARc", "AROMA", "aXXo", "BDP", "C4K", "CM8", "CMCT", "core",
             "CrEwSaDe", "d3g", "DeadFish", "DNL", "ELiTE", "FaNGDiNG0", "FGT", "FRDS", "FROZEN", 
@@ -75,7 +76,7 @@ class YU():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'], meta.get('is_disc'))
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -145,7 +146,7 @@ class YU():
         }
         
         if meta['debug']:
-            console.print(f"[blue][b]DATA 2 SEND[/b][/blue]:")
+            log.debug("[blue][b]DATA 2 SEND[/b][/blue]:")
             console.print(Pretty(data))
 
         else:

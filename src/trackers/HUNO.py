@@ -2,7 +2,6 @@
 # import discord
 import asyncio
 import requests
-from difflib import SequenceMatcher
 import os
 import re
 import platform
@@ -16,9 +15,11 @@ class HUNO():
         self.type = 'unit3d'
         self.tracker = 'HUNO'
         self.source_flag = 'HUNO'
-        self.search_url = 'https://hawke.uno/api/torrents/filter'
-        self.upload_url = 'https://hawke.uno/api/torrents/upload'
-        self.signature = None
+        self.domain = 'https://hawke.uno'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [
                             "4K4U", "Bearfish", "BiTOR", "BONE", "D3FiL3R", "DTR", "ELiTE", "EVO", "eztv", "EzzRips",
                             "HashMiner", "HETeam", "HEVCBay", "HiQVE", "HR-DR", "iFT", "ION265", "iVy", "JATT", "Joy",
@@ -30,7 +31,7 @@ class HUNO():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.unit3d_edit_desc(meta, self.tracker)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta)
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -98,7 +99,7 @@ class HUNO():
         }
 
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -174,7 +175,7 @@ class HUNO():
         path = next(iter(meta['filelist']), meta['path'])
         return os.path.basename(path)
 
-    async def get_name(self, meta):
+    async def get_name(self, meta): #TODO use edit_name
         # Copied from Prep.get_name() then modified to match HUNO's naming convention.
         # It was much easier to build the name from scratch than to alter the existing name.
 
@@ -194,7 +195,7 @@ class HUNO():
         three_d = meta.get('3D', "")
         tag = meta.get('tag', "").replace("-", "- ")
         if tag == "":
-            tag = "- NOGRP"
+            tag = "-NOGRP"
         source = meta.get('source', "")
         uhd = meta.get('uhd', "")
         hdr = meta.get('hdr', "")

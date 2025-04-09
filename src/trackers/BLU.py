@@ -2,8 +2,6 @@
 # import discord
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
@@ -16,9 +14,12 @@ class BLU():
         self.type = 'unit3d'
         self.tracker = 'BLU'
         self.source_flag = 'BLU'
-        self.search_url = 'https://blutopia.cc/api/torrents/filter'
-        self.torrent_url = 'https://blutopia.cc/api/torrents/'
-        self.upload_url = 'https://blutopia.cc/api/torrents/upload' 
+        self.domain = 'https://blutopia.cc'
+        self.torrent_url = f'{self.domain}/api/torrents/' #For API use
+        self.search_url = f'{self.torrent_url}/filter'
+        self.upload_url = f'{self.torrent_url}/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.signature = None
         self.banned_groups = {
             "ALL_TYPES": [
@@ -49,7 +50,7 @@ class BLU():
             blu_name, desc_header = await self.derived_dv_layer(meta)
         manual_name = meta.get('manual_name')
         blu_name = blu_name if not manual_name else manual_name
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker, comparison=True, desc_header=desc_header)
         cat_id = await self.get_cat_id(meta['category'], meta.get('edition', ''))
         type_id = await self.get_type_id(meta['type'])
@@ -118,7 +119,7 @@ class BLU():
         }
 
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

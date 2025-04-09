@@ -4,11 +4,10 @@ import asyncio
 import requests
 import base64
 import re
-import json
 import datetime
 
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 class RTF():
 
@@ -17,16 +16,18 @@ class RTF():
         self.type = 'unit3d'
         self.tracker = 'RTF'
         self.source_flag = 'sunshine'
-        self.signature = None
-        self.upload_url = 'https://retroflix.club/api/upload'
-        self.search_url = 'https://retroflix.club/api/torrent'
-        self.forum_link = 'https://retroflix.club/forums.php?action=viewtopic&topicid=3619'
+        self.domain = 'https://retroflix.club'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
+        self.upload_url = f'{self.domain}/api/upload'
+        self.search_url = f'{self.domain}/api/torrent'
+        self.forum_link = f'{self.domain}/forums.php?action=viewtopic&topicid=3619'
         self.banned_groups = []
         pass
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker, self.forum_link)
         if meta['bdinfo'] != None:
             mi_dump = None
@@ -71,7 +72,7 @@ class RTF():
 
 
         if datetime.date.today().year - meta['year'] <= 9:
-            console.print(f"[red]ERROR: Not uploading!\nMust be older than 10 Years as per rules")
+            log.warning("[red]ERROR: Not uploading!\nMust be older than 10 Years as per rules")
             return
 
 
@@ -111,10 +112,10 @@ class RTF():
         keywords = meta.get('keywords', '')
         keyword_list = [k.strip() for k in keywords.lower().split(',')]
         if ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic'])) and adult:
-            console.print(f'[bold red]Porn is strictly prohibited on RetroFlix')
+            console.print('[bold red]Porn is strictly prohibited on RetroFlix')
             return True, True
         elif adult:
-            console.print(f'[bold red]Flagged as adult content.RetroFlix bans all porn/erotica.')
+            console.print('[bold red]Flagged as adult content.RetroFlix bans all porn/erotica.')
             return True, False
 
         return False, False

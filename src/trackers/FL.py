@@ -2,12 +2,9 @@ import requests
 import asyncio
 import re
 import os
-from pathlib import Path
-import json
-import glob
 import pickle
 from unidecode import unidecode
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 from rich.prompt import Prompt, Confirm
 from bs4 import BeautifulSoup
 
@@ -23,6 +20,8 @@ class FL():
         self.tracker = 'FL'
         self.source_flag = 'FL'
         self.signature = None
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f'http://reactor.filelist.io/{pid}/announce'
         self.username = config['TRACKERS'][self.tracker].get('username', '').strip()
         self.password = config['TRACKERS'][self.tracker].get('password', '').strip()
         self.fltools = config['TRACKERS'][self.tracker].get('fltools', {})
@@ -109,7 +108,7 @@ class FL():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         manual_name = meta.get('manual_name')
         fl_name = await self.edit_name(meta) if not manual_name else manual_name
@@ -206,7 +205,7 @@ class FL():
             with open(cookiefile, 'rb') as cf:
                 session.cookies.update(pickle.load(cf))
             
-            search_url = f"https://filelist.io/browse.php"
+            search_url = "https://filelist.io/browse.php"
             if int(meta['imdb_id'].replace('tt', '')) != 0:
                 params = {
                     'search' : meta['imdb_id'],

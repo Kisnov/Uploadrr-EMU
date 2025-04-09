@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
 import re
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
@@ -17,9 +15,11 @@ class FNP():
         self.type = 'unit3d'
         self.tracker = 'FNP'
         self.source_flag = 'FnP'
-        self.upload_url = 'https://fearnopeer.com/api/torrents/upload'
-        self.search_url = 'https://fearnopeer.com/api/torrents/filter'
-        self.signature = None
+        self.domain = 'https://fearnopeer.com'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = {
             "ALL_TYPES": [
                 "4K4U", "BiTOR", "d3g", "FGT", "FRDS", "GalaxyRG", "iVy", "INFINITY", "LAMA", 
@@ -84,7 +84,7 @@ class FNP():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('name_notag'))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -153,7 +153,7 @@ class FNP():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

@@ -2,8 +2,6 @@
 # import discord
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 
@@ -18,9 +16,11 @@ class LST():
         self.type = 'unit3d'
         self.tracker = 'LST'
         self.source_flag = 'LST.GG'
-        self.upload_url = 'https://lst.gg/api/torrents/upload'
-        self.search_url = 'https://lst.gg/api/torrents/filter'
-        self.signature = None
+        self.domain = 'https://lst.gg'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = {
             "ALL_TYPES": [
                 "aXXo", "BONE", "BRrip", "CM8", "CrEwSaDe", "CTFOH", "DNL", "dAV1nci", "FaNGDiNG0", "GalaxyTV", 
@@ -84,7 +84,7 @@ class LST():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'], meta.get('keywords', ''), meta.get('adult', False), meta.get('anime', False ))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -105,7 +105,7 @@ class LST():
         
         desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'r', encoding='utf-8').read()
         if meta.get('service') == "hentai":
-            desc = "[center]" + "[img]" + str(meta['poster']) + "[/img][/center]" + f"\n[center]" + "https://www.themoviedb.org/tv/" + str(meta['tmdb']) + f"\nhttps://myanimelist.net/anime/" + str(meta['mal']) + "[/center]" + desc
+            desc = "[center]" + "[img]" + str(meta['poster']) + "[/img][/center]" + "\n[center]" + "https://www.themoviedb.org/tv/" + str(meta['tmdb']) + "\nhttps://myanimelist.net/anime/" + str(meta['mal']) + "[/center]" + desc
         
         open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
         nfo_file = meta.get('nfo_file', None)
@@ -160,7 +160,7 @@ class LST():
         }
 
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

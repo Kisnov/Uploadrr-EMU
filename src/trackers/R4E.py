@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class R4E():
@@ -16,20 +14,23 @@ class R4E():
         self.type = 'unit3d'
         self.tracker = 'R4E'
         self.source_flag = 'R4E'
-        self.signature = None
-        self.upload_url = 'https://racing4everyone.eu/api/torrents/upload'
-        self.search_url = 'https://racing4everyone.eu/api/torrents/filter'
+        self.domain = 'https://racing4everyone.eu'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [""]
         pass
 
     async def get_cat_id(self, category_name, genres):
+        genres = list(map(str.strip, genres.lower().split(',')))
         if category_name == 'MOVIE':
-            if 'documentary' in map(str.strip, genres.lower().split(',')):
+            if 'documentary' in genres:
                 category_id = '66' # Documentary
             else:
                 category_id = '70' # Motorsports Movie
         elif category_name == 'TV':
-            if 'documentary' in map(str.strip, genres.lower().split(',')):
+            if 'documentary' in genres:
                 category_id = '2' # TV Documentary
             else:
                 category_id = '79' # TV Series
@@ -59,7 +60,7 @@ class R4E():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -122,7 +123,7 @@ class R4E():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

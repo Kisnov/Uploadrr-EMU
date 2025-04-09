@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# import discord
 import requests
 import platform
 
@@ -37,7 +36,7 @@ class TL():
         self.banned_groups = [""]
         
         self.announce_key = self.config['TRACKERS'][self.tracker]['announce_key']
-        self.config['TRACKERS'][self.tracker]['announce_url'] = f"https://tracker.torrentleech.org/a/{self.announce_key}/announce"
+        self.announce_url = f"https://tracker.torrentleech.org/a/{self.announce_key}/announce"
         pass
     
     async def get_cat_id(self, common, meta):
@@ -79,7 +78,7 @@ class TL():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(common, meta)
         await common.unit3d_edit_desc(meta, self.tracker)
 
@@ -110,7 +109,7 @@ class TL():
             if not response.text.isnumeric():
                 console.print(f'[red]{response.text}')
         else:
-            console.print(f"[cyan]Request Data:")
+            console.print("[cyan]Request Data:")
             console.print(data)
         open_torrent.close()
         open_desc.close()

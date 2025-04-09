@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import requests
 import asyncio
-import traceback
 
 from src.trackers.COMMON import COMMON
 from src.console import console
@@ -32,7 +31,7 @@ class SN():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         cat_id = ""
         sub_cat_id = ""

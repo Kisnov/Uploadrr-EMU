@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
@@ -15,8 +13,11 @@ class HHD():
         self.type = 'unit3d'
         self.tracker = 'HHD'
         self.source_flag = 'HHD'
-        self.upload_url = 'https://homiehelpdesk.net/api/torrents/upload'
-        self.search_url = 'https://homiehelpdesk.net/api/torrents/filter'
+        self.domain = 'https://homiehelpdesk.net'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [
                             "aXXo", "BONE", "BRrip", "CM8", "CrEwSaDe", "CTFOH", "dAV1nci", "d3g", "DNL", 
                             "FaNGDiNG0", "GalaxyTV", "HD2DVD", "HDTime", "iHYTECH", "ION10", "iPlanet", "KiNGDOM", 
@@ -78,7 +79,7 @@ class HHD():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -148,7 +149,7 @@ class HHD():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

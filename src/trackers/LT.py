@@ -2,8 +2,6 @@
 # import discord
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
@@ -17,9 +15,11 @@ class LT():
         self.type = 'unit3d'
         self.tracker = 'LT'
         self.source_flag = 'Lat-Team "Poder Latino"'
-        self.upload_url = 'https://lat-team.com/api/torrents/upload'
-        self.search_url = 'https://lat-team.com/api/torrents/filter'
-        self.signature = None
+        self.domain = 'https://lat-team.com'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [""]
         pass
     
@@ -100,7 +100,7 @@ class LT():
                 lang_string2 = track.get('Language_String2', '').lower()                
                 title = track.get('Title', '').lower()
                 
-                if not any(title.find(word) != -1 for word in ['comment', 'director', 'review']) and not 'Spain' in imdb_info.get('countries_of_origin', []):
+                if not any(title.find(word) != -1 for word in ['comment', 'director', 'review']) and 'Spain' not in imdb_info.get('countries_of_origin', []):
                     if lang == 'es-ES':
                         return ' [CAST]'
                     if lang in ('es-419', 'es-CO' ,'es-AR','es-MX'):
@@ -255,7 +255,7 @@ class LT():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('overview', ''), meta.get('keywords', ''))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -325,7 +325,7 @@ class LT():
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip()
         }
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
                     
         else:

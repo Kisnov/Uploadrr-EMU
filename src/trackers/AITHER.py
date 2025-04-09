@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-# import discord
 import asyncio
 import requests
-from difflib import SequenceMatcher
+from typing import Dict
 import json
-import os
 import platform
 from rich.pretty import Pretty
+
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 class AITHER():
 
@@ -17,8 +16,11 @@ class AITHER():
         self.type = 'unit3d'
         self.tracker = 'AITHER'
         self.source_flag = 'Aither'
-        self.search_url = 'https://aither.cc/api/torrents/filter'
-        self.upload_url = 'https://aither.cc/api/torrents/upload'
+        self.domain = 'https://aither.cc'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.signature = None
         self.banned_groups = {
             "ALL_TYPES": [  
@@ -46,7 +48,7 @@ class AITHER():
     
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker, comparison=True)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
@@ -109,11 +111,11 @@ class AITHER():
             data['season_number'] = int(meta.get('season_int', '0'))
             data['episode_number'] = int(meta.get('episode_int', '0'))
 
-        if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
-            console.print(Pretty(data))
+        
+        log.debug("[blue]DATA 2 SEND[/blue]:")
+        log.debug(Pretty(data))
 
-        else:
+        if not meta('debug'):
             success = 'Unknown'
             try:
                 response = requests.post(url=self.upload_url, files=files, data=data, headers=headers, params=params)
@@ -168,39 +170,48 @@ class AITHER():
 
             return success
 
-    async def edit_name(self, meta):
-        aither_name = meta['name']
-        has_eng_audio = False
-        if meta['is_disc'] != "BDMV":
-            with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/MediaInfo.json", 'r', encoding='utf-8') as f:
-                mi = json.load(f)
-            
-            for track in mi['media']['track']:
-                if track['@type'] == "Audio":
-                    if track.get('Language', 'None').startswith('en'):
+    async def edit_name(self, meta: Dict) -> str:
+            name = meta["name"]
+            has_eng_audio = False
+
+            # Check audio language
+            if meta["is_disc"] != "BDMV":
+                with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/MediaInfo.json", "r", encoding="utf-8") as f:
+                    mi = json.load(f)
+                for track in mi["media"]["track"]:
+                    if track["@type"] == "Audio" and track.get("Language", "None").startswith("en"):
                         has_eng_audio = True
-            if not has_eng_audio:
-                audio_lang = mi['media']['track'][2].get('Language_String', "").upper()
-                if audio_lang != "":
-                    aither_name = aither_name.replace(meta['resolution'], f"{audio_lang} {meta['resolution']}", 1)
-        else:
-            for audio in meta['bdinfo']['audio']:
-                if audio['language'] == 'English':
-                    has_eng_audio = True
-            if not has_eng_audio:
-                audio_lang = meta['bdinfo']['audio'][0]['language'].upper()
-                if audio_lang != "":
-                    aither_name = aither_name.replace(meta['resolution'], f"{audio_lang} {meta['resolution']}", 1)
-        if meta['is_disc'] == 'DVD':
-            aither_name = aither_name.replace(str(meta['year']), f"{meta['year']} {meta['resolution']}", 1)
-            aither_name = aither_name.replace(meta['audio'], f"{meta['video_codec']} {meta['audio']}", 1)            
-        if meta['category'] == "MOVIE":
-            if meta.get('type') == "REMUX" and meta.get('source', '') in ("PAL DVD", "NTSC DVD"):
-                aither_name = aither_name.replace(meta['source'], f"{meta['resolution']} {meta['source']}", 1)
-                aither_name = aither_name.replace('REMUX', f"REMUX {meta['video_codec']}", 1)
-        if meta['category'] == "TV" and meta.get('tv_pack', 0) == 0 and meta.get('episode_title_storage', '').strip() != '' and meta['episode'].strip() != '':
-            aither_name = aither_name.replace(meta['episode'], f"{meta['episode']} {meta['episode_title_storage']}", 1)
-        return aither_name
+                if not has_eng_audio and mi["media"]["track"][2].get("Language_String"):
+                    audio_lang = mi["media"]["track"][2]["Language_String"].upper()
+                    name = name.replace(meta["resolution"], f"{audio_lang} {meta['resolution']}", 1)
+            else:
+                for audio in meta["bdinfo"]["audio"]:
+                    if audio["language"] == "English":
+                        has_eng_audio = True
+                if not has_eng_audio and meta["bdinfo"]["audio"]:
+                    audio_lang = meta["bdinfo"]["audio"][0]["language"].upper()
+                    name = name.replace(meta["resolution"], f"{audio_lang} {meta['resolution']}", 1)
+
+            # DVD-specific adjustments
+            if meta["is_disc"] == "DVD":
+                name = name.replace(str(meta["year"]), f"{meta['year']} {meta['resolution']}", 1)
+                name = name.replace(meta["audio"], f"{meta['video_codec']} {meta['audio']}", 1)
+
+            # DVD Movie REMUX adjustments
+            if meta["category"] == "MOVIE" and meta.get("type") == "REMUX" and meta.get("source", "") in ("PAL DVD", "NTSC DVD"):
+                name = name.replace(meta["source"], f"{meta['resolution']} {meta['source']}", 1)
+                name = name.replace("REMUX", f"REMUX {meta['video_codec']}", 1)
+
+            # TV episode title adjustment
+            if (
+                meta["category"] == "TV"
+                and meta.get("tv_pack", 0) == 0
+                and meta.get("episode_title_storage", "").strip()
+                and meta["episode"].strip()
+            ):
+                name = name.replace(meta["episode"], f"{meta['episode']} {meta['episode_title_storage']}", 1)
+
+            return name
 
     async def get_cat_id(self, category_name):
         category_id = {

@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-from difflib import SequenceMatcher
 import json
 import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 class OE():
     def __init__(self, config):
@@ -15,9 +14,11 @@ class OE():
         self.type = 'unit3d'
         self.tracker = 'OE'
         self.source_flag = 'OE'
-        self.search_url = 'https://onlyencodes.cc/api/torrents/filter'
-        self.upload_url = 'https://onlyencodes.cc/api/torrents/upload'
-        self.signature = None
+        self.domain = 'https://onlyencodes.cc'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [
         "0neshot", "3LT0N", "4K4U", "4yEo", "$andra", "[Oj]", "AFG", "AkihitoSubs", "AniHLS", "Anime Time",
         "AnimeRG", "AniURL", "AOC", "AR", "AROMA", "ASW", "aXXo", "BakedFish", "BiTOR", "BRrip",
@@ -37,7 +38,7 @@ class OE():
     
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'], meta.get('tv_pack', 0), meta.get('video_codec'), meta.get('category', ""))
@@ -85,7 +86,7 @@ class OE():
             'sticky' : 0,
         }
         # Internal
-        if self.config['TRACKERS'][self.tracker].get('internal', False) == True:
+        if self.config['TRACKERS'][self.tracker].get('internal', False):
             if meta['tag'] != "" and (meta['tag'][1:] in self.config['TRACKERS'][self.tracker].get('internal_groups', [])):
                 data['internal'] = 1
                 
@@ -100,7 +101,7 @@ class OE():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -188,7 +189,7 @@ class OE():
         path = next(iter(meta['filelist']), meta['path'])
         return os.path.basename(path)
 
-    async def get_name(self, meta):
+    async def get_name(self, meta): #TODO use edit_name
         basename = self.get_basename(meta)
         type = meta.get('type', "")
         title = meta.get('title',"")

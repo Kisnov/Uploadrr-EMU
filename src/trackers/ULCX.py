@@ -2,12 +2,10 @@
 # import discord
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class ULCX():
@@ -17,8 +15,11 @@ class ULCX():
         self.type = 'unit3d'
         self.tracker = 'ULCX'
         self.source_flag = 'ULCX'
-        self.upload_url = 'https://upload.cx/api/torrents/upload'
-        self.search_url = 'https://upload.cx/api/torrents/filter'
+        self.domain = 'https://upload.cx'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.signature = None
         self.banned_groups = {
             "ALL_TYPES": [
@@ -73,7 +74,7 @@ class ULCX():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -143,7 +144,7 @@ class ULCX():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

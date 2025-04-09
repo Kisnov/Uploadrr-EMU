@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 from rich.pretty import Pretty
 import platform
 
@@ -14,15 +13,17 @@ class UTP():
         self.type = 'unit3d'
         self.tracker = 'UTP'
         self.source_flag = 'UTOPIA'
-        self.search_url = 'https://utp.to/api/torrents/filter'
-        self.torrent_url = 'https://utp.to/api/torrents/'
-        self.upload_url = 'https://utp.to/api/torrents/upload'        
+        self.domain = 'https://utp.to'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"      
         self.banned_groups = [""]
         pass
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker, comparison=True)
         cat_id = await self.get_cat_id(meta['category'], meta.get('edition', ''))
         type_id = await self.get_type_id(meta['type'])
@@ -92,7 +93,7 @@ class UTP():
         }
 
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -181,9 +182,7 @@ class UTP():
             }.get(resolution, '1')
         return resolution_id
 
-    async def get_name(self, meta):
-
-        basename = self.get_basename(meta)
+    async def get_name(self, meta): #TODO replace with edit_name
         type = meta.get('type', "")
         title = meta.get('title',"")
         alt_title = meta.get('aka', "")
@@ -195,7 +194,6 @@ class UTP():
         service = meta.get('service', "")
         season = meta.get('season', "")
         episode = meta.get('episode', "")
-        part = meta.get('part', "")
         repack = meta.get('repack', "")
         three_d = meta.get('3D', "")
         tag = meta.get('tag', "")
@@ -335,7 +333,7 @@ class UTP():
                 result = each['attributes']['name']
                 size = each['attributes']['size']
                 dupes[result] = size
-        except:
+        except Exception:
             console.print('[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect')
             await asyncio.sleep(5)
 

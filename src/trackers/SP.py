@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import re
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class SP():
@@ -16,8 +14,11 @@ class SP():
         self.type = 'unit3d'
         self.tracker = 'SP'
         self.source_flag = 'seedpool.org'
-        self.upload_url = 'https://seedpool.org/api/torrents/upload'
-        self.search_url = 'https://seedpool.org/api/torrents/filter'
+        self.domain = 'https://seedpool.org'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = [""]
         pass
     
@@ -39,7 +40,7 @@ class SP():
         
         return category_id
 
-    def is_sports(self, name):
+    def is_sports(self, name): #TODO replace with is_sports call
         sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
                         r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
                         r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
@@ -94,7 +95,7 @@ class SP():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta['resolution'], meta.get('tv_pack'), meta.get('name_notag'))
         type_id = await self.get_type_id(meta['type'], meta.get('is_music', False))
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -163,7 +164,7 @@ class SP():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:

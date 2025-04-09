@@ -8,7 +8,7 @@ import platform
 import time
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class RHD():
@@ -17,8 +17,11 @@ class RHD():
         self.type = 'unit3d'
         self.tracker = 'RHD'
         self.source_flag = 'RocketHD'
-        self.upload_url = 'https://rocket-hd.cc/api/torrents/upload'
-        self.search_url = 'https://rocket-hd.cc/api/torrents/filter'
+        self.domain = 'https://rocket-hd.cc'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = ["1XBET", "MEGA", "MTZ", "Whistler", "WOTT", "Taylor.D", "HELD", "FSX", "FuN", "RobertDeNiro", "Oergel", "Jakopo", "MagicX"]
 
         pass
@@ -63,7 +66,7 @@ class RHD():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -134,8 +137,7 @@ class RHD():
         }
 
         if meta['debug']:
-            console.print(f'\n[red]RHD NAME:[/red][blue]{rhd_name}')
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -251,7 +253,7 @@ class RHD():
         path = next(iter(meta['filelist']), meta['path'])
         return os.path.basename(path)
 
-    async def get_name(self, meta):
+    async def get_name(self, meta): #TODO replace get_name with edit_name
         basename = self.get_basename(meta)
         type = meta.get('type', "")
         title = meta.get('title',"")

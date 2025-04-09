@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import requests
-import json
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 
 class OTW():
@@ -15,9 +13,11 @@ class OTW():
         self.type = 'unit3d'
         self.tracker = 'OTW'
         self.source_flag = 'OTW'
-        self.upload_url = 'https://oldtoons.world/api/torrents/upload'
-        self.search_url = 'https://oldtoons.world/api/torrents/filter'
-        self.signature = None
+        self.domain = ''
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = {
             "ALL_TYPES": [
                 "[Oj]", "3LTON", "4yEo", "ADE", "AFG", "AniHLS", "AnimeRG", "AniURL", "AROMA", "aXXo", "Brrip", "CHD",
@@ -48,7 +48,7 @@ class OTW():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
             'UPSCALE': '16'
             }.get(type, '0')
         return type_id
@@ -75,7 +75,7 @@ class OTW():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
@@ -146,7 +146,7 @@ class OTW():
         }
         
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            log.debug("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -233,10 +233,10 @@ class OTW():
         keywords = meta.get('keywords', '')
         keyword_list = [k.strip() for k in keywords.lower().split(',')]
         if ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic', 'animation'])) and adult:
-            console.print(f'[bold red]OldToons strictly prohibits Porn/Hentai.')
+            console.print('[bold red]OldToons strictly prohibits Porn/Hentai.')
             return True, True
         elif adult:
-            console.print(f'[bold red]Flagged as adult content. OldToons is family friendly. Please check rules.')
+            console.print('[bold red]Flagged as adult content. OldToons is family friendly. Please check rules.')
             return True, False
 
         return False, False

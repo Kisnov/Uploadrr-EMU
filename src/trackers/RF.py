@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-# import discord
 import asyncio
 import requests
-import os
 import platform
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
-from src.console import console
+from src.console import console, log
 
 class RF():
     def __init__(self, config):
@@ -14,15 +12,17 @@ class RF():
         self.type = 'unit3d'
         self.tracker = 'RF'
         self.source_flag = 'ReelFliX'
-        self.signature = None
-        self.upload_url = 'https://reelflix.xyz/api/torrents/upload'
-        self.search_url = 'https://reelflix.xyz/api/torrents/filter'
+        self.domain = 'https://reelflix.xyz'
+        self.search_url = f'{self.domain}/api/torrents/filter'
+        self.upload_url = f'{self.domain}/api/torrents/upload'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = ['RoSubbed', 'LAMA', 'MeGusta', 'x0r', 'aXXo']
         pass
     
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await common.unit3d_edit_desc(meta, self.tracker)
         region_id = await common.unit3d_region_ids(meta.get('region'))
         distributor_id = await common.unit3d_distributor_ids(meta.get('distributor'))
@@ -91,7 +91,7 @@ class RF():
             return success
 
         if meta['debug']:
-            console.print(f"[blue]DATA 2 SEND[/blue]:")
+            console.print("[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -186,13 +186,13 @@ class RF():
         keywords = meta.get('keywords', '')
         keyword_list = [k.strip() for k in keywords.lower().split(',')]
         if meta['category'] != 'MOVIE':
-            console.print(f'[bold red]Content not Supported: ReelFLiX only support Movies.')
+            console.print('[bold red]Content not Supported: ReelFLiX only support Movies.')
             return True, True
         elif ('XXX' in path or any(keyword in keyword_list for keyword in ['porn', 'hentai', 'erotic'])) and adult:
-            console.print(f'[bold red]Porn is strictly prohibited on ReelFlix')
+            console.print('[bold red]Porn is strictly prohibited on ReelFlix')
             return True, True
         elif adult:
-            console.print(f'[bold red]Flagged as adult content.ReelFlix bans all porn/erotica.')
+            console.print('[bold red]Flagged as adult content.ReelFlix bans all porn/erotica.')
             return True, False
 
         return False, False
@@ -217,8 +217,8 @@ class RF():
                 result = each['attributes']['name']
                 size = each['attributes']['size']
                 dupes[result] = size
-        except:
-            console.print('[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect')
+        except Exception:
+            log.error('[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect')
             await asyncio.sleep(5)
 
         return dupes
