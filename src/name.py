@@ -1,5 +1,4 @@
 from typing import Dict, Tuple, List
-import json
 
 from src.console import log
 
@@ -79,22 +78,22 @@ class NameGenerator:
         return processed
 
     @staticmethod
-    def get_template(category: str, type_: str, source: str = None, is_disc: str = None) -> str:
+    def get_template(category: str, media_type: str, source: str = None, is_disc: str = None) -> str:
         """Retrieve the appropriate naming template."""
         templates = NameGenerator.NAMING_TEMPLATES.get(category, {})
         if category == "MUSIC":
-            return templates.get(type_, templates["default"])
-        if type_ == "DISC":
-            return templates[type_].get(is_disc, "")
-        if type_ == "REMUX":
-            return templates[type_].get(source.split()[0] if source else "BluRay", "")
-        return templates.get(type_, "")
+            return templates.get(media_type, templates["default"])
+        if media_type == "DISC":
+            return templates[media_type].get(is_disc, "")
+        if media_type == "REMUX":
+            return templates[media_type].get(source.split()[0] if source else "BluRay", "")
+        return templates.get(media_type, "")
 
     @staticmethod
-    def get_potential_missing(category: str, type_: str) -> List[str]:
+    def get_potential_missing(category: str, media_type: str) -> List[str]:
         """Retrieve potential missing fields."""
         missing = NameGenerator.POTENTIAL_MISSING.get(category, {})
-        return missing.get(type_, missing["default"])
+        return missing.get(media_type, missing["default"])
 
     @staticmethod
     def clean_filename(name: str) -> str:
@@ -106,22 +105,22 @@ class NameGenerator:
     async def get_name(self, meta: Dict) -> Tuple[str, str, str, List[str]]:
         """Generate the name based on metadata"""
         meta = self.preprocess_meta(meta)
-        category, type_ = meta["category"], meta.get("type", "")
+        category, media_type = meta["category"], meta.get("type", "")
         source, is_disc = meta.get("source", ""), meta.get("is_disc", "")
 
-        log.debug(f"[cyan]CATEGORY: {category}, TYPE: {type_}")
+        log.debug(f"[cyan]CATEGORY: {category}, TYPE: {media_type}")
         if meta.get("is_music", False):
             log.debug(f"ARTIST: {meta['artist']}, ALBUM: {meta['album']}, YEAR: {meta['year']}, SOURCE: {source}")
 
         # Get template and potential missing fields
-        template = self.get_template(category, type_, source, is_disc)
-        potential_missing = self.get_potential_missing(category, type_)
+        template = self.get_template(category, media_type, source, is_disc)
+        potential_missing = self.get_potential_missing(category, media_type)
 
         # Handle MUSIC-specific formatting
         if category == "MUSIC":
             edition = meta.get("manual_edition", meta.get("edition", ""))
             meta["edition"] = f"[{edition}]" if edition else ""
-            meta["bit_depth"] = f"{meta.get('bit_depth', '')}bit" if meta.get('bit_depth') else ""
+            meta["bit_depth"] = f"{meta.get('bit_depth', '')}"
             meta["source"] = f"{source} " if source else ""
 
 
@@ -146,7 +145,7 @@ class NameGenerator:
 
         # Log if no meaningful name was generated
         if not name_notag or name_notag.isspace():
-            log.warning(f"[yellow]Generated name is empty for category: {category}, type: {type_}, source: {source}")
+            log.warning(f"[yellow]Generated name is empty for category: {category}, type: {media_type}, source: {source}")
             return "Unnamed", name, clean_name, potential_missing
 
         return name_notag, name, clean_name, potential_missing
