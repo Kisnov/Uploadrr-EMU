@@ -141,7 +141,7 @@ class Args:
         parser.add_argument('-pb', '--desclink', nargs='*', help=r'\"https://pastebin.com/URL\"')
         parser.add_argument('-df', '--descfile', nargs='*', help=r'\"\path\to\description.txt\"')
         parser.add_argument('-aid', '--auto-insert-desc', dest='auto_desc', action='store_true',
-                            help="Use existing .txt file for description")
+                            default=self.config['AUTO'].get('always_aid', False), help="Use existing .txt file for description")
         parser.add_argument('-th', '--torrenthash', nargs='*', help="Torrent hash to reuse")
         parser.add_argument('-k', '--keywords', nargs='*', help="Comma-separated keywords")
         parser.add_argument('-reg', '--region', nargs='*', help="Region for discs")
@@ -156,9 +156,11 @@ class Args:
         parser.add_argument('-aq', '--auto-queue', dest='auto_queue', help="Automatically queue files in directory")
         parser.add_argument('-sq', '--show-queue', dest='show_queue', action='store_true', help="Show queued files")
         parser.add_argument('-delay', '--delay', dest='delay', type=int, help="Delay between queued torrents (seconds)")
-        parser.add_argument('-ua', '--unattended', action='store_true', required=False, help=argparse.SUPPRESS)
+        parser.add_argument('-ua', '--unattended', action='store_true', required=False, help= "Unattended Mode")
         parser.add_argument('-fa', '--full-auto', dest='full_auto', nargs='?', const=True, default=False, type=str,
-                            help=argparse.SUPPRESS)
+                            help="Compiles Queue, Grabs Desc if Avail, Unnatended")
+        parser.add_argument('-q', '--quiet', action='store_true', default=self.config['AUTO'].get('keep_quiet', False),
+                            help="Quiet mode, live processing + summary only")                
         parser.add_argument('-fl', '--freeleech', nargs='*', default=0, dest="freeleech", help="Freeleech percentage")
 
         return parser
