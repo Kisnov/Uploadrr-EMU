@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-import re
+import json
 from typing import Dict, Tuple, Optional
 
 import httpx
@@ -68,8 +68,8 @@ class TMDbHandler:
 
     @cached(ttl=180)
     async def get_tmdb_id(self, filename: str, search_year: str, meta: Dict, category: str, 
-                         untouched_filename: str = "", attempted: int = 0) -> Dict:
-        """Search for TMDb ID based on filename and year."""
+                        untouched_filename: str = "", attempted: int = 0) -> Dict:
+        """Search for TMDb ID based on filename and year with stricter year matching."""
         log.debug(f"Searching TMDb: filename={filename}, year={search_year}, category={category}, attempt={attempted}")
         try:
             await self.rate_limit()
@@ -82,21 +82,40 @@ class TMDbHandler:
             response.raise_for_status()
             results = response.json().get('results', [])
 
+            # Filter results by year range (±4 years)
+            if search_year not in (None, ''):
+                year_range = range(search_year - 4, search_year + 5)
+                results = [
+                    r for r in results 
+                    if self._get_year_from_result(r, category) in year_range
+                ]
+
             if meta.get('tmdb_manual') is not None:
                 meta['tmdb'] = meta['tmdb_manual']
             elif results:
                 meta['tmdb'] = results[0]['id']
                 meta['category'] = category
-                meta['title'] = results[0].get('title' if category == 'MOVIE' else 'name', filename)  # Set title early
+                meta['title'] = results[0].get('title' if category == 'MOVIE' else 'name', filename)
             else:
                 raise IndexError
         except IndexError:
             return await self._fallback_tmdb_search(filename, search_year, meta, category, untouched_filename, attempted)
         return meta
 
-    async def _fallback_tmdb_search(self, filename: str, search_year: str, meta: Dict, category: str, 
-                                   untouched_filename: str, attempted: int) -> Dict:
-        """Fallback search logic for TMDb ID."""
+
+    def _get_year_from_result(self, result: Dict, category: str) -> int:
+        """Extract year from TMDb result."""
+        date_key = 'release_date' if category == 'MOVIE' else 'first_air_date'
+        date_str = result.get(date_key, '')
+        try:
+            return int(date_str.split('-')[0]) if date_str else 0
+        except (ValueError, IndexError):
+            return 0
+
+
+    async def _fallback_tmdb_search(self, filename: str, search_year: int, meta: Dict, category: str, 
+                                untouched_filename: str, attempted: int) -> Dict:
+        """Fallback search logic for TMDb ID"""
         try:
             await self.rate_limit()
             endpoint = "/search/movie" if category == "MOVIE" else "/search/tv"
@@ -105,6 +124,15 @@ class TMDbHandler:
             })
             response.raise_for_status()
             results = response.json().get('results', [])
+
+            # Apply year filtering
+            if search_year is not None:
+                year_range = range(search_year - 4, search_year + 5)
+                results = [
+                    r for r in results 
+                    if self._get_year_from_result(r, category) in year_range
+                ]
+
             if results:
                 meta['tmdb'] = results[0]['id']
                 meta['category'] = category
@@ -119,7 +147,7 @@ class TMDbHandler:
                 return await self.get_tmdb_id(parsed_title, search_year, meta, meta['category'], untouched_filename, attempted + 1)
 
             if not meta.get('tmdb'):
-                console.print(f"[red]No TMDb match for {filename}")
+                console.print(f"[red]No reasonable TMDb match for {filename} found.")
                 if meta.get('unattended'):
                     meta['tmdb_not_found'] = True
                 else:
@@ -136,18 +164,25 @@ class TMDbHandler:
             if meta['tmdb'] == "0":
                 return meta
 
-        max_retries = 3
+        max_retries = 4
+        original_category = meta['category']
         for attempt in range(max_retries):
             try:
-                return await self._fetch_tmdb_metadata(meta)
+                result = await self._fetch_tmdb_metadata(meta)
+                return result
             except httpx.HTTPStatusError as e:
                 await self._handle_tmdb_error(e, meta, attempt, max_retries)
             except Exception as e:
-                log.error(f"Unexpected error in attempt {attempt + 1}: {str(e)}", exc_info=True)  # Add stack trace
+                log.error(f"Unexpected error in attempt {attempt + 1}: {str(e)}", exc_info=True)
+                if attempt == 0:
+                    log.debug(f"Switching category from {meta['category']} to {'TV' if meta['category'] == 'MOVIE' else 'MOVIE'}")
+                    meta['category'] = "TV" if meta['category'] == "MOVIE" else "MOVIE"
                 if attempt == max_retries - 1:
                     log.warning(f"Failed after {max_retries} attempts, returning meta: {meta}")
+                    meta['category'] = original_category  # Reset on final failure
                     return meta
                 await asyncio.sleep(1)
+        meta['category'] = original_category
         return meta
 
     async def _fetch_tmdb_metadata(self, meta: Dict) -> Dict:
@@ -164,7 +199,7 @@ class TMDbHandler:
         )
         response.raise_for_status()
         data = response.json()
-        log.ddebug(f"TMDb response for ID {meta['tmdb']}: {data}")
+        log.ddebug(f"TMDb response for ID {meta['tmdb']}:\n {json.dumps(data, indent=2, sort_keys=True)}")
 
         from .imdb import IMDbHandler
         imdb_task = asyncio.create_task(IMDbHandler().get_imdb_aka(meta.get('imdb_id', '0')))
@@ -183,12 +218,12 @@ class TMDbHandler:
         """Parse TMDb response data into metadata."""
         date_key = 'release_date' if meta['category'] == 'MOVIE' else 'first_air_date'
         release_date = data.get(date_key)
-        year, full_date = self._parse_date(release_date, meta['search_year'])
+        year, full_date = self._parse_date(release_date, meta.get('search_year', ''))
         title_or_name = 'title' if meta['category'] == 'MOVIE' else 'name'
-        default_title = meta.get('title', '')
+        default_title = data.get(title_or_name, meta.get('title', ''))
 
         common_data = {
-            'title': data.get(title_or_name, default_title) or default_title,
+            'title': default_title,
             'year': year,
             'full_date': full_date,
             'imdb_id': self._normalize_imdb_id(data.get('external_ids', {}).get('imdb_id', meta.get('imdb', '0'))),
@@ -198,7 +233,7 @@ class TMDbHandler:
             'youtube': self._get_youtube_trailer(data),
             'aka': aka,
             'original_language': original_language or data['original_language'],
-            'original_title': data.get('original_title' if meta['category'] == 'MOVIE' else 'original_name', meta['title']),
+            'original_title': data.get('original_title' if meta['category'] == 'MOVIE' else 'original_name', default_title),
             'keywords': ', '.join(kw['name'].replace(',', ' ') for kw in data.get('keywords', {}).get('keywords', []) or data.get('keywords', {}).get('results', [])),
             'genres': ', '.join(g['name'].replace(',', ' ') for g in data.get('genres', [])),
             'tmdb_directors': [c.get('original_name', c.get('name')) for c in data.get('credits', {}).get('crew', []) if c.get('job') == 'Director']
@@ -209,7 +244,7 @@ class TMDbHandler:
             common_data['runtime'] = data.get('runtime', 60)
         else:
             common_data['tmdb_type'] = data.get('type', 'Scripted')
-            common_data['runtime'] = data.get('episode_run_time', [60])[0]
+            common_data['runtime'] = (data.get('episode_run_time') or [60])[0]
         
         return common_data
 
