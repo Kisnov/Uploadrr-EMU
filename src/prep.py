@@ -91,65 +91,72 @@ class Prep():
         """Process directory contents recursively with video priority."""
         def collect_files_recursive(directory, meta):
             # Collect all files recursively, sorted alphabetically
-            files = {
-                f"{path.parent.name}/{path.name}" if path.parent.name != meta['uuid'] else f"BASE/{path.name}": str(path)
-                for path in sorted(Path(directory).rglob('*'), key=str)
-                if path.is_file() and not path.name.startswith('._')
-            }
-            return files
+            files = {}
+            total_size = 0
+            for path in sorted(Path(directory).rglob('*'), key=str):
+                if path.is_file() and not path.name.startswith('._'):
+                    rel_path = path.relative_to(directory)
+                    file_key = str(rel_path.parent / rel_path.name) if rel_path.parent.name != meta['uuid'] else f"BASE/{rel_path.name}"
+                    files[file_key] = str(path)
+                    total_size += path.stat().st_size
+            return files, total_size
 
-        try:
-            all_files = await asyncio.to_thread(collect_files_recursive, meta['path'], meta)
-            base_name = os.path.basename(meta['path'])
-            nfo_candidates = []
-            video_files = []
-            music_files = []
 
-            # Categorize files
-            for file_name, full_path in all_files.items():
-                ext = os.path.splitext(file_name)[1].lower()
-                if ext in ['.mkv', '.mp4', '.ts']:
-                    video_files.append((file_name, full_path))
-                elif ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
-                    music_files.append((file_name, full_path))
-                elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
-                    meta['user_images'].append(full_path)
-                elif ext == '.nfo':
-                    nfo_candidates.append((file_name, full_path))
-                elif ext == '.log':
-                    meta['log_files'].append(full_path)
+        all_files, total_size = await asyncio.to_thread(collect_files_recursive, meta['path'], meta)
+        meta['content_size'] = total_size
+        base_name = os.path.basename(meta['path'])
+        nfo_candidates = []
+        video_files = []
+        music_files = []
 
-            # Prioritize video if in base directory or dominant
-            base_video = any(f.startswith('BASE/') for f, _ in video_files)
-            video_count = len(video_files)
-            music_count = len(music_files)
-            log.debug(f"Found {video_count} video files, {music_count} music files")
+        # Categorize files
+        for file_name, full_path in all_files.items():
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext in ['.mkv', '.mp4', '.ts']:
+                video_files.append((file_name, full_path))
+            elif ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
+                music_files.append((file_name, full_path))
+            elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
+                meta['user_images'].append(full_path)
+            elif ext == '.nfo':
+                nfo_candidates.append((file_name, full_path))
+            elif ext == '.log':
+                meta['log_files'].append(full_path)
 
-            if video_count > 0 and (base_video or video_count > music_count * 2 or not meta.get('is_music')):
-                meta['is_video'] = True
-                meta['filelist'] = {f: p for f, p in video_files}
-            elif music_count > 0:
-                meta['is_music'] = True
-                meta['filelist'] = {f: p for f, p in music_files}
-                console.print('[red]Processing as music')
-                await self.get_music(meta, mode)
+        # Prioritize video if in base directory or dominant
+        base_video = any(f.startswith('BASE/') for f, _ in video_files)
+        video_count = len(video_files)
+        music_count = len(music_files)
+        log.debug(f"Found {video_count} video files, {music_count} music files")
 
-            # Handle NFO files
-            if nfo_candidates:
-                for file_name, full_path in nfo_candidates:
-                    if file_name == f"{base_name}.nfo":
-                        meta['nfo_file'] = full_path
-                        break
-                else:
-                    meta['nfo_file'] = nfo_candidates[0][1]
+        if video_count > 0 and (base_video or video_count > music_count * 2 or not meta.get('is_music')):
+            meta['is_video'] = True
+            meta['filelist'] = {f: p for f, p in video_files}
+        elif music_count > 0:
+            meta['is_music'] = True
+            meta['filelist'] = {f: p for f, p in music_files}
+            console.print('[red]Processing as music')
+            await self.get_music(meta, mode)
 
-        except Exception as e:
-            log.error(f"Error processing directory: {e}")
+        # Handle NFO files
+        if nfo_candidates:
+            for file_name, full_path in nfo_candidates:
+                if file_name == f"{base_name}.nfo":
+                    meta['nfo_file'] = full_path
+                    break
+            else:
+                meta['nfo_file'] = nfo_candidates[0][1]
         return meta
 
     async def _process_single_file(self, meta, mode):
-        """Process a single file with video priority."""
+        """Process a single file with video priority and calculate size."""
         file_extension = os.path.splitext(meta['path'])[1].lower()
+        try:
+            meta['content_size'] = await asyncio.to_thread(os.path.getsize, meta['path'])
+        except (OSError, FileNotFoundError) as e:
+            log.error(f"Error getting file size: {e}")
+            meta['content_size'] = 0
+
         if file_extension in ['.mkv', '.mp4', '.ts']:
             meta['is_video'] = True
             meta['filelist'] = {"BASE/" + os.path.basename(meta['path']): meta['path']}
@@ -163,7 +170,7 @@ class Prep():
                 if nfo_files:
                     meta['nfo_file'] = os.path.join(directory, nfo_files[0])
         elif file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
-            if meta.get('is_music'):  # Only process as music if explicitly set
+            if meta.get('is_music'):
                 meta['is_music'] = True
                 console.print('[red]Processing as music')
                 await self.process_single_music_file(meta, mode)
@@ -363,7 +370,7 @@ class Prep():
             meta = await self.get_season_episode(meta['video'], meta)
 
         # Assign common metadata 
-        meta = await self._assign_common_metadata(meta) #After TMDb for Dual/Dub
+        meta = await self._assign_common_metadata(meta) #After TMDb for Dual/Dub/Silent
 
         # Additional cleanup
         meta = await self.tag_override(meta)
@@ -772,7 +779,12 @@ class Prep():
         #INITIALIZE META 
         log.debug('About to first_audio_file')
         first_audio_file = tracks[0][2]
-        mi = self.mihandle.exportInfo(first_audio_file, meta['isdir'], meta['uuid'], self.base_dir, export_text=True)
+        mi = await self.mihandle.exportInfo(
+                    media_path=first_audio_file,
+                    is_dir=meta.get('isdir', False),
+                    folder_id=meta['uuid'],
+                    export_text=True
+                )
         meta.update(
             is_disc=False,
             screens=0,
@@ -846,10 +858,6 @@ class Prep():
                 console.print("[red]WARN[/red]: No MusicBrainz data found using any method.")                 
 
         await self.process_with_discogs(meta)
-
-        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_cover', 'user_cover', ('.jpg', '.jpeg'))
-        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_back', 'back_cover')
-        await self.screenshot_uploadrr.upload_proof_or_cover(meta, 'album_proof', 'user_proof')
 
         if not meta.get('tracklist', {}):
             log.debug('[magenta]MANUAL TRACKLIST')
@@ -1643,6 +1651,8 @@ class Prep():
                 if descfile and descfile.is_file():
                     with descfile.open('r') as f:
                         descfile_content = f.read()
+                        if not any(line.strip().startswith("# DESC_CONTROL:") for line in descfile_content.splitlines()):
+                            descfile_content = "# DESC_CONTROL: full\n" + descfile_content
                         description.write("\n" + descfile_content + "\n")
                         meta['description'] = "CUSTOM"
                         custom_desc_written = True
