@@ -12,9 +12,7 @@ import ffmpeg
 import oxipng
 import numpy as np
 from PIL import Image
-from rich.console import Group
-from rich.live import Live
-from rich.spinner import Spinner
+
 
 from src.console import console, log
 
@@ -31,7 +29,7 @@ class ScreenshotGenerator:
         self.max_image_size = None
         self.child_processes = []
 
-    async def generate_screenshots(self, meta, filename, folder_id, bdinfo=None):
+    async def generate_screenshots(self, meta, filename, folder_id, bdinfo=None, task_widget=None):
         screens = meta.get('screens', self.config.get('DEFAULT', {}).get('screens', 3))
         img_host = meta.get('imghost') or self.config['DEFAULT'].get('img_host_1', 'imgbox')
         self.max_image_size = self.max_sizes.get(img_host.lower(), 10000000)
@@ -41,47 +39,49 @@ class ScreenshotGenerator:
         os.chdir(tmp_dir)
 
         existing_screenshots = sorted(glob.glob(f"{filename}-*.png"))
-        valid_existing = []
-        for img in existing_screenshots:
-            if os.path.exists(img):
-                size = os.path.getsize(img)
-                if self.min_image_size <= size <= self.max_image_size:
-                    valid_existing.append(img)
-                else:
-                    log.debug(f"Removing invalid screenshot {img} (size: {size} bytes)")
-                    os.remove(img)
-
-        num_screens_needed = screens - len(valid_existing)
-        if num_screens_needed <= 0:
+        valid_existing = [img for img in existing_screenshots if os.path.exists(img) and self.min_image_size <= os.path.getsize(img) <= self.max_image_size]
+        if len(valid_existing) >= screens:
             log.debug(f"Reusing {len(valid_existing)} existing screenshots for {filename}")
+            if task_widget:
+                task_widget.text = f"Processing {filename}: Reusing existing screenshots"
+            else:
+                console.print(f"[green]Reusing {len(valid_existing)} existing screenshots for {filename}[/green]")
             return valid_existing[:screens]
 
+        num_screens_needed = screens - len(valid_existing)
         log.debug(f"Found {len(valid_existing)} valid screenshots, generating {num_screens_needed} more for {filename} in {folder_id}")
-        spinner = Spinner("dots", text="Generating screenshots...")
-        with Live(Group(spinner), console=console, transient=True, refresh_per_second=10) as live:
-            try:
-                if meta.get('is_disc') == 'BDMV':
-                    new_screenshots = await self._generate_bdmv(meta, filename, folder_id, bdinfo, num_screens_needed)
-                elif meta.get('is_disc') == 'DVD':
-                    new_screenshots = await self._generate_dvd(meta, filename, num_screens_needed)
-                else:
-                    new_screenshots = await self._generate_file(meta, filename, folder_id, num_screens_needed)
 
-                all_screenshots = valid_existing + new_screenshots
-                live.stop()
-                console.print(f"[green]Generated {len(new_screenshots)} screenshots successfully")
+        if task_widget:
+            task_widget.text = f"Processing {filename}: Generating screenshots..."
+        else:
+            console.print(f"[yellow]Generating {num_screens_needed} screenshots for {filename}[/yellow]")
 
-                if self.config['SCREENS'].get('optimize_images', False):
-                    spinner = Spinner("dots", text="Optimizing images...")
-                    with Live(Group(spinner), console=console, transient=True, refresh_per_second=10):
-                        all_screenshots = await self._optimize_images(all_screenshots, meta.get('debug', False))
-                    console.print("[green]Images optimized")
+        if meta.get('is_disc') == 'BDMV':
+            new_screenshots = await self._generate_bdmv(meta, filename, folder_id, bdinfo, num_screens_needed)
+        elif meta.get('is_disc') == 'DVD':
+            new_screenshots = await self._generate_dvd(meta, filename, num_screens_needed)
+        else:
+            new_screenshots = await self._generate_file(meta, filename, folder_id, num_screens_needed)
 
-                return all_screenshots[:screens]
-            except asyncio.CancelledError:
-                live.stop()
-                log.debug("Screenshot generation cancelled")
-                raise
+        all_screenshots = valid_existing + new_screenshots
+
+        if self.config['SCREENS'].get('optimize_images', False):
+            if task_widget:
+                task_widget.text = f"Processing {filename}: Optimizing images..."
+            else:
+                console.print(f"[yellow]Optimizing images for {filename}[/yellow]")
+            all_screenshots = await self._optimize_images(all_screenshots, meta.get('debug', False))
+            if task_widget:
+                task_widget.text = f"Processing {filename}: Images optimized"
+            else:
+                console.print(f"[green]Images optimized for {filename}[/green]")
+
+        if task_widget:
+            task_widget.text = f"Processing {filename}: Completed"
+        else:
+            console.print(f"[green]Generated {len(new_screenshots)} screenshots for {filename}[/green]")
+
+        return all_screenshots[:screens]
 
     async def _generate_bdmv(self, meta, filename, folder_id, bdinfo, num_screens):
         file = self._find_longest_file(bdinfo)
@@ -425,7 +425,16 @@ class ScreenshotGenerator:
         return 0
 
     async def _validate_and_retry(self, meta, results, file, filename, length, keyframe, num_screens, vobs=None):
-        valid = [r for r in results if not isinstance(r, Exception) and r and os.path.exists(r) and self.min_image_size <= os.path.getsize(r) <= self.max_image_size]
+        valid = []
+        for r in results:
+            if not isinstance(r, Exception) and r and os.path.exists(r):
+                size = os.path.getsize(r)
+                if self.min_image_size <= size <= self.max_image_size and not self.is_monochromatic(r):
+                    valid.append(r)
+                elif os.path.exists(r):
+                    log.debug(f"Discarding {r}: {'monochromatic' if self.is_monochromatic(r) else 'invalid size'}")
+                    os.remove(r)
+
         if len(valid) < num_screens:
             log.debug(f"Only {len(valid)} valid screenshots, retrying for {num_screens - len(valid)} more")
             missing = num_screens - len(valid)
@@ -449,8 +458,31 @@ class ScreenshotGenerator:
                         self._take_screenshot(file, f"{filename}-{max_existing_idx + 1 + i}.png", ss_time, keyframe, meta.get('ffdebug', False))
                     )
             retry_results = await asyncio.gather(*tasks, return_exceptions=True)
-            valid.extend([r for r in retry_results if not isinstance(r, Exception) and r and os.path.exists(r) and self.min_image_size <= os.path.getsize(r) <= self.max_image_size])
+            for r in retry_results:
+                if not isinstance(r, Exception) and r and os.path.exists(r):
+                    size = os.path.getsize(r)
+                    if self.min_image_size <= size <= self.max_image_size and not self.is_monochromatic(r):
+                        valid.append(r)
+                    elif os.path.exists(r):
+                        os.remove(r)
         return valid[:num_screens]
+
+    def is_monochromatic(self, image_path, sample_size=100):
+        """Check if an image is monochromatic by sampling pixels."""
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert('RGB')
+                width, height = img.size
+                if width * height < sample_size:
+                    pixels = list(img.getdata())
+                else:
+                    pixels = [img.getpixel((random.randint(0, width - 1), random.randint(0, height - 1))) for _ in range(sample_size)]
+                first_pixel = pixels[0]
+                return all(pixel == first_pixel for pixel in pixels)
+        except Exception as e:
+            log.error(f"Error checking if {image_path} is monochromatic: {e}")
+            return False
+
 
     async def _optimize_images(self, images, debug=False):
         valid_images = [img for img in images if img and os.path.exists(img)]
@@ -479,6 +511,7 @@ class ScreenshotGenerator:
             raise
         finally:
             executor.shutdown(wait=False) 
+            self.child_processes.clear()
 
     async def _optimize_image_task(self, image, executor):
         try:
