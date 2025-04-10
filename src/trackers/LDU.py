@@ -25,7 +25,7 @@ class LDU():
         pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
         self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = ['']
-        self.allowed_imghosts = None # == All
+        self.allowed_imghosts = []
         pass
     
     async def get_cat_id(self, meta):
@@ -36,6 +36,8 @@ class LDU():
         edition = meta.get('edition', '')
         adult = meta.get('adult', False)
         is_silent = meta.get('is_silent', False)
+        original_language = meta.get('original_language')
+        hc = meta.get('hardcoded_subs', False)
 
         tag = self.get_language_tag(meta) or ''
         tags = [t[1:] for t in tag.split(']') if t]
@@ -60,7 +62,7 @@ class LDU():
             return '6'   # Adult content
 
         if category_name == 'MOVIE':
-            if not meta['is_disc'] == 'DVD' and '???' in tags:
+            if (meta['is_disc'] != 'DVD' and '???' in tags and original_language != "en") or hc:
                 return '27'
             if 'ENG' not in ''.join(tags):
                 return '22'
@@ -85,7 +87,7 @@ class LDU():
             return '1'  # Default for MOVIE
 
         if category_name == 'TV':
-            if tag and not all(char.isalpha() or char.isspace() for char in tags[0]):
+            if (meta['is_disc'] != 'DVD' and '???' in tags and original_language != "en") or hc:
                 return '31'
             if 'ENG' not in ''.join(tags):
                 return '29'

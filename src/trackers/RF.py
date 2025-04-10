@@ -180,7 +180,7 @@ class RF():
             }.get(resolution, '10')
         return resolution_id
 
-    async def other_banned_content(self, meta):
+    async def banned_content(self, meta):
         path = meta.get('uuid', '')
         adult = meta.get('adult', False)
         keywords = meta.get('keywords', '')

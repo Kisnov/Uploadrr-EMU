@@ -106,7 +106,7 @@ class RTF():
             return success
 
 
-    async def other_banned_content(self, meta):
+    async def banned_content(self, meta):
         path = meta.get('uuid', '')
         adult = meta.get('adult', False)
         keywords = meta.get('keywords', '')

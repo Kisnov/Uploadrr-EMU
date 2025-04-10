@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# import discord
 import asyncio
 import requests
-import os
+from typing import Dict
 import re
+import os
+
 import platform
+
+from rich.prompt import Confirm
 from rich.pretty import Pretty
 from src.trackers.COMMON import COMMON
 from src.console import console
@@ -26,7 +29,33 @@ class HUNO():
                             "LAMA", "MeGusta", "m3th", "MRN", "Musafirboy", "OEPlus", "Pahe.in", "PHOCiS", "PoF", "PSA",
                             "RARBG", "RMTeam", "ShieldBearer", "SiQ", "TBD", "TSP", "VXT", "WKS", "YAWNiX", "YIFY", "YTS"
                         ]
-        pass
+        self.allowed_imghosts = []
+
+
+    async def banned_content(self, meta):
+        # Reject non-HEVC ENCODE/WEBRIP
+        if meta['video_codec'] != "HEVC" and meta['type'] in {"ENCODE", "WEBRIP"}:
+            console.print('[bold red]Only x265/HEVC encodes are allowed')
+            return True, True  # banned, and skip
+
+        # Bitrate check
+        for track in meta['mediainfo'].get("media", {}).get("track", []):
+            if track.get("@type") == "Video":
+                bitrate = int(track.get("BitRate", 3000000))
+                bitrate_str = track.get("BitRate_String", f"{bitrate // 1000} kbps")
+                if bitrate < 3000000:
+                    if meta.get("unattended"):
+                        console.print(f"[bold yellow]Skipped due to low bitrate ({bitrate_str}).")
+                        return False, True  # not banned, but skip
+                    else:
+                        console.print(f"[bold yellow]This encode is bitstarved ({bitrate_str}). Upload anyway? [y/N]")
+                        if not Confirm.ask("Upload anyway?", default=False):
+                            return False, True  # user said no, so skip
+                        return False, False  # user allowed upload
+                break
+
+        return False, False
+
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
@@ -40,12 +69,7 @@ class HUNO():
         else:
             anon = 0
 
-        # adding logic to check if its an encode or webrip and not HEVC as only HEVC encodes and webrips are allowed
-        if meta['video_codec'] != "HEVC" and (meta['type'] == "ENCODE" or meta['type'] == "WEBRIP"):
-            console.print('[bold red]Only x265/HEVC encodes are allowed')
-            return
-
-        if meta['bdinfo'] != None:
+        if meta['bdinfo'] not in (None, ''):
             mi_dump = None
             bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
         else:
@@ -60,7 +84,7 @@ class HUNO():
             files['nfo'] = open_nfo
         manual_name = meta.get('manual_name')
         data = {
-            'name' : manual_name or await self.get_name(meta),
+            'name' : manual_name or await self.edit_name(meta),
             'description' : desc,
             'mediainfo' : mi_dump,
             'bdinfo' : bd_dump,
@@ -175,85 +199,80 @@ class HUNO():
         path = next(iter(meta['filelist']), meta['path'])
         return os.path.basename(path)
 
-    async def get_name(self, meta): #TODO use edit_name
-        # Copied from Prep.get_name() then modified to match HUNO's naming convention.
-        # It was much easier to build the name from scratch than to alter the existing name.
+    async def edit_name(self, meta: Dict) -> str:
+        basename = self.get_basename(meta)  # For Hybrid/DS4K/RM4K checks
+        aka = meta.get('aka', '')
+        audio = meta.get('audio')
+        episode = meta.get('episode', '')
+        hc = meta.get('hardcoded_subs', False)
+        hdr = meta.get('hdr', 'SDR')  # Default to SDR if empty
+        repack = meta.get('repack', '')
+        resolution = meta.get('resolution', '')
+        season = meta.get('season', '')
+        service = meta.get('service', '')
+        source = meta.get('source', '')
+        tag = meta.get('tag', '')
+        year = meta.get('year', '')
+        search_year = meta.get('search_year', year) if meta['category'] == 'TV' else year
 
-        basename = self.get_basename(meta)
-        type = meta.get('type', "")
-        title = meta.get('title',"")
-        alt_title = meta.get('aka', "")
-        year = meta.get('year', "")
-        resolution = meta.get('resolution', "")
-        audio = self.get_audio(meta)
-        service = meta.get('service', "")
-        season = meta.get('season', "")
-        episode = meta.get('episode', "")
-        repack = meta.get('repack', "")
-        if repack.strip():
-            repack = f"[{repack}]"
-        three_d = meta.get('3D', "")
-        tag = meta.get('tag', "").replace("-", "- ")
-        if tag == "":
-            tag = "-NOGRP"
-        source = meta.get('source', "")
-        uhd = meta.get('uhd', "")
-        hdr = meta.get('hdr', "")
-        if not hdr.strip():
-            hdr = "SDR"
-        distributor = meta.get('distributor', "")
-        video_codec = meta.get('video_codec', "")
-        video_encode = meta.get('video_encode', "").replace(".", "")
-        if 'x265' in basename:
-            video_encode = video_encode.replace('H', 'x')
-        region = meta.get('region', "")
-        dvd_size = meta.get('dvd_size', "")
-        edition = meta.get('edition', "")
+        name = meta['name'].replace(aka, '')
+
+        # Adjust Audio
+        name = name.replace(audio, self.get_audio(meta))
+
+        # Adjust year + Ensubbed
+        huno_year = f'({year}) Ensubbed' if hc else f'({year})'
+        huno_search_year = f'({search_year} Ensubbed)' if hc else f'({search_year})'
+        if year and year in name:
+            name = name.replace(year, huno_year)
+        elif search_year and search_year in name:  # For TV with search_year
+            name = name.replace(search_year, huno_search_year)
+
+        # Ajust Tag
+        if tag:
+            tag_with_space = tag.replace('-', ' - ')
+            name = name.replace(tag, tag_with_space)
+        elif '-NOGRP' not in name:  # Default tag if none present
+            name += ' -NOGRP'
+
+        # Ensure HDR is present (add SDR if missing)
+        if hdr not in name and 'HDR' not in name.upper():
+            audio_pos = name.rfind(' ') + 1
+            if '- ' in name[audio_pos:]:
+                tag_pos = name.rfind('- ')
+                name = f"{name[:tag_pos]}{hdr} {name[tag_pos:]}"
+            else:
+                name += f" {hdr}"
+
+        # Add Hybrid/DS4K/RM4K based on basename
         hybrid = "Hybrid" if "HYBRID" in basename.upper() else ""
-        search_year = meta.get('search_year', "")
-        if not str(search_year).strip():
-            search_year = year
         scale = "DS4K" if "DS4K" in basename.upper() else "RM4K" if "RM4K" in basename.upper() else ""
+        if hybrid and "Hybrid" not in name:
+            name = name.replace(source, f"{source} {hybrid}") if source in name else f"{name} {hybrid}"
+        if scale and scale not in name:
+            name = name.replace(resolution, f"{resolution} {scale}") if resolution in name else f"{name} {scale}"
 
-        #YAY NAMING FUN
-        if meta['category'] == "MOVIE": #MOVIE SPECIFIC
-            if type == "DISC": #Disk
-                if meta['is_disc'] == 'BDMV':
-                    name = f"{title} ({year}) {three_d} {edition} ({resolution} {region} {uhd} {source} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-                elif meta['is_disc'] == 'DVD':
-                    name = f"{title} ({year}) {edition} ({resolution} {dvd_size} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-                elif meta['is_disc'] == 'HDDVD':
-                    name = f"{title} ({year}) {edition} ({resolution} {source} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-            elif type == "REMUX" and source == "BluRay": #BluRay Remux
-                name = f"{title} ({year}) {three_d} {edition} ({resolution} {uhd} {source} {hybrid} REMUX {video_codec} {hdr} {audio} {tag}) {repack}"
-            elif type == "REMUX" and source in ("PAL DVD", "NTSC DVD"): #DVD Remux
-                name = f"{title} ({year}) {edition} ({resolution} {source} {hybrid} REMUX {video_codec} {hdr} {audio} {tag}) {repack}"
-            elif type == "ENCODE": #Encode
-                name = f"{title} ({year}) {edition} ({resolution} {scale} {uhd} {source} {hybrid} {video_encode} {hdr} {audio} {tag}) {repack}"
-            elif type in ("WEBDL", "WEBRIP"): #WEB
-                name = f"{title} ({year}) {edition} ({resolution} {scale} {uhd} {service} WEB-DL {hybrid} {video_encode} {hdr} {audio} {tag}) {repack}"
-            elif type == "HDTV": #HDTV
-                name = f"{title} ({year}) {edition} ({resolution} HDTV {hybrid} {video_encode} {audio} {tag}) {repack}"
-        elif meta['category'] == "TV": #TV SPECIFIC
-            if type == "DISC": #Disk
-                if meta['is_disc'] == 'BDMV':
-                    name = f"{title} ({search_year}) {season}{episode} {three_d} {edition} ({resolution} {region} {uhd} {source} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-                if meta['is_disc'] == 'DVD':
-                    name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} {dvd_size} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-                elif meta['is_disc'] == 'HDDVD':
-                    name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} {source} {hybrid} {video_codec} {hdr} {audio} {tag}) {repack}"
-            elif type == "REMUX" and source == "BluRay": #BluRay Remux
-                name = f"{title} ({search_year}) {season}{episode} {three_d} {edition} ({resolution} {uhd} {source} {hybrid} REMUX {video_codec} {hdr} {audio} {tag}) {repack}" #SOURCE
-            elif type == "REMUX" and source in ("PAL DVD", "NTSC DVD"): #DVD Remux
-                name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} DVD {hybrid} REMUX {video_codec} {hdr} {audio} {tag}) {repack}" #SOURCE
-            elif type == "ENCODE": #Encode
-                name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} {scale} {uhd} {source} {hybrid} {video_encode} {hdr} {audio} {tag}) {repack}" #SOURCE
-            elif type in ("WEBDL", "WEBRIP"): #WEB
-                name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} {scale} {uhd} {service} WEB-DL {hybrid} {video_encode} {hdr} {audio} {tag}) {repack}"
-            elif type == "HDTV": #HDTV
-                name = f"{title} ({search_year}) {season}{episode} {edition} ({resolution} HDTV {hybrid} {video_encode} {audio} {tag}) {repack}"
+        if repack:
+            name = name.replace(repack, '').strip()
+            name = f"{name} [{repack}]"
 
-        return ' '.join(name.split()).replace(": ", " - ")
+        metadata_fields = [resolution, source, service, season + episode]
+        if any(f in name for f in metadata_fields):
+            # Find segment after title/year and before tag
+            start = name.find(')') + 2  # After (year)
+            end = len(name)
+            if repack and f'[{repack}]' in name:
+                end = name.rfind(f'[{repack}]') - 1
+            elif '- ' in name:
+                end = name.rfind('- ') - 1
+            metadata_segment = name[start:end].strip()
+            if metadata_segment:
+                name = f"{name[:start]}({metadata_segment}){name[end:]}"
+
+        name = name.replace(': ', '- ')
+        name = ' '.join(name.split())
+
+        return name
 
 
     async def get_cat_id(self, category_name):
@@ -297,7 +316,7 @@ class HUNO():
 
 
     async def is_plex_friendly(self, meta):
-        lossy_audio_codecs = ["AAC", "DD", "DD+", "OPUS"]
+        lossy_audio_codecs = ["AAC", "DD", "DDP", "OPUS"]
 
         if any(l in meta["audio"] for l in lossy_audio_codecs):
             return 1
@@ -328,7 +347,7 @@ class HUNO():
                 result = each['attributes']['name']
                 size = each['attributes']['size']
                 dupes[result] = size
-        except:
+        except Exception:
             console.print('[bold red]Unable to search for existing torrents on site. Either the site is down or your API key is incorrect')
             await asyncio.sleep(5)
 

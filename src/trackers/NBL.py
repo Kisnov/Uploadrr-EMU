@@ -11,7 +11,7 @@ class NBL():
 
     def __init__(self, config):
         self.config = config
-        self.type = "api"
+        self.type = "api" # TODO gazelle
         self.tracker = 'NBL'
         self.source_flag = 'NBL'
         self.domain = 'https://nebulance.io'

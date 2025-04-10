@@ -30,7 +30,7 @@ class PTP():
         self.api_user = config['TRACKERS']['PTP'].get('ApiUser', '').strip()
         self.api_key = config['TRACKERS']['PTP'].get('ApiKey', '').strip()
         self.pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
-        self.announce_url = f"https://please.passthepopcorn.me/{self.pid}/announce" #TODO verify might be http on port 2710
+        self.announce_url = f"https://please.passthepopcorn.me/{self.pid}/announce"
         self.username = config['TRACKERS']['PTP'].get('username', '').strip() 
         self.password = config['TRACKERS']['PTP'].get('password', '').strip()
         self.web_source = config['TRACKERS']['PTP'].get('add_web_source_to_desc', True) 
@@ -579,8 +579,8 @@ class PTP():
         desc = desc.replace("[code]", "[quote]").replace("[/code]", "[/quote]")
         return desc
 
-    async def edit_desc(self, meta):
-        from prep import Prep
+    async def edit_desc(self, meta): #TODO Change to GENRATOR + Support Multi-Disc/Episode Screens
+        from prep import Prep 
         prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=self.config)
         base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding="utf-8").read()
         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding="utf-8") as desc:
@@ -650,7 +650,7 @@ class PTP():
                         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/TEMP_PTP_MEDIAINFO.txt", "w", newline="", encoding="utf-8") as f:
                             f.write(mi_dump)
                         mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/TEMP_PTP_MEDIAINFO.txt", "r", encoding="utf-8").read()
-                        # Generate and upload screens for other files
+                        # Generate and upload screens for other files 
                         s = multiprocessing.Process(target=prep.screenshots, args=(file, f"FILE_{i}", meta['uuid'], meta['base_dir'], meta, 2))
                         s.start()
                         while s.is_alive() is True:

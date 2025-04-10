@@ -38,7 +38,7 @@ class BLU():
             "TERMiNAL": ["ENCODE", "WEBRIP"],
             "ViSION": ["ENCODE", "WEBRIP"]
         }
-      
+        self.allowed_imghosts = []
         pass
     
     async def upload(self, meta):

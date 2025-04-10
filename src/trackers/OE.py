@@ -2,6 +2,7 @@
 import asyncio
 import requests
 import json
+from typing import Dict
 import os
 import platform
 from rich.pretty import Pretty
@@ -47,7 +48,7 @@ class OE():
             anon = 1
         else:
             anon = 0
-        if meta['bdinfo'] != None:
+        if meta['bdinfo'] not in (None, ''):
             mi_dump = None
             bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
         else:
@@ -62,7 +63,7 @@ class OE():
             files['nfo'] = open_nfo
         manual_name = meta.get('manual_name')
         data = {
-            'name' : await self.get_name(meta) if not manual_name else manual_name,
+            'name' : manual_name or await self.edit_name,
             'description' : desc,
             'mediainfo' : mi_dump,
             'bdinfo' : bd_dump, 
@@ -159,11 +160,11 @@ class OE():
 
             return success
 
-    def get_language_tag(self, meta):
-        lang_tag = ""  
+    def get_language_tag(self, meta: Dict) -> str:
+        lang_tag = ""
         has_eng_audio = False
         audio_lang = ""
-        if meta['is_disc'] != "BDMV":
+        if meta.get('is_disc') != "BDMV":
             try:
                 with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/MediaInfo.json", 'r', encoding='utf-8') as f:
                     mi = json.load(f)
@@ -173,145 +174,57 @@ class OE():
                             has_eng_audio = True
                         if not has_eng_audio:
                             audio_lang = mi['media']['track'][2].get('Language_String', "").upper()
-            except Exception as e:
-                print(f"Error: {e}")
+            except Exception:
+                pass
         else:
-            for audio in meta['bdinfo']['audio']:
-                if audio['language'] == 'English':
+            for audio in meta.get('bdinfo', {}).get('audio', []):
+                if audio.get('language') == 'English':
                     has_eng_audio = True
-                if not has_eng_audio:
-                    audio_lang = meta['bdinfo']['audio'][0]['language'].upper()
-        if audio_lang != "":
+                if not has_eng_audio and meta['bdinfo']['audio']:
+                    audio_lang = meta['bdinfo']['audio'][0].get('language', '').upper()
+        if audio_lang:
             lang_tag = audio_lang
         return lang_tag
 
-    def get_basename(self, meta):
-        path = next(iter(meta['filelist']), meta['path'])
-        return os.path.basename(path)
-
-    async def get_name(self, meta): #TODO use edit_name
-        basename = self.get_basename(meta)
-        type = meta.get('type', "")
-        title = meta.get('title',"")
-        alt_title = meta.get('aka', "")
-        year = meta.get('year', "")
-        resolution = meta.get('resolution', "")
-        if resolution == "OTHER":
-            resolution = ""
-        audio = meta.get('audio', "")
-        lang_tag = self.get_language_tag(meta)
-        service = meta.get('service', "")
-        season = meta.get('season', "")
-        episode = meta.get('episode', "")
-        part = meta.get('part', "")
-        repack = meta.get('repack', "")
-        three_d = meta.get('3D', "")
-        tag = meta.get('tag', "")
-        if tag == "":
-            tag = "-NOGRP"
-        source = meta.get('source', "")
-        uhd = meta.get('uhd', "")
-        hdr = meta.get('hdr', "")
+    async def edit_name(self, meta: Dict) -> str:
+        name = meta['name']
+        category = meta.get('category', '')
+        type = meta.get('type', '')
+        is_disc = meta.get('is_disc', '')
+        alt_title = meta.get('aka', '')
+        year = meta.get('year', '')
+        tag = meta.get('tag', '')
+        three_d = meta.get('3D', '')
+        season = meta.get('season', '')
+        episode = meta.get('episode', '')
         episode_title = meta.get('episode_title', '')
-        if meta.get('is_disc', "") == "BDMV": #Disk
-            video_codec = meta.get('video_codec', "")
-            region = meta.get('region', "")
-        elif meta.get('is_disc', "") == "DVD":
-            region = meta.get('region', "")
-            dvd_size = meta.get('dvd_size', "")
-        else:
-            video_codec = meta.get('video_codec', "")
-            video_encode = meta.get('video_encode', video_codec)
-        edition = meta.get('edition', "")
-        cut = meta.get('cut', "")
-        ratio = meta.get('ratio', "")
+        part = meta.get('part', '')
+        lang_tag = self.get_language_tag(meta)
 
-        if meta['category'] == "TV":
-            try:
-                year = meta['year']
-                if not year: 
-                    raise ValueError("No TMDB Year Found..trying IMDB")
-            except (KeyError, ValueError):
-                try:
-                    year = meta['imdb_info']['year']
-                    if not year:
-                        raise ValueError("No IMDB Year Found..")
-                except (KeyError, ValueError):
-                    year = ""
-        if meta.get('no_season', False) is True:
-            season = ''
-        if meta.get('no_year', False) is True:
-            year = ''
-        if meta.get('no_aka', False) is True:
-            alt_title = ''
-        if meta['debug']:
-            console.log("[cyan]get_name cat/type")
-            console.log(f"CATEGORY: {meta['category']}")
-            console.log(f"TYPE: {meta['type']}")
-            console.log("[cyan]get_name meta:")
-            console.log(meta)
+        # Adjust alt_title: brackets for movie BDMV, space-separated otherwise
+        if alt_title:
+            if category == "MOVIE" and type == "DISC" and is_disc == "BDMV":
+                    name = name.replace(alt_title, f"[{alt_title}]")
 
-        #YAY NAMING FUN
-        if meta['category'] == "MOVIE": #MOVIE SPECIFIC
-            if type == "DISC": #Disk
-                if meta['is_disc'] == 'BDMV':
-                    name = f"{title} [{alt_title}] {year} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}{tag}"
-                    potential_missing = ['edition', 'region', 'distributor']
-                elif meta['is_disc'] == 'DVD': 
-                    name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}{tag}"
-                    potential_missing = ['edition', 'distributor']
-                elif meta['is_disc'] == 'HDDVD':
-                    name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec}] {audio}{tag}"
-                    potential_missing = ['edition', 'region', 'distributor']
-            elif type == "REMUX" and source in ("BluRay", "HDDVD"): #BluRay/HDDVD Remux
-                name = f"{title} {alt_title} {year} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}{tag}" 
-                potential_missing = ['edition', 'description']
-            elif type == "REMUX" and source in ("PAL DVD", "NTSC DVD", "DVD"): #DVD Remux
-                name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {source} REMUX  {audio}{tag}" 
-                potential_missing = ['edition', 'description']
-            elif type == "ENCODE": #Encode
-                name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}{tag}"  
-                potential_missing = ['edition', 'description']
-            elif type == "WEBDL": #WEB-DL
-                name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}{tag}"
-                potential_missing = ['edition', 'service']
-            elif type == "WEBRIP": #WEBRip
-                name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}{tag}"
-                potential_missing = ['edition', 'service']
-            elif type == "HDTV": #HDTV
-                name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}"
-                potential_missing = []
-        elif meta['category'] == "TV": #TV SPECIFIC
-            if type == "DISC": #Disk
-                if meta['is_disc'] == 'BDMV':
-                    name = f"{title} {year} {alt_title} {season}{episode} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}{tag}"
-                    potential_missing = ['edition', 'region', 'distributor']
-                if meta['is_disc'] == 'DVD':
-                    name = f"{title} {alt_title} {season}{episode} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}{tag}"
-                    potential_missing = ['edition', 'distributor']
-                elif meta['is_disc'] == 'HDDVD':
-                    name = f"{title} {alt_title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}{tag}"
-                    potential_missing = ['edition', 'region', 'distributor']
-            elif type == "REMUX" and source in ("BluRay", "HDDVD"): #BluRay Remux
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}{tag}" #SOURCE
-                potential_missing = ['edition', 'description']
-            elif type == "REMUX" and source in ("PAL DVD", "NTSC DVD"): #DVD Remux
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {source} REMUX {audio}{tag}" #SOURCE
-                potential_missing = ['edition', 'description']
-            elif type == "ENCODE": #Encode
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}{tag}" #SOURCE
-                potential_missing = ['edition', 'description']
-            elif type == "WEBDL": #WEB-DL
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}{tag}"
-                potential_missing = ['edition', 'service']
-            elif type == "WEBRIP": #WEBRip
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}{tag}"
-                potential_missing = ['edition', 'service']
-            elif type == "HDTV": #HDTV
-                name = f"{title} {year} {alt_title} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}"
-                potential_missing = []
+        # Insert lang_tag after 3D (movies) or season/episode/part/episode_title (TV)
+        if lang_tag:
+            if lang_tag not in name:
+                if category == "MOVIE":
+                    insert_pos = name.find(three_d) + len(three_d) + 1 if three_d in name else name.find(year) + len(year) + 1
+                else:  # TV
+                    after_part = name.find(part) + len(part) + 1 if part in name else -1
+                    after_episode_title = name.find(episode_title) + len(episode_title) + 1 if episode_title in name else -1
+                    after_episode = name.find(f"{season}{episode}") + len(f"{season}{episode}") + 1 if f"{season}{episode}" in name else -1
+                    insert_pos = max(after_part, after_episode_title, after_episode, name.find(year) + len(year) + 1)
+                name = f"{name[:insert_pos]}{lang_tag} {name[insert_pos:]}"
 
-        
+        if tag:
+            if '- ' in tag:  # Remove space if present
+                tag = tag.replace('- ', '-')
+            name = name.replace(meta.get('tag', ''), tag)
+        elif '-NOGRP' not in name:
+            name += '-NOGRP'
+
         return ' '.join(name.split())
 
     async def get_cat_id(self, category_name):
