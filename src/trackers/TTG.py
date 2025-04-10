@@ -1,39 +1,41 @@
-import pickle
-from bs4 import BeautifulSoup
-import requests
 import asyncio
-import re
+import aiofiles
 import os
+import re
 from pathlib import Path
-import traceback
-import json
+import pickle
+from urllib.parse import urlparse
+
+import httpx
+from bs4 import BeautifulSoup
 from rich.prompt import Confirm
 from unidecode import unidecode
-from urllib.parse import urlparse, quote
-from src.trackers.COMMON import COMMON
-from src.exceptions import *
+
 from src.console import console
+from src.exceptions import UploadException
+from src.trackers.COMMON import COMMON
 
 
 class TTG():
 
     def __init__(self, config):
         self.config = config
-        self.type = 'http'
+        self.type = 'http' #custom nexus?
         self.tracker = 'TTG'
         self.source_flag = 'TTG'
+        self.domain = 'https://totheglory.im'
         self.username = str(config['TRACKERS']['TTG'].get('username', '')).strip()
         self.password = str(config['TRACKERS']['TTG'].get('password', '')).strip()
         self.passid = str(config['TRACKERS']['TTG'].get('login_question', '0')).strip()
         self.passan = str(config['TRACKERS']['TTG'].get('login_answer', '')).strip()
         self.uid = str(config['TRACKERS']['TTG'].get('user_id', '')).strip()
-        self.passkey = str(config['TRACKERS']['TTG'].get('announce_url', '')).strip().split('/')[-1]
+        self.passkey = config['TRACKERS']['TTG'].get('annouce_key', '').strip()
+        self.announce_url = f"{self.domain}/announce/{self.passkey}"
         self.banned_groups = [""]
-
+        self.allowed_imghosts = []
 
     async def edit_name(self, meta):
         ttg_name = meta['name']
-
         remove_list = ['Dubbed', 'Dual-Audio']
         for each in remove_list:
             ttg_name = ttg_name.replace(each, '')
@@ -103,10 +105,8 @@ class TTG():
 
     async def get_anon(self, anon):
         if anon == 0 and not self.config['TRACKERS'][self.tracker].get('anon', False):
-            anon = 'no'
-        else:
-            anon = 'yes'
-        return anon
+            return 'no'
+        return 'yes'
     
 
     ###############################################################
@@ -115,264 +115,239 @@ class TTG():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         manual_name = meta.get('manual_name')
         ttg_name = await self.edit_name(meta)
 
-        # FORM
-            # type = category dropdown
-            # name = name
-            # descr = description
-            # anonymity = "yes" / "no"
-            # nodistr = "yes" / "no" (exclusive?) not required
-            # imdb_c = tt123456
-            #
-        # POST > upload/upload
+        base_dir = Path(meta['base_dir'])
+        tmp_dir = base_dir / 'tmp' / meta['uuid']
+        
+        mi_file = 'BD_SUMMARY_00.txt' if meta['bdinfo'] else 'MEDIAINFO.txt'
+        async with aiofiles.open(tmp_dir / mi_file, 'r', encoding='utf-8') as mi_dump:
+            mi_content = await mi_dump.read()
 
-        if meta['bdinfo'] != None:
-            mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8')
-        else:
-            mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'r', encoding='utf-8')
+        async with aiofiles.open(tmp_dir / f'[{self.tracker}]DESCRIPTION.txt', 'r', encoding='utf-8') as desc_file:
+            ttg_desc = (await desc_file.read()).rstrip()
 
-        ttg_desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'r', encoding='utf-8').read()
-        torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent"
-        with open(torrent_path, 'rb') as torrentFile:
-            if len(meta['filelist']) == 1:
-                torrentFileName = unidecode(os.path.basename(meta['video']).replace(' ', '.'))
-            else:
-                torrentFileName = unidecode(os.path.basename(meta['path']).replace(' ', '.'))
-            files = {
-                'file' : (f"{torrentFileName}.torrent", torrentFile, "application/x-bittorent"),
-                'nfo' : ("torrent.nfo", mi_dump)
-            }
-            data = {
-                'MAX_FILE_SIZE' : '4000000',
-                'team' : '',
-                'hr' : 'no',
-                'name' : manual_name or ttg_name,
-                'type' : await self.get_type_id(meta),
-                'descr' : ttg_desc.rstrip(),
-                
+        torrent_path = tmp_dir / f'[{self.tracker}]{meta["clean_name"]}.torrent'
+        torrent_filename = unidecode(os.path.basename(meta['video'] if len(meta['filelist']) == 1 else meta['path']).replace(' ', '.'))
+        
+        async with aiofiles.open(torrent_path, 'rb') as torrent_file:
+            torrent_data = await torrent_file.read()
 
-                'anonymity' : await self.get_anon(meta['anon']),
-                'nodistr' : 'no',
-                
-            }
-            url = "https://totheglory.im/takeupload.php"
-            if int(meta['imdb_id'].replace('tt', '')) != 0:
-                data['imdb_c'] = f"tt{meta.get('imdb_id', '').replace('tt', '')}"
+        files = {
+            'file': (f"{torrent_filename}.torrent", torrent_data, "application/x-bittorrent"),
+            'nfo': ("torrent.nfo", mi_content.encode('utf-8'))
+        }
+        data = {
+            'MAX_FILE_SIZE': '4000000',
+            'team': '',
+            'hr': 'no',
+            'name': manual_name or ttg_name,
+            'type': await self.get_type_id(meta),
+            'descr': ttg_desc,
+            'anonymity': await self.get_anon(meta['anon']),
+            'nodistr': 'no',
+        }
+        if int(meta['imdb_id'].replace('tt', '')) != 0:
+            data['imdb_c'] = f"tt{meta.get('imdb_id', '').replace('tt', '')}"
 
-            # Submit
+        url = f"{self.domain}/takeupload.php"
+        cookiefile = base_dir / 'data' / 'cookies' / 'TTG.pkl'
+
+        async with httpx.AsyncClient(cookies=await self._load_cookies(cookiefile)) as client:
             if meta['debug']:
                 console.print(url)
                 console.print(data)
             else:
-                with requests.Session() as session:
-                    cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.pkl")
-                    with open(cookiefile, 'rb') as cf:
-                        session.cookies.update(pickle.load(cf))
-                    up = session.post(url=url, data=data, files=files)
-                    torrentFile.close()
-                    mi_dump.close()
-                    
-                    if up.url.startswith("https://totheglory.im/details.php?id="):
-                        console.print(f"[green]Uploaded to: [yellow]{up.url}[/yellow][/green]")
-                        id = re.search(r"(id=)(\d+)", urlparse(up.url).query).group(2)
-                        await self.download_new_torrent(id, torrent_path)
-                    else:
-                        console.print(data)
-                        console.print("\n\n")
-                        console.print(up.text)
-                        raise UploadException(f"Upload to TTG Failed: result URL {up.url} ({up.status_code}) was not expected", 'red')
-        return
+                response = await client.post(url, data=data, files=files)
+                if response.url.startswith(f"{self.domain}/details.php?id="):
+                    console.print(f"[green]Uploaded to: [yellow]{response.url}[/yellow][/green]")
+                    id_match = re.search(r"(id=)(\d+)", urlparse(str(response.url)).query)
+                    if id_match:
+                        await self.download_new_torrent(id_match.group(2), torrent_path)
+                else:
+                    console.print(data)
+                    console.print("\n\n")
+                    console.print(response.text)
+                    raise UploadException(f"Upload to TTG Failed: result URL {response.url} ({response.status_code}) was not expected", 'red')
 
+
+    async def _load_cookies(self, cookiefile):
+        if cookiefile.exists():
+            async with aiofiles.open(cookiefile, 'rb') as cf:
+                return pickle.loads(await cf.read())
+        return {}
 
     async def search_existing(self, meta):
         dupes = {}
-        with requests.Session() as session:
-            cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.pkl")
-            with open(cookiefile, 'rb') as cf:
-                session.cookies.update(pickle.load(cf))
-            
-            if int(meta['imdb_id'].replace('tt', '')) != 0:
-                imdb = f"imdb{meta['imdb_id'].replace('tt', '')}"
-            else:
-                imdb = ""
-            if meta.get('is_disc', '') == "BDMV":
-                res_type = f"{meta['resolution']} Blu-ray"
-            elif meta.get('is_disc', '') == "DVD":
-                res_type = "DVD"
-            else:
-                res_type = meta['resolution']
-            search_url = f"https://totheglory.im/browse.php?search_field= {imdb} {res_type}"
-            r = session.get(search_url)
+        cookiefile = Path(meta['base_dir']) / 'data' / 'cookies' / 'TTG.pkl'
+        
+        imdb = f"imdb{meta['imdb_id'].replace('tt', '')}" if int(meta['imdb_id'].replace('tt', '')) != 0 else ""
+        res_type = {
+            'BDMV': f"{meta['resolution']} Blu-ray",
+            'DVD': "DVD"
+        }.get(meta.get('is_disc', ''), meta['resolution'])
+        
+        search_url = f"{self.domain}/browse.php?search_field={imdb} {res_type}"
+        
+        async with httpx.AsyncClient(cookies=await self._load_cookies(cookiefile)) as client:
+            response = await client.get(search_url)
             await asyncio.sleep(0.5)
-            soup = BeautifulSoup(r.text, 'html.parser')
-            find = soup.find_all('a', href=True)
-            for each in find:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for each in soup.find_all('a', href=True):
                 if each['href'].startswith('/t/'):
                     release = re.search(r"(<b>)(<font.*>)?(.*)<br", str(each))
-                    size = 0 #I dont have access to TTG so setting to 0 so script doesnt fail
                     if release:
-                        dupes[release.group(3)] = size
-
+                        dupes[release.group(3)] = 0  # CVT NOTE: No TTG Access so size is made to be 0 as I dont know the param to grab
+        
         return dupes
-
-    
 
 
     async def validate_credentials(self, meta):
-        cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/TTG.pkl")
-        if not os.path.exists(cookiefile):
+        cookiefile = Path(meta['base_dir']) / 'data' / 'cookies' / 'TTG.pkl'
+        if not cookiefile.exists():
             await self.login(cookiefile)
         vcookie = await self.validate_cookies(meta, cookiefile)
-        if vcookie != True:
+        if not vcookie:
             console.print('[red]Failed to validate cookies. Please confirm that the site is up and your passkey is valid.')
             recreate = Confirm.ask("Log in again and create new session?")
-            if recreate == True:
-                if os.path.exists(cookiefile):
-                    os.remove(cookiefile)
+            if recreate:
+                if cookiefile.exists():
+                    cookiefile.unlink()
                 await self.login(cookiefile)
-                vcookie = await self.validate_cookies(meta, cookiefile)
-                return vcookie
-            else:
-                return False
+                return await self.validate_cookies(meta, cookiefile)
+            return False
         return True
+
     
     async def validate_cookies(self, meta, cookiefile):
-        url = "https://totheglory.im"
-        if os.path.exists(cookiefile):
-            with requests.Session() as session:
-                with open(cookiefile, 'rb') as cf:
-                    session.cookies.update(pickle.load(cf))
-                resp = session.get(url=url)
-                if meta['debug']:
-                    console.print('[cyan]Cookies:')
-                    console.print(session.cookies.get_dict())
-                    console.print(resp.url)
-                if resp.text.find("""<a href="/logout.php">Logout</a>""") != -1:
-                    return True
-                else:
-                    return False
-        else:
+        url = self.domain
+        cookies = await self._load_cookies(cookiefile)
+        if not cookies:
             return False
+        
+        async with httpx.AsyncClient(cookies=cookies) as client:
+            response = await client.get(url)
+            if meta['debug']:
+                console.print('[cyan]Cookies:')
+                console.print(cookies)
+                console.print(response.url)
+            return "<a href=\"/logout.php\">Logout</a>" in response.text
 
     async def login(self, cookiefile):
-        url = "https://totheglory.im/takelogin.php"
-        data={
+        url = f"{self.domain}/takelogin.php"
+        data = {
             'username': self.username,
             'password': self.password,
             'passid': self.passid,
             'passan': self.passan
         }
-        with requests.Session() as session:
-            response = session.post(url, data=data)
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, data=data)
             await asyncio.sleep(0.5)
-            if response.url.endswith('2fa.php'):
+            
+            if str(response.url).endswith('2fa.php'):
                 soup = BeautifulSoup(response.text, 'html.parser')
-                auth_token = soup.find('input', {'name' : 'authenticity_token'}).get('value')
+                auth_token = soup.find('input', {'name': 'authenticity_token'}).get('value')
                 two_factor_data = {
-                    'otp' : console.input('[yellow]TTG 2FA Code: '),
-                    'authenticity_token' : auth_token,
-                    'uid' : self.uid
+                    'otp': console.input('[yellow]TTG 2FA Code: '),
+                    'authenticity_token': auth_token,
+                    'uid': self.uid
                 }
-                two_factor_url = "https://totheglory.im/take2fa.php"
-                response = session.post(two_factor_url, data=two_factor_data)
+                two_factor_url = f"{self.domain}/take2fa.php"
+                response = await client.post(two_factor_url, data=two_factor_data)
                 await asyncio.sleep(0.5)
-            if response.url.endswith('my.php'):
+            
+            if str(response.url).endswith('my.php'):
                 console.print('[green]Successfully logged into TTG')
-                with open(cookiefile, 'wb') as cf:
-                    pickle.dump(session.cookies, cf)
+                async with aiofiles.open(cookiefile, 'wb') as cf:
+                    await cf.write(pickle.dumps(client.cookies))
             else:
                 console.print('[bold red]Something went wrong')
                 await asyncio.sleep(1)
                 console.print(response.text)
                 console.print(response.url)
-        return
-
-
 
     async def edit_desc(self, meta):
-        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r').read()
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w') as descfile:
+        base_dir = Path(meta['base_dir'])
+        tmp_dir = base_dir / 'tmp' / meta['uuid']
+        
+        async with aiofiles.open(tmp_dir / 'DESCRIPTION.txt', 'r', encoding='utf-8') as f:
+            base = await f.read()
+        
+        async with aiofiles.open(tmp_dir / f'[{self.tracker}]DESCRIPTION.txt', 'w', encoding='utf-8') as descfile:
             from src.bbcode import BBCODE
-            from src.trackers.COMMON import COMMON
             common = COMMON(config=self.config)
+            
             if int(meta.get('imdb_id', '0').replace('tt', '')) != 0:
                 ptgen = await common.ptgen(meta)
-                if ptgen.strip() != '':
-                    descfile.write(ptgen)   
+                if ptgen.strip():
+                    await descfile.write(ptgen)
 
-            # Add This line for all web-dls
-            if meta['type'] == 'WEBDL' and meta.get('service_longname', '') != '' and meta.get('description', None) == None:
-                descfile.write(f"[center][b][color=#ff00ff][size=3]{meta['service_longname']}的无损REMUX片源，没有转码/This release is sourced from {meta['service_longname']} and is not transcoded, just remuxed from the direct {meta['service_longname']} stream[/size][/color][/b][/center]")
+            if meta['type'] == 'WEBDL' and meta.get('service_longname', '') and not meta.get('description'):
+                await descfile.write(f"[center][b][color=#ff00ff][size=3]{meta['service_longname']}的无损REMUX片源，没有转码/This release is sourced from {meta['service_longname']} and is not transcoded, just remuxed from the direct {meta['service_longname']} stream[/size][/color][/b][/center]")
+
             bbcode = BBCODE()
-            if meta.get('discs', []) != []:
+            if meta.get('discs', []):
                 discs = meta['discs']
                 for each in discs:
                     if each['type'] == "BDMV":
-                        descfile.write(f"[quote={each.get('name', 'BDINFO')}]{each['summary']}[/quote]\n")
-                        descfile.write("\n")
-                        pass
-                    if each['type'] == "DVD":
-                        descfile.write(f"{each['name']}:\n")
-                        descfile.write(f"[quote={os.path.basename(each['vob'])}][{each['vob_mi']}[/quote] [quote={os.path.basename(each['ifo'])}][{each['ifo_mi']}[/quote]\n")
-                        descfile.write("\n")
+                        await descfile.write(f"[quote={each.get('name', 'BDINFO')}]{each['summary']}[/quote]\n\n")
+                    elif each['type'] == "DVD":
+                        await descfile.write(f"{each['name']}:\n[quote={os.path.basename(each['vob'])}][{each['vob_mi']}[/quote] [quote={os.path.basename(each['ifo'])}][{each['ifo_mi']}[/quote]\n\n")
             else:
-                mi = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", 'r', encoding='utf-8').read()
-                descfile.write(f"[quote=MediaInfo]{mi}[/quote]")
-                descfile.write("\n")
+                async with aiofiles.open(tmp_dir / 'MEDIAINFO_CLEANPATH.txt', 'r', encoding='utf-8') as mi:
+                    await descfile.write(f"[quote=MediaInfo]{await mi.read()}[/quote]\n")
+
             desc = base
-            desc = bbcode.convert_code_to_quote(desc)
-            desc = bbcode.convert_spoiler_to_hide(desc)
-            desc = bbcode.convert_comparison_to_centered(desc, 1000)
-            desc = desc.replace('[img]', '[img]')
-            desc = re.sub(r"(\[img=\d+)]", "[img]", desc, flags=re.IGNORECASE)
-            descfile.write(desc)
-            add_trailer_enabled = self.config["DEFAULT"].get("add_trailer", False)    
-            if add_trailer_enabled and meta.get("category") == "MOVIE":
-                key = meta.get("youtube")
-                if key:
-                    descfile.write("[center][youtube]{key}[/youtube][/center]")
+            for transform in [
+                bbcode.convert_code_to_quote,
+                bbcode.convert_spoiler_to_hide,
+                lambda d: bbcode.convert_comparison_to_centered(d, 1000),
+                lambda d: re.sub(r"(\[img=\d+)]", "[img]", d, flags=re.IGNORECASE)
+            ]:
+                desc = transform(desc)
+            await descfile.write(desc)
+
+            if self.config["DEFAULT"].get("add_trailer", False) and meta.get("category") == "MOVIE" and meta.get("youtube"):
+                await descfile.write(f"[center][youtube]{meta['youtube']}[/youtube][/center]")
 
             img_size = self.config["DEFAULT"]["img_size"]
-            desc = desc.replace('[img]', f"[img={img_size}")
-            descfile.write(desc)
-            images = meta['image_list']
-            if len(images) > 0: 
-                descfile.write(f"\n[center]")
-                for each in range(len(images[:int(meta['screens'])])):
-                    web_url = images[each]['web_url']
-                    raw_url = images[each]['raw_url']
-                    img_size = self.config["DEFAULT"]["img_size"]
-                    descfile.write(f"[url={web_url}][img={img_size}]{raw_url}[/img][/url]")
-                descfile.write("[/center]")
+            desc = desc.replace('[img]', f"[img={img_size}]")
+            await descfile.write(desc)
 
-            use_global_sigs = self.config["DEFAULT"].get("use_global_sigs", False)
-            if use_global_sigs:
-                signature = self.config["DEFAULT"].get("global_sig", "")
-                anon_signature = self.config["DEFAULT"].get("global_anon_sig", "")
-                if signature is None or anon_signature is None:
-                    print("[bold red]WARN[/red]: Global signatures are enabled but not provided in config.[/bold]")                
-            else:
-                signature = self.config["TRACKERS"][tracker].get("signature", "")
-                anon_signature = self.config["TRACKERS"][tracker].get("anon_signature", "")
-                if signature is None or anon_signature is None:
-                    print(f"[bold red]WARN[/red]: Global Signatures are turned off, but no signature is provided for selected tracker.[/bold]")
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{tracker}]DESCRIPTION.txt", 'a', encoding='utf8') as descfile:
-            if meta["anon"] != 0 or self.config["TEAS"][tracker].get("anon"):
-                descfile.write("\n" + anon_signature)
-            elif meta["anon"] == 0:
-                descfile.write("\n" + signature)
-            descfile.close()
+            images = meta['image_list']
+            if images:
+                await descfile.write("\n[center]")
+                for img in images[:int(meta['screens'])]:
+                    await descfile.write(f"[url={img['web_url']}][img={img_size}]{img['raw_url']}[/img][/url]")
+                await descfile.write("[/center]")
+
+            use_global_sigs = self.config["DEFAULT"]["SIGNATURES"].get("use_global_sigs", False)
+            signature, anon_signature = (
+                (self.config["DEFAULT"]["SIGNATURES"].get("global_sig", ""),
+                 self.config["DEFAULT"]["SIGNATURES"].get("global_anon_sig", ""))
+                if use_global_sigs else
+                (self.config["TRACKERS"][self.tracker].get("signature", ""),
+                 self.config["TRACKERS"][self.tracker].get("anon_signature", ""))
+            )
+            if signature is None or anon_signature is None:
+                console.print("[bold red]WARN[/red]: Signatures missing in config.")
+
+            sig = anon_signature if meta["anon"] != 0 or self.config["TEAS"][self.tracker].get("anon") else signature
+            if sig:
+                await descfile.write(f"\n{sig}")
 
     async def download_new_torrent(self, id, torrent_path):
-        download_url = f"https://totheglory.im/dl/{id}/{self.passkey}"
-        r = requests.get(url=download_url)
-        if r.status_code == 200:
-            with open(torrent_path, "wb") as tor:
-                tor.write(r.content)
-        else:
-            console.print("[red]There was an issue downloading the new .torrent from TTG")
-            console.print(r.text)
+        download_url = f"{self.domain}/dl/{id}/{self.passkey}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(download_url)
+            if response.status_code == 200:
+                async with aiofiles.open(torrent_path, "wb") as tor:
+                    await tor.write(response.content)
+            else:
+                console.print("[red]There was an issue downloading the new .torrent from TTG")
+                console.print(response.text)

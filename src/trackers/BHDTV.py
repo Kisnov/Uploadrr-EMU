@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-# import discord
-import asyncio
-from torf import Torrent
 import requests
-from src.console import console
+from src.console import console, log
 from pprint import pprint
 import os
 import traceback
@@ -22,13 +19,15 @@ class BHDTV():
         #search not implemented
         #self.search_url = 'https://api.bit-hdtv.com/torrent/search/advanced'
         self.upload_url = 'https://www.bit-hdtv.com/takeupload.php'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f'https://trackerr.bit-hdtv.com/{pid}/announce'
         #self.forum_link = 'https://www.bit-hdtv.com/rules.php'
         self.banned_groups = []
         pass
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         cat_id = await self.get_cat_id(meta)
         sub_cat_id = ""
@@ -85,26 +84,24 @@ class BHDTV():
         }
 
 
-        if meta['debug'] == False:
+        if not meta['debug']:
             response = requests.post(url=self.upload_url, data=data, files=files)
             try:
                 # pprint(data)
                 console.print(response.json())
-            except:
-                console.print(f"[cyan]It may have uploaded, go check")
+            except Exception:
+                console.print("[cyan]It may have uploaded, go check")
                 # cprint(f"Request Data:", 'cyan')
                 pprint(data)
                 console.print(traceback.print_exc())
         else:
-            console.print(f"[cyan]Request Data:")
+            console.print("[cyan]Request Data:")
             pprint(data)
         # # adding my anounce url to torrent.
         if 'view' in response.json()['data']:
-            await common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.config['TRACKERS']['BHDTV'].get('my_announce_url'), response.json()['data']['view'])
+            await common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.announce_url, response.json()['data']['view'])
         else:
-            await common.add_tracker_torrent(meta, self.tracker, self.source_flag,
-                                             self.config['TRACKERS']['BHDTV'].get('my_announce_url'),
-                                             "Torrent Did not upload")
+            await common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.announce_url, "Torrent Did not upload")
         open_torrent.close()
 
 
@@ -122,7 +119,6 @@ class BHDTV():
 
     async def get_type_movie_id(self, meta):
         type_id = '0'
-        test = meta['type']
         if meta['type'] == 'DISC':
             if meta['3D']:
                 type_id = '46'
@@ -202,7 +198,7 @@ class BHDTV():
         return
 
     async def search_existing(self, meta):
-        console.print(f"[red]Dupes must be checked Manually")
-        return ['Dupes must be checked Manually']
+        log.warning("[red]Dupes must be checked Manually")
+        return []
         ### hopefully someone else has the time to implement this.
         #CvT: No change here but this might break script. Unable to test or add support as I don't have an account here either.

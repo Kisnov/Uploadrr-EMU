@@ -3,7 +3,6 @@
 import asyncio
 import requests
 from difflib import SequenceMatcher
-import urllib
 import os
 import platform
 
@@ -17,14 +16,20 @@ class BHD():
         self.type = 'api'
         self.tracker = 'BHD'
         self.source_flag = 'BHD'
-        self.upload_url = 'https://beyond-hd.me/api/upload/'
-        self.signature = None
-        self.banned_groups = ['Sicario', 'TOMMY', 'x0r', 'nikt0', 'FGT', 'd3g', 'MeGusta', 'YIFY', 'tigole', 'TEKNO3D', 'C4K', 'RARBG', '4K4U', 'EASports', 'ReaLHD']
+        self.domain = 'https://beyond-hd.me'
+        self.upload_url = f'{self.domain}/api/upload/'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f'https://beyond-hd.me/announce/{pid}' 
+        self.banned_groups = [
+            '4K4U', 'AOC', 'C4K', 'd3g', 'EASports', 'FGT', 'MeGusta', 'nikt0','RARBG',
+            'ReaLHD', 'SasukeducK', 'Sicario', 'TEKNO3D', 'Telly', 'TOMMY', 'WKS', 'x0r', 'YIFY'         
+        ]
+        self.allowed_imghosts = ["ibb.co", "ptpimg.me", "pixhost.to", "beyondhd.co", "imgbox.com", "imagebam.com"]
         pass
     
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta['category'])
         source_id = await self.get_source(meta['source'])
         type_id = await self.get_type(meta)

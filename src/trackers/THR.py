@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
-from torf import Torrent
 import requests
 import json
 import glob
-from difflib import SequenceMatcher
-import base64
 from rich.prompt import Prompt
 from rich.prompt import Confirm
 import os
@@ -14,23 +11,27 @@ import platform
 from unidecode import unidecode
 
 from src.console import console 
-
+from src.trackers.COMMON import COMMON
 
 class THR():
 
     def __init__(self, config):
         self.config = config
-        self.type = 'other'
+        self.type = 'other' # Custom Nexus?
+        self.source = '[https://www.torrenthr.org] TorrentHR.org'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"http://www.torrenthr.org/announce.php?passkey={pid}"
         self.username = config['TRACKERS']['THR'].get('username')
         self.password = config['TRACKERS']['THR'].get('password')
         self.banned_groups = [""]
         pass
     
     async def upload(self, session, meta):
-        await self.edit_torrent(meta)
+        common = COMMON(config=self.config)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta)
         subs = self.get_subtitles(meta)
-        pronfo = await self.edit_desc(meta)
+        pronfo = await self.edit_desc(meta)  # noqa: F841
         thr_name = unidecode(meta['name'].replace('DD+', 'DDP'))
 
         # Confirm the correct naming order for FL
@@ -54,6 +55,8 @@ class THR():
             # bd_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8'
         else:
             mi_file = os.path.abspath(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt")
+            if not mi_file.exists(): # backward support first incase people saved /tmp TODO establish a -clean-mi to avoid this
+                mi_file = os.path.abspath(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt")
             with open(mi_file, 'r') as f:
                 mi_file = f.read()
                 f.close()
@@ -104,13 +107,13 @@ class THR():
                 if response.url.endswith('uploaded=1'):
                     console.print(f'[green]Successfully Uploaded at: {response.url}')
                 #Check if actually uploaded
-            except:
+            except Exception:
                 if meta['debug']:
                     console.print(response.text)
                 console.print("It may have uploaded, go check")
                 return 
         else:
-            console.print(f"[cyan]Request Data:")
+            console.print("[cyan]Request Data:")
             console.print(payload)
             
     
@@ -131,7 +134,7 @@ class THR():
                 cat = '7'
             else:
                 cat = '34'
-        elif meta.get('anime') != False:
+        elif meta.get('anime') is not False:
             cat = '31'
         return cat
 
@@ -159,19 +162,10 @@ class THR():
             }
             for sub in sub_langs:
                 language = sub_lang_map.get(sub)
-                if language != None:
+                if language is not None:
                     subs.append(language)
         return subs
 
-
-
-    async def edit_torrent(self, meta):
-        if os.path.exists(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent"):
-            THR_torrent = Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent")
-            THR_torrent.metainfo['announce'] = self.config['TRACKERS']['THR']['announce_url']
-            THR_torrent.metainfo['info']['source'] = "[https://www.torrenthr.org] TorrentHR.org"
-            Torrent.copy(THR_torrent).write(f"{meta['base_dir']}/tmp/{meta['uuid']}/[THR]{meta['clean_name']}.torrent", overwrite=True)
-        return 
         
     async def edit_desc(self, meta):
         pronfo = False
@@ -242,11 +236,11 @@ class THR():
                 response = requests.post(pronfo_url, data=data)
                 try:
                     response = response.json()
-                    if response.get('error', True) == False:
+                    if response.get('error', True) is not False:
                         mi_img = response.get('url')
                         desc.write(f"\n[img]{mi_img}[/img]\n")
                         pronfo = True
-                except:
+                except Exception:
                     console.print('[bold red]Error parsing pronfo response, using THR parser instead')
                     if meta['debug']:
                         console.print(f"[red]{response}")

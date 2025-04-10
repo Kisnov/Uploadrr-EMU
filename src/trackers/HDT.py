@@ -2,17 +2,13 @@ import requests
 import asyncio
 import re
 import os
-import json
-import glob
 from rich.prompt import Prompt, Confirm
-import pickle
-from pathlib import Path
 from bs4 import BeautifulSoup
 from unidecode import unidecode
 from pymediainfo import MediaInfo
 
 from src.trackers.COMMON import COMMON
-from src.exceptions import *
+from src.exceptions import UploadException
 from src.console import console
 
 class HDT():
@@ -23,6 +19,9 @@ class HDT():
         self.tracker = 'HDT'
         self.signature = None
         self.source_flag = 'hd-torrents.org'
+        self.domain = 'https://hd-torrents.org'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"https://hdts-announce.ru/announce.php?pid={pid}"
         self.username = config['TRACKERS'][self.tracker].get('username', '').strip()
         self.password = config['TRACKERS'][self.tracker].get('password', '').strip()
         self.banned_groups = [""]
@@ -115,7 +114,7 @@ class HDT():
 
     async def upload(self, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         manual_name = meta.get('manual_name')
         hdt_name = await self.edit_name(meta) if not manual_name else manual_name
@@ -181,7 +180,7 @@ class HDT():
 
 
             # Send
-            url = "https://hd-torrents.org/upload.php"
+            url = f"{self.domain}/upload.php"
             if meta['debug']:
                 console.print(url)
                 console.print(data)
@@ -197,7 +196,7 @@ class HDT():
                     search = re.search(r"download\.php\?id\=([a-z0-9]+)", up.text).group(1)
                     if search:
                         # modding existing torrent for adding to client instead of downloading torrent from site.
-                        await common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.config['TRACKERS']['HDT'].get('my_announce_url'), "https://hd-torrents.org/details.php?id=" + search)
+                        await common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.announce_url, f"{self.domain}/details.php?id=" + search)
                     else:
                         console.print(data)
                         console.print("\n\n")
@@ -213,7 +212,7 @@ class HDT():
             cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/HDT.txt")
             session.cookies.update(await common.parseCookieFile(cookiefile))
             
-            search_url = f"https://hd-torrents.org/torrents.php"
+            search_url = f"{self.domain}/torrents.php"
             csrfToken = await self.get_csrfToken(session, search_url)
             if int(meta['imdb_id'].replace('tt', '')) != 0:
                 params = {
@@ -255,7 +254,7 @@ class HDT():
     async def validate_credentials(self, meta):
         cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/HDT.txt")
         vcookie = await self.validate_cookies(meta, cookiefile)
-        if vcookie != True:
+        if not vcookie:
             console.print('[red]Failed to validate cookies. Please confirm that the site is up or export a fresh cookie file from the site')
             return False
         return True
@@ -263,12 +262,11 @@ class HDT():
     
     async def validate_cookies(self, meta, cookiefile):
         common = COMMON(config=self.config)
-        url = "https://hd-torrents.org/index.php"
         cookiefile = f"{meta['base_dir']}/data/cookies/HDT.txt"
         if os.path.exists(cookiefile):
             with requests.Session() as session:
                 session.cookies.update(await common.parseCookieFile(cookiefile))
-                res = session.get(url=url)
+                res = session.get(url= f"{self.domain}/index.php")
                 if meta['debug']:
                     console.print('[cyan]Cookies:')
                     console.print(session.cookies.get_dict())
@@ -280,37 +278,6 @@ class HDT():
         else:
             return False
         
-
-        
-    """ 
-    Old login method, disabled because of site's DDOS protection. Better to use exported cookies.
-
-
-    async def login(self, cookiefile):
-        with requests.Session() as session:
-            url = "https://hd-torrents.org/login.php"
-            csrfToken = await self.get_csrfToken(session, url)
-            data = {
-                'csrfToken' : csrfToken,
-                'uid' : self.username,
-                'pwd' : self.password,
-                'submit' : 'Confirm'
-            }
-            response = session.post('https://hd-torrents.org/login.php', data=data)
-            await asyncio.sleep(0.5)
-            index = 'https://hd-torrents.org/index.php'
-            response = session.get(index)
-            if response.text.find("Logout") != -1:
-                console.print('[green]Successfully logged into HDT')
-                with open(cookiefile, 'wb') as cf:
-                    pickle.dump(session.cookies, cf)
-            else:
-                console.print('[bold red]Something went wrong while trying to log into HDT. Make sure your username and password are correct')
-                await asyncio.sleep(1)
-                console.print(response.url)
-        return
-    """
-
     
     async def get_csrfToken(self, session, url):
         r = session.get(url)

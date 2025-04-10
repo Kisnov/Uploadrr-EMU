@@ -1,16 +1,17 @@
-import requests
 import asyncio
-from src.console import console
-import traceback
-from torf import Torrent
-import xml.etree.ElementTree
 import os
-from rich.prompt import Confirm
 import pickle
 import re
+import traceback
+import xml.etree.ElementTree
 from pathlib import Path
-from src.trackers.COMMON import COMMON
 
+import requests
+from rich.prompt import Confirm
+from torf import Torrent
+
+from src.console import console
+from src.trackers.COMMON import COMMON
 class MTV():
 
     def __init__(self, config):
@@ -18,6 +19,8 @@ class MTV():
         self.type = 'http'
         self.tracker = 'MTV'
         self.source_flag = 'MTV'
+        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"http://tracker.morethantv.me:2710/{pid}/announce"
         self.upload_url = 'https://www.morethantv.me/upload.php'
         self.forum_link = 'https://www.morethantv.me/wiki.php?action=article&id=73'
         self.search_url = 'https://www.morethantv.me/api/torznab'
@@ -130,7 +133,7 @@ class MTV():
         #     param['malid'] = meta['mal_id']
 
 
-        if meta['debug'] == False:
+        if not meta['debug']:
             with requests.Session() as session:
                 with open(cookiefile, 'rb') as cf:
                     session.cookies.update(pickle.load(cf))
@@ -140,20 +143,20 @@ class MTV():
                         console.print(response.url)
                     else:
                         if "authkey.php" in response.url:
-                            console.print(f"[red]No DL link in response, So unable to download torrent but It may have uploaded, go check")
+                            console.print("[red]No DL link in response, So unable to download torrent but It may have uploaded, go check")
                             print(response.content)
                             console.print(f"[red]Got response code = {response.status_code}")
                             print(data)
                         else:
-                            console.print(f"[red]Upload Failed, Doesnt look like you are logged in")
+                            console.print("[red]Upload Failed, Doesnt look like you are logged in")
                             print(response.content)
                             print(data)
                 except:
-                    console.print(f"[red]It may have uploaded, go check")
+                    console.print("[red]It may have uploaded, go check")
                     console.print(data)
                     print(traceback.print_exc())
         else:
-            console.print(f"[cyan]Request Data:")
+            console.print("[cyan]Request Data:")
             console.print(data)
         return
 
@@ -174,12 +177,12 @@ class MTV():
                 desc.write("[mediainfo]" + mi_dump + "[/mediainfo]\n\n")
             images = meta['image_list']
             if len(images) > 0:
-                desc.write(f"[spoiler=Screenshots]")
+                desc.write("[spoiler=Screenshots]")
                 for each in range(len(images)):
                     raw_url = images[each]['raw_url']
                     img_url = images[each]['img_url']
                     desc.write(f"[url={raw_url}][img=250]{img_url}[/img][/url]")
-                desc.write(f"[/spoiler]")
+                desc.write("[/spoiler]")
             desc.write(f"\n\n{base}")
             desc.close()
         return
@@ -421,10 +424,10 @@ class MTV():
         if not os.path.exists(cookiefile):
             await self.login(cookiefile)
         vcookie = await self.validate_cookies(meta, cookiefile)
-        if vcookie != True:
+        if not vcookie:
             console.print('[red]Failed to validate cookies. Please confirm that the site is up and your username and password is valid.')
             recreate = Confirm.ask("Log in again and create new session?")
-            if recreate == True:
+            if recreate:
                 if os.path.exists(cookiefile):
                     os.remove(cookiefile)
                 await self.login(cookiefile)
@@ -433,7 +436,7 @@ class MTV():
             else:
                 return False
         vapi = await self.validate_api()
-        if vapi != True:
+        if not vapi:
             console.print('[red]Failed to validate API. Please confirm that the site is up and your API key is valid.')
         return True
 
@@ -449,7 +452,7 @@ class MTV():
                     console.print("[red]Invalid API Key")
                 return False
             return True
-        except:
+        except Exception:
             return False
 
     async def validate_cookies(self, meta, cookiefile):
@@ -559,10 +562,10 @@ class MTV():
                     console.print(f"[yellow]{rr.get('status_message')}")
                     await asyncio.sleep(5)
                 else:
-                    console.print(f"[red]Site Seems to be down or not responding to API")
-                    console.print(f"[bold red] Posibility Uploadrr breaks support. Please report if issue repeats.")
-        except:
-            console.print(f"[red]Unable to search for existing torrents on site. Most likely the site is down.")
+                    console.print("[red]Site Seems to be down or not responding to API")
+                    console.print("[bold red] Posibility Uploadrr breaks support. Please report if issue repeats.")
+        except Exception:
+            console.print("[red]Unable to search for existing torrents on site. Most likely the site is down.")
             dupes.append("FAILED SEARCH")
             print(traceback.print_exc())
             await asyncio.sleep(5)

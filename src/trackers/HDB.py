@@ -1,16 +1,18 @@
-import os
-from pathlib import Path
-import json
-import glob
-import re
-from torf import Torrent
-import aiohttp
 import aiofiles
-from unidecode import unidecode
+import glob
+import httpx
+import json
+import os
+import re
+from pathlib import Path
 from urllib.parse import urlparse, quote
-from src.trackers.COMMON import COMMON
-from src.exceptions import *  
+
+from torf import Torrent
+from unidecode import unidecode
+
 from src.console import console
+from src.exceptions import UploadException
+from src.trackers.COMMON import COMMON
 
 """
 NOTE FROM CvT
@@ -23,15 +25,16 @@ Thank you :)
 class HDB:
     def __init__(self, config):
         self.config = config
-        self.type = 'http'
+        self.type = 'http' # TODO nexus
         self.tracker = 'HDB'
         self.source_flag = 'HDBits'
+        self.domain = 'https://hdbits.org'
         self.username = config['TRACKERS']['HDB'].get('username', '').strip()
         self.passkey = config['TRACKERS']['HDB'].get('passkey', '').strip()
+        self.announce_url = f'{self.domain}/announce/{self.passkey}'
         self.rehost_images = config['TRACKERS']['HDB'].get('img_rehost', True)
         self.signature = None
         self.banned_groups = [""]
-        self.prep = Prep()  
 
     async def get_type_category_id(self, meta):
         cat_id = "EXIT"
@@ -191,9 +194,11 @@ class HDB:
         hdb_name = hdb_name.replace('H.265', 'HEVC')
         if meta.get('source', '').upper() == 'WEB' and meta.get('service', '').strip():
             hdb_name = hdb_name.replace(f"{meta.get('service', '')} ", '', 1)
-        if 'DV' in meta.get('hdr', ''): hdb_name = hdb_name.replace(' DV ', ' DoVi ')
+        if 'DV' in meta.get('hdr', ''): 
+            hdb_name = hdb_name.replace(' DV ', ' DoVi ')
         if 'HDR' in meta.get('hdr', ''):
-            if 'HDR10+' not in meta['hdr']: hdb_name = hdb_name.replace('HDR', 'HDR10')
+            if 'HDR10+' not in meta['hdr']:
+                 hdb_name = hdb_name.replace('HDR', 'HDR10')
         if meta.get('type') in ('WEBDL', 'WEBRIP', 'ENCODE'):
             hdb_name = hdb_name.replace(meta['audio'], meta['audio'].replace(' ', '', 1).replace('Atmos', ''))
         else:
@@ -211,7 +216,7 @@ class HDB:
 
     async def upload(self, meta, disctype):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         manual_name = meta.get('manual_name')
         hdb_name = await self.edit_name(meta)
@@ -228,21 +233,25 @@ class HDB:
             console.print("[bold red]Dual-Audio Encodes are not allowed for non-anime and non-disc content")
             return
 
-        hdb_desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'r', encoding='utf-8').read()
-        torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent"
-        torrent = Torrent.read(torrent_path)
+        base_dir = Path(meta['base_dir'])
+        tmp_dir = base_dir / 'tmp' / meta['uuid']
+        desc_path = tmp_dir / f'[{self.tracker}]DESCRIPTION.txt'
+        torrent_name = f"[{self.tracker}]{meta['clean_name']}.torrent"
+        torrent_path = tmp_dir / torrent_name
 
-        # Check piece size and regenerate if > 16 MiB
+        async with aiofiles.open(desc_path, 'r', encoding='utf-8') as f:
+            hdb_desc = (await f.read()).rstrip()
+
+        torrent = Torrent.read(torrent_path)
         if torrent.piece_size > 16777216:
             console.print("[red]Piece size is OVER 16M and does not work on HDB. Generating a new .torrent")
             torrent = self.prep.create_torrent(
                 meta=meta,
                 path=meta['path'],
                 output_filename=f"[{self.tracker}]{meta['clean_name']}",
-                piece_size_max=16777216  # Enforce 16 MiB max
+                piece_size_max=16777216
             )
 
-        # Prepare upload
         torrent_filename = unidecode(os.path.basename(meta['video'] if len(meta['filelist']) == 1 else meta['path']).replace(' ', '.'))
         async with aiofiles.open(torrent_path, 'rb') as torrent_file:
             torrent_data = await torrent_file.read()
@@ -253,46 +262,52 @@ class HDB:
             'codec': codec_id,
             'medium': medium_id,
             'origin': 0,
-            'descr': hdb_desc.rstrip(),
+            'descr': hdb_desc,
             'techinfo': '',
             'tags[]': hdb_tags,
         }
-        if self.config['TRACKERS'][self.tracker].get('internal', False) and meta['tag'][1:] in self.config['TRACKERS'][self.tracker].get('internal_groups', []):
+        
+        # DRY Suggestion: Extract repeated config access to method
+        tracker_config = self.config['TRACKERS'][self.tracker]
+        if tracker_config.get('internal', False) and meta['tag'][1:] in tracker_config.get('internal_groups', []):
             data['internal'] = 1
+
         if meta.get('is_disc', '') != "BDMV":
-            async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO_CLEANPATH.txt", 'r', encoding='utf-8') as f:
+            async with aiofiles.open(tmp_dir / 'MEDIAINFO_CLEANPATH.txt', 'r', encoding='utf-8') as f:
                 data['techinfo'] = await f.read()
-        if meta.get('tvdb_id', 0) != 0: data['tvdb'] = meta['tvdb_id']
-        if int(meta.get('imdb_id', 0)) != 0: data['imdb'] = f"https://www.imdb.com/title/tt{meta['imdb_id']:07d}/"
-        if meta.get('category') == 'TV':
+
+        if meta.get('tvdb_id', 0) != 0:
+            data['tvdb'] = meta['tvdb_id']
+        if int(meta.get('imdb_id', 0)) != 0:
+            data['imdb'] = f"https://www.imdb.com/title/tt{meta['imdb_id']:07d}/"
+        if meta['category'] == 'TV':
             data['tvdb_season'] = int(meta.get('season_int', 1))
             data['tvdb_episode'] = int(meta.get('episode_int', 1))
 
         url = "https://hdbits.org/upload/upload"
         files = {'file': (f"{torrent_filename}.torrent", torrent_data, "application/x-bittorrent")}
 
-        async with aiohttp.ClientSession(cookies=await self._get_cookies(meta)) as session:
+        async with httpx.AsyncClient(cookies=await self._get_cookies(meta)) as client:
             if meta['debug']:
                 console.print(url)
                 console.print(data)
             else:
-                async with session.post(url, data=data, files=files) as response:
-                    result_url = str(response.url)
-                    if response.status == 200 and "hdbits.org/details.php" in result_url:
-                        id_match = re.search(r"(id=)(\d+)", urlparse(result_url).query)
-                        if id_match:
-                            id = id_match.group(2)
-                            await self.download_new_torrent(id, torrent_path)
-                        else:
-                            raise UploadException(f"Upload to HDB Failed: Could not extract ID from {result_url}", 'red')
+                response = await client.post(url, data=data, files=files)
+                result_url = str(response.url)
+                if response.status_code == 200 and "hdbits.org/details.php" in result_url:
+                    id_match = re.search(r"(id=)(\d+)", urlparse(result_url).query)
+                    if id_match:
+                        await self.download_new_torrent(id_match.group(2), torrent_path)
                     else:
-                        console.print(data)
-                        console.print(f"\n\nResponse: {await response.text()}")
-                        raise UploadException(f"Upload to HDB Failed: result URL {result_url} ({response.status}) was not expected", 'red')
+                        raise UploadException(f"Upload to HDB Failed: Could not extract ID from {result_url}", 'red')
+                else:
+                    console.print(data)
+                    console.print(f"\n\nResponse: {response.text}")
+                    raise UploadException(f"Upload to HDB Failed: result URL {result_url} ({response.status_code}) was not expected", 'red')
 
     async def _get_cookies(self, meta):
         common = COMMON(config=self.config)
-        cookiefile = f"{meta['base_dir']}/data/cookies/HDB.txt"
+        cookiefile = Path(meta['base_dir']) / 'data' / 'cookies' / 'HDB.txt'
         return await common.parseCookieFile(cookiefile)
 
     async def search_existing(self, meta, disctype):
@@ -307,102 +322,99 @@ class HDB:
             'medium': await self.get_type_medium_id(meta),
             'search': meta['resolution']
         }
-        if int(meta.get('imdb_id', 0)) != 0: data['imdb'] = {'id': meta['imdb_id']}
-        if int(meta.get('tvdb_id', 0)) != 0: data['tvdb'] = {'id': meta['tvdb_id']}
+        if int(meta.get('imdb_id', 0)) != 0:
+            data['imdb'] = {'id': meta['imdb_id']}
+        if int(meta.get('tvdb_id', 0)) != 0:
+            data['tvdb'] = {'id': meta['tvdb_id']}
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5)) as client:
             try:
-                async with session.post(url, json=data) as response:
-                    if response.status == 200:
-                        response_data = await response.json()
-                        for each in response_data.get('data', []):
-                            dupes.append(each['name'])
-                    else:
-                        console.print(f"[bold red]HTTP request failed. Status: {response.status}")
-            except aiohttp.ClientError as e:
+                response = await client.post(url, json=data)
+                if response.status_code == 200:
+                    response_data = response.json()
+                    dupes.extend(each['name'] for each in response_data.get('data', []))
+                else:
+                    console.print(f"[bold red]HTTP request failed. Status: {response.status_code}")
+            except httpx.HTTPError as e:
                 console.print(f"[bold red]Error searching torrents: {e}")
         return dupes
 
-    async def validate_credentials(self, meta):
-        vapi = await self.validate_api()
-        vcookie = await self.validate_cookies(meta)
-        if not vapi:
-            console.print('[red]Failed to validate API. Please confirm that the site is up and your passkey is valid.')
-            return False
-        if not vcookie:
-            console.print('[red]Failed to validate cookies. Please confirm that the site is up and your passkey is valid.')
-            return False
-        return True
-
     async def validate_api(self):
-        url = "https://hdbits.org/api/test"
         data = {'username': self.username, 'passkey': self.passkey}
-        async with aiohttp.ClientSession() as session:
+        async with httpx.AsyncClient() as client:
             try:
-                async with session.post(url, data=json.dumps(data)) as response:
-                    r = await response.json()
-                    return r.get('status', 5) == 0
-            except aiohttp.ClientError:
+                response = await client.post(f'{self.domain}/api/test', content=json.dumps(data))
+                return response.json().get('status', 5) == 0
+            except httpx.HTTPError:
                 return False
 
     async def validate_cookies(self, meta):
         common = COMMON(config=self.config)
-        url = "https://hdbits.org"
-        cookiefile = f"{meta['base_dir']}/data/cookies/HDB.txt"
-        if not os.path.exists(cookiefile):
+        cookiefile = Path(meta['base_dir']) / 'data' / 'cookies' / 'HDB.txt'
+        if not cookiefile.exists():
             console.print("[bold red]Missing Cookie File. (data/cookies/HDB.txt)")
             return False
-        cookies = await common.parseCookieFile(cookiefile) 
-        async with aiohttp.ClientSession() as session:
-            for key, value in cookies.items():
-                session.cookie_jar.update_cookies({key: value})
-            async with session.get(url) as resp:
-                text = await resp.text()
-                if meta['debug']:
-                    console.print('[cyan]Cookies:')
-                    console.print(dict(session.cookie_jar)) 
-                    console.print("\n\n")
-                    console.print(text)
-                return "<a href=\"/logout.php\">Logout</a>" in text
+        cookies = await common.parseCookieFile(cookiefile)
+        async with httpx.AsyncClient(cookies=cookies) as client:
+            response = await client.get(self.domain)
+            text = response.text
+            if meta['debug']:
+                console.print('[cyan]Cookies:')
+                console.print(cookies)
+                console.print("\n\n")
+                console.print(text)
+            return "<a href=\"/logout.php\">Logout</a>" in text
 
     async def download_new_torrent(self, id, torrent_path):
-        api_url = "https://hdbits.org/api/torrents"
         data = {'username': self.username, 'passkey': self.passkey, 'id': id}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, data=json.dumps(data)) as resp:
-                filename = (await resp.json())['data'][0]['filename']
-            download_url = f"https://hdbits.org/download.php/{quote(filename)}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f'{self.domain}/api/torrents', content=json.dumps(data))
+            filename = response.json()['data'][0]['filename']
+            download_url = f"{self.domain}/download.php/{quote(filename)}"
             params = {'passkey': self.passkey, 'id': id}
-            async with session.get(download_url, params=params) as resp:
-                async with aiofiles.open(torrent_path, "wb") as tor:
-                    await tor.write(await resp.read())
+            response = await client.get(download_url, params=params)
+            async with aiofiles.open(torrent_path, "wb") as tor:
+                await tor.write(response.content)
 
     async def edit_desc(self, meta):
-        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding='utf-8') as f:
+        base_dir = Path(meta['base_dir'])
+        tmp_dir = base_dir / 'tmp' / meta['uuid']
+        
+        async with aiofiles.open(tmp_dir / 'DESCRIPTION.txt', 'r', encoding='utf-8') as f:
             base = await f.read()
-        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding='utf-8') as descfile:
+        
+        async with aiofiles.open(tmp_dir / f'[{self.tracker}]DESCRIPTION.txt', 'w', encoding='utf-8') as descfile:
             from src.bbcode import BBCODE
             if meta['type'] == 'WEBDL' and meta.get('service_longname', '') and not meta.get('description'):
                 await descfile.write(f"[center][quote]This release is sourced from {meta['service_longname']}[/quote][/center]")
+            
             bbcode = BBCODE()
             if meta.get('discs', []):
                 discs = meta['discs']
-                if discs[0]['type'] == "DVD":
-                    await descfile.write(f"[quote=VOB MediaInfo]{discs[0]['vob_mi']}[/quote]\n\n")
-                if discs[0]['type'] == "BDMV":
-                    await descfile.write(f"[quote]{discs[0]['summary'].strip()}[/quote]\n\n")
+                disc_type_handlers = {
+                    "DVD": lambda disc: f"[quote=VOB MediaInfo]{disc['vob_mi']}[/quote]\n\n",
+                    "BDMV": lambda disc: f"[quote]{disc['summary'].strip()}[/quote]\n\n"
+                }
+                await descfile.write(disc_type_handlers[discs[0]['type']](discs[0]))
+                
                 if len(discs) >= 2:
-                    for each in discs[1:]:
-                        if each['type'] == "BDMV":
-                            await descfile.write(f"[quote={each.get('name', 'BDINFO')}]{each['summary']}[/quote]\n\n")
-                        if each['type'] == "DVD":
-                            await descfile.write(f"{each['name']}:\n[quote={os.path.basename(each['vob'])}][{each['vob_mi']}[/quote] [quote={os.path.basename(each['ifo'])}][{each['ifo_mi']}[/quote]\n\n")
+                    for disc in discs[1:]:
+                        if disc['type'] == "BDMV":
+                            await descfile.write(f"[quote={disc.get('name', 'BDINFO')}]{disc['summary']}[/quote]\n\n")
+                        elif disc['type'] == "DVD":
+                            await descfile.write(f"{disc['name']}:\n[quote={os.path.basename(disc['vob'])}][{disc['vob_mi']}[/quote] [quote={os.path.basename(disc['ifo'])}][{disc['ifo_mi']}[/quote]\n\n")
+
             desc = base
-            desc = bbcode.convert_code_to_quote(desc)
-            desc = bbcode.convert_spoiler_to_hide(desc)
-            desc = bbcode.convert_comparison_to_centered(desc, 1000)
-            desc = re.sub(r"(\[img=\d+)]", "[img]", desc, flags=re.IGNORECASE)
+            bbcode_transforms = [
+                bbcode.convert_code_to_quote,
+                bbcode.convert_spoiler_to_hide,
+                lambda d: bbcode.convert_comparison_to_centered(d, 1000),
+                lambda d: re.sub(r"(\[img=\d+)]", "[img]", d, flags=re.IGNORECASE)
+            ]
+            for transform in bbcode_transforms:
+                desc = transform(desc)
             await descfile.write(desc)
+
             if self.rehost_images:
                 console.print("[green]Rehosting Images...")
                 hdbimg_bbcode = await self.hdbimg_upload(meta)
@@ -430,35 +442,35 @@ class HDB:
             'galleryname': meta['name'],
             'thumbsize': 'w300'
         }
-        # Set maximum screenshots to 3 for tv singles and 6 for everthing else
         screen_count = min(len(images), 3 if meta['category'] == "TV" and meta.get('tv_pack', 0) == 0 else 6)
 
-        async with aiohttp.ClientSession() as session:
+        async with httpx.AsyncClient() as client:
             files = {}
             for i in range(screen_count):
                 async with aiofiles.open(images[i], 'rb') as f:
                     files[f'images_files[{i}]'] = (f'image_{i}.png', await f.read(), 'image/png')
-            async with session.post(url, data=data, files=files) as resp:
-                return await resp.text()
+            response = await client.post(url, data=data, files=files)
+            return response.text
 
     async def get_info_from_torrent_id(self, hdb_id):
         url = "https://hdbits.org/api/torrents"
         data = {"username": self.username, "passkey": self.passkey, "id": hdb_id}
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, json=data) as resp:
-                if resp.status == 200:
-                    r = await resp.json()
-                    if r.get('data'):
-                        first = r['data'][0]
-                        return (int(first.get('imdb', {}).get('id') or 0),
-                                int(first.get('tvdb', {}).get('id') or 0),
-                                first.get('name'), first.get('hash'))
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, json=data)
+            if response.status_code == 200:
+                r = response.json()
+                if r.get('data'):
+                    first = r['data'][0]
+                    return (int(first.get('imdb', {}).get('id') or 0),
+                           int(first.get('tvdb', {}).get('id') or 0),
+                           first.get('name'), first.get('hash'))
         return None, None, None, None
 
     async def search_filename(self, search_term, search_file_folder, meta):
         url = "https://hdbits.org/api/torrents"
+        base_dir = Path(meta['base_dir'])
         if search_file_folder == 'folder' and meta.get('is_disc'):
-            bd_summary_path = os.path.join(meta['base_dir'], 'tmp', meta['uuid'], 'BD_SUMMARY_00.txt')
+            bd_summary_path = base_dir / 'tmp' / meta['uuid'] / 'BD_SUMMARY_00.txt'
             async with aiofiles.open(bd_summary_path, 'r', encoding='utf-8') as f:
                 for line in await f.readlines():
                     if "Disc Title:" in line:
@@ -473,15 +485,15 @@ class HDB:
             data = {"username": self.username, "passkey": self.passkey, "limit": 100, "file_in_torrent": os.path.basename(search_term)}
             console.print(f"[green]Searching HDB for file: [bold yellow]{os.path.basename(search_term)}[/bold yellow]")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, json=data) as resp:
-                if resp.status == 200:
-                    r = await resp.json()
-                    for each in r.get('data', []):
-                        hdb_id = each.get('id')
-                        console.print(f'[bold green]Matched release with HDB ID: [yellow]https://hdbits.org/details.php?id={hdb_id}[/yellow][/bold green]')
-                        return (int(each.get('imdb', {}).get('id') or 0),
-                                int(each.get('tvdb', {}).get('id') or 0),
-                                each.get('name'), each.get('hash'), hdb_id)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, json=data)
+            if response.status_code == 200:
+                r = response.json()
+                for each in r.get('data', []):
+                    hdb_id = each.get('id')
+                    console.print(f'[bold green]Matched release with HDB ID: [yellow]https://hdbits.org/details.php?id={hdb_id}[/yellow][/bold green]')
+                    return (int(each.get('imdb', {}).get('id') or 0),
+                           int(each.get('tvdb', {}).get('id') or 0),
+                           each.get('name'), each.get('hash'), hdb_id)
                 console.print('[yellow]Could not find a matching release on HDB[/yellow]')
         return None, None, None, None, None

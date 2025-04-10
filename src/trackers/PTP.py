@@ -1,23 +1,21 @@
-import rich.prompt as Prompt
-import requests
 import asyncio
-import re
-import os
-from pathlib import Path
-import time
-import traceback
-import json
 import glob
+import json
 import multiprocessing
-import platform
+import os
 import pickle
+import platform
+import re
+from pathlib import Path
+
+import requests
+import rich.prompt as Prompt
 from pymediainfo import MediaInfo
 
-
-from src.trackers.COMMON import COMMON
 from src.bbcode import BBCODE
-from src.exceptions import *
 from src.console import console
+from src.exceptions import LoginException, UploadException
+from src.trackers.COMMON import COMMON
 
 
 
@@ -31,7 +29,8 @@ class PTP():
         self.signature = None
         self.api_user = config['TRACKERS']['PTP'].get('ApiUser', '').strip()
         self.api_key = config['TRACKERS']['PTP'].get('ApiKey', '').strip()
-        self.announce_url = config['TRACKERS']['PTP'].get('announce_url', '').strip() 
+        self.pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
+        self.announce_url = f"https://please.passthepopcorn.me/{self.pid}/announce" #TODO verify might be http on port 2710
         self.username = config['TRACKERS']['PTP'].get('username', '').strip() 
         self.password = config['TRACKERS']['PTP'].get('password', '').strip()
         self.web_source = config['TRACKERS']['PTP'].get('add_web_source_to_desc', True) 
@@ -188,7 +187,7 @@ class PTP():
         ptp_desc = response.text
         bbcode = BBCODE()
         desc = bbcode.clean_ptp_description(ptp_desc, is_disc)
-        console.print(f"[bold green]Successfully grabbed description from PTP")
+        console.print("[bold green]Successfully grabbed description from PTP")
         return desc
  
     async def get_group_by_imdb(self, imdb):
@@ -299,7 +298,7 @@ class PTP():
             torrents = response.get('Torrents', [])
             if len(torrents) != 0:
                 for torrent in torrents:
-                    if torrent.get('Quality') == quality and quality != None:
+                    if torrent.get('Quality') == quality and quality is not None:
                         existing.append(f"[{torrent.get('Resolution')}] {torrent.get('ReleaseName', 'RELEASE NAME NOT FOUND')}")
         except Exception:
             console.print("[red]An error has occured trying to find existing releases")
@@ -321,7 +320,7 @@ class PTP():
             ptpimg_code = response[0]['code']
             ptpimg_ext = response[0]['ext']
             img_url = f"https://ptpimg.me/{ptpimg_code}.{ptpimg_ext}"
-        except:
+        except Exception:
             console.print("[red]PTPIMG image rehost failed")
             img_url = image_url
             # img_url = ptpimg_upload(image_url, ptpimg_api)
@@ -361,7 +360,7 @@ class PTP():
                 ptpType = "Stand-up Comedy"
             elif "concert" in keywords:
                 ptpType = "Concert"
-        if ptpType == None:
+        if ptpType is None:
             if meta.get('mode', 'discord') == 'cli':
                 ptpTypeList = ["Feature Film", "Short Film", "Miniseries", "Stand-up Comedy", "Concert", "Movie Collection"]
                 ptpType = Prompt.ask("Select the proper type", choices=ptpTypeList)
@@ -389,7 +388,7 @@ class PTP():
             }
             searchcodec = meta.get('video_codec', meta.get('video_encode'))
             codec = codecmap.get(searchcodec, searchcodec)
-            if meta.get('has_encode_settings') == True:
+            if meta.get('has_encode_settings') is True:
                 codec = codec.replace("H.", "x")
         return codec
 
@@ -482,7 +481,7 @@ class PTP():
         if opts:
             for t, v in trumpable_values.items():
                 if t in ''.join(opts):
-                    if v == None:
+                    if v is None:
                         break
                     elif v != 50: # Hardcoded, Forced
                         trumpable.append(v)
@@ -547,7 +546,7 @@ class PTP():
             remaster_title.append('Dual Audio')
         if "Dubbed" in meta['audio']:
             remaster_title.append('English Dub')
-        if meta.get('has_commentary', False) == True:
+        if meta.get('has_commentary', False) is True:
             remaster_title.append('With Commentary')
 
 
@@ -601,13 +600,13 @@ class PTP():
                             mi_dump = each['summary']
                         else:
                             mi_dump = each['summary']
-                            if meta.get('vapoursynth', False) == True:
+                            if meta.get('vapoursynth', False) is True:
                                 use_vs = True
                             else:
                                 use_vs = False
                             ds = multiprocessing.Process(target=prep.disc_screenshots, args=(f"FILE_{i}", each['bdinfo'], meta['uuid'], meta['base_dir'], use_vs, [], meta.get('ffdebug', False), 2))
                             ds.start()
-                            while ds.is_alive() == True:
+                            while ds.is_alive() is True:
                                 await asyncio.sleep(1)
                             new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}",f"FILE_{i}-*.png")
                             images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})   
@@ -625,7 +624,7 @@ class PTP():
                         else:
                             ds = multiprocessing.Process(target=prep.dvd_screenshots, args=(meta, i, 2))
                             ds.start()
-                            while ds.is_alive() == True:
+                            while ds.is_alive() is True:
                                 await asyncio.sleep(1)
                             new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}", f"{meta['discs'][i]['name']}-*.png")
                             images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})  
@@ -641,7 +640,7 @@ class PTP():
                     file = meta['filelist'][i]
                     if i == 0:
                         # Add This line for all web-dls
-                        if meta['type'] == 'WEBDL' and meta.get('service_longname', '') != '' and meta.get('description', None) == None and self.web_source == True:
+                        if meta['type'] == 'WEBDL' and meta.get('service_longname', '') != '' and meta.get('description', None) is None and self.web_source is True:
                             desc.write(f"[quote][align=center]This release is sourced from {meta['service_longname']}[/align][/quote]")
                         mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'r', encoding='utf-8').read()
                     else:
@@ -654,7 +653,7 @@ class PTP():
                         # Generate and upload screens for other files
                         s = multiprocessing.Process(target=prep.screenshots, args=(file, f"FILE_{i}", meta['uuid'], meta['base_dir'], meta, 2))
                         s.start()
-                        while s.is_alive() == True:
+                        while s.is_alive() is True:
                             await asyncio.sleep(3)
                         new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}",f"FILE_{i}-*.png")
                         images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})
@@ -686,14 +685,13 @@ class PTP():
                 loggedIn = await self.validate_login(uploadresponse)
             else:
                 console.print("[yellow]PTP Cookies not found. Creating new session.")
-            if loggedIn == True:
+            if loggedIn is True:
                 AntiCsrfToken = re.search(r'data-AntiCsrfToken="(.*)"', uploadresponse.text).group(1)
             else:
-                passKey = re.match(r"https?://please\.passthepopcorn\.me:?\d*/(.+)/announce",self.announce_url).group(1)
                 data = {
                     "username": self.username,
                     "password": self.password,
-                    "passkey": passKey,
+                    "passkey": self.pid,
                     "keeplogged": "1",
                 }
                 headers = {"User-Agent" : self.user_agent}
@@ -731,7 +729,7 @@ class PTP():
 
     async def fill_upload_form(self, groupID, meta):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         resolution, other_resolution = self.get_resolution(meta)
         await self.edit_desc(meta)
         desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "r").read()
@@ -761,7 +759,7 @@ class PTP():
             data["remaster"] = "on"
         if resolution == "Other":
             data["other_resolution"] = other_resolution
-        if meta.get('personalrelease', False) == True:
+        if meta.get('personalrelease', False) is True:
             data["internalrip"] = "on"
         # IF SPECIAL (idk how to check for this automatically)
             # data["special"] = "on"
@@ -771,18 +769,18 @@ class PTP():
             data["imdb"] = meta["imdb_id"]
 
 
-        if groupID == None: # If need to make new group
+        if groupID is None: # If need to make new group
             url = "https://passthepopcorn.me/upload.php"
             if data["imdb"] == "0":
                 tinfo = await self.get_torrent_info_tmdb(meta)
             else:
                 tinfo = await self.get_torrent_info(meta.get("imdb_id", "0"), meta)
             cover = meta["imdb_info"].get("cover")
-            if cover == None:
+            if cover is None:
                 cover = meta.get('poster')
-            if cover != None and "ptpimg" not in cover:
+            if cover is not None and "ptpimg" not in cover:
                 cover = await self.ptpimg_url_rehost(cover)
-            while cover == None:
+            while cover is None:
                 cover = Prompt.ask("No Poster was found. Please input a link to a poster:", default="")
                 if "ptpimg" not in str(cover) and str(cover).endswith(('.jpg', '.png')):
                     cover = await self.ptpimg_url_rehost(cover)
@@ -803,7 +801,7 @@ class PTP():
                     console.print("Valid tags can be found on the PTP upload form")
                     new_data["tags"] = console.input("Please enter at least one tag. Comma seperated (action, animation, short):")
             data.update(new_data)
-            if meta["imdb_info"].get("directors", None) != None:
+            if meta["imdb_info"].get("directors", None) is not None:
                 data["artist[]"] = tuple(meta['imdb_info'].get('directors'))
                 data["importance[]"] = "1"
         else: # Upload on existing group

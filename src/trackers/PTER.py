@@ -1,29 +1,34 @@
 from bs4 import BeautifulSoup
 import requests
-import asyncio
 import re
 import os
 from pathlib import Path
-import traceback
 import json
 import glob
 import pickle
 from unidecode import unidecode
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
+
 from src.trackers.COMMON import COMMON
-from src.exceptions import *
+from src.exceptions import LoginException, UploadException
 from src.console import console
+
+"""
+CvT NOTE: Likely borked. This should be updated to newer nexus structure. Not on PTER. Unable to test.
+"""
 
 
 class PTER():
 
     def __init__(self, config):
         self.config = config
-        self.type = 'http'
+        self.type = 'http' # TODO nexus
         self.tracker = 'PTER'
         self.source_flag = 'PTER'
         self.signature = None
+        self.domain = "https://pterclub.com"
         self.passkey =  str(config['TRACKERS']['PTER'].get('passkey', '')).strip()
+        self.announce_url = f"{self.domain}/announce.php?passkey={self.passkey}"
         self.username = config['TRACKERS']['PTER'].get('username', '').strip()
         self.password = config['TRACKERS']['PTER'].get('password', '').strip()
         self.rehost_images = config['TRACKERS']['PTER'].get('img_rehost', False)
@@ -34,19 +39,18 @@ class PTER():
 
     async def validate_credentials(self, meta):
         vcookie = await self.validate_cookies(meta)
-        if vcookie != True:
+        if not vcookie:
             console.print('[red]Failed to validate cookies. Please confirm that the site is up and your passkey is valid.')
             return False
         return True
     
     async def validate_cookies(self, meta):
         common = COMMON(config=self.config)
-        url = "https://pterclub.com"
         cookiefile = f"{meta['base_dir']}/data/cookies/PTER.txt"
         if os.path.exists(cookiefile):
             with requests.Session() as session:
                 session.cookies.update(await common.parseCookieFile(cookiefile))
-                resp = session.get(url=url)
+                resp = session.get(url=self.domain)
                
                 if meta['debug']:
                     console.print('[cyan]Cookies:')
@@ -269,7 +273,7 @@ class PTER():
     async def upload(self, meta):
 
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
 
         desc_file=f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt"
         if not os.path.exists(desc_file):
