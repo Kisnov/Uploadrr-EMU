@@ -10,27 +10,26 @@ from .generator import ScreenshotGenerator
 from .up2host import ScreenshotUploader
 from src.console import log
 
+
 class RehostManager:
     def __init__(self, config, base_dir, uploader: ScreenshotUploader):
         self.config = config
         self.base_dir = base_dir
         self.uploader = uploader
 
-    async def ensure_compliance(self, meta: Dict, tracker_whitelists: Dict[str, List[str]],
-                                            base_images: List, screen_count: int) -> Dict:
+    async def ensure_compliance(self, meta: Dict, tracker_whitelists: Dict[str, List[str]], base_images: List, screen_count: int) -> Dict:
         """Ensure images comply with tracker whitelists using image_list and rehost_list."""
-    
         if meta.get('skip_imghost_upload', False):
             log.debug("Skipping rehosting due to skip_imghost_upload")
             return meta
 
         meta['rehost_list'] = meta.get('rehost_list', {})
+        all_images = base_images + sum(meta['rehost_list'].values(), [])
 
         for tracker, whitelist in tracker_whitelists.items():
             whitelist_hosts = set(whitelist) if whitelist else set()
-            all_images = base_images + sum(meta['rehost_list'].values(), [])
             compliant_images = self._get_compliant_images(all_images, whitelist_hosts, screen_count)
-
+            
             shortfall = screen_count - len(compliant_images)
             if shortfall > 0 and whitelist_hosts:
                 log.debug(f"Tracker {tracker} needs {shortfall} more compliant images")
@@ -44,8 +43,11 @@ class RehostManager:
                 )
                 meta['rehost_list'].setdefault(target_host, []).extend(rehosted)
                 meta['rehost_list'][target_host] = meta['rehost_list'][target_host][-screen_count:]
+            elif not whitelist_hosts and shortfall <= 0:
+                log.debug(f"Tracker {tracker}: All hosts allowed, {len(compliant_images)} images sufficient")
 
         return meta
+
 
     def _get_compliant_images(self, images: List, whitelist_hosts: Set[str], screen_count: int) -> List:
         """Filter images that comply with the whitelist, matching subdomains."""
@@ -61,8 +63,8 @@ class RehostManager:
     async def _rehost_images(self, meta: Dict, base_images: List, compliant_images: List,
                     shortfall: int, whitelist: List[str], tracker: str,target_host: str) -> List:
         """Rehost only needed screens"""
-        to_rehost = [img['local_file'] for img in base_images if img not in compliant_images][:shortfall]
-        
+        to_rehost = [img['local_file'] for img in base_images if img not in compliant_images][:shortfall] #TODO FIX
+
         if len(to_rehost) < shortfall:
             log.debug(f"Generating {shortfall - len(to_rehost)} additional screenshots for {tracker}")
             generator = ScreenshotGenerator(self.config, self.base_dir)
@@ -175,24 +177,22 @@ class ScreenshotManager:
             meta, tracker_whitelists, meta.get('image_list', []), screen_count
         )
 
-    @staticmethod
-    def _extract_host(url: str, whitelist: Set[str]) -> str:
-        """Extract host with whitelist matching, returning base module name."""
-        hostname = urlparse(url).hostname or url
-        base_name = hostname.split('.')[0] if '.' in hostname else hostname
-        for wl in whitelist:
-            if hostname == wl or hostname.endswith('.' + wl):
-                return base_name
-        return ""
-        
     async def _cleanup(self):
         """Clean up child processes and resources."""
         current_process = psutil.Process()
         children = current_process.children(recursive=True)
         for child in children:
-            if 'ffmpeg' in child.name().lower() or 'oxipng' in child.name().lower():
-                child.terminate()
-        psutil.wait_procs(children, timeout=3)
+            if any(name in child.name().lower() for name in ['ffmpeg', 'oxipng']):
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+        gone, alive = psutil.wait_procs(children, timeout=3)
+        for child in alive:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
         gc.collect()
 
 

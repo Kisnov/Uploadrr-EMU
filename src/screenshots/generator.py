@@ -7,6 +7,7 @@ import re
 from functools import partial
 from hashlib import md5
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import ffmpeg
 import oxipng
@@ -29,17 +30,20 @@ class ScreenshotGenerator:
         self.max_image_size = None
         self.child_processes = []
 
-    async def generate_screenshots(self, meta, filename, folder_id, bdinfo=None, task_widget=None):
-        screens = meta.get('screens', self.config.get('DEFAULT', {}).get('screens', 3))
+    async def generate_screenshots(self, meta, filename, folder_id, bdinfo=None, task_widget=None, count=None):
+        screens = count if count is not None else meta.get('screens', self.config.get('DEFAULT', {}).get('screens', 3))
         img_host = meta.get('imghost') or self.config['DEFAULT'].get('img_host_1', 'imgbox')
         self.max_image_size = self.max_sizes.get(img_host.lower(), 10000000)
 
-        tmp_dir = f"{self.base_dir}/tmp/{folder_id}"
-        os.makedirs(tmp_dir, exist_ok=True)
+        tmp_dir = self.base_dir / "tmp" / folder_id
+        tmp_dir.mkdir(parents=True, exist_ok=True)
         os.chdir(tmp_dir)
 
         existing_screenshots = sorted(glob.glob(f"{filename}-*.png"))
-        valid_existing = [img for img in existing_screenshots if os.path.exists(img) and self.min_image_size <= os.path.getsize(img) <= self.max_image_size]
+        valid_existing = [
+            img for img in existing_screenshots 
+            if os.path.exists(img) and self.min_image_size <= os.path.getsize(img) <= self.max_image_size
+        ]
         if len(valid_existing) >= screens:
             log.debug(f"Reusing {len(valid_existing)} existing screenshots for {filename}")
             if task_widget:
