@@ -30,7 +30,7 @@ class FNP():
 
         pass
     
-    async def get_cat_id(self, category_name, anime, name):
+    async def get_cat_id(self, category_name, anime, sports):
         category_id = {
             'MOVIE': '1', 
             'TV': '2', 
@@ -38,18 +38,9 @@ class FNP():
             }.get(category_name, '0')
         if anime:
             category_id = '6'
-        elif category_name == 'TV':
-            if self.is_sports(name):
-                category_id = '9' 
+        elif sports:
+            category_id = '9' 
         return category_id
-
-    def is_sports(self, name):
-        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
-                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
-                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
-                        r'.*overtake.*)'
-
-        return re.search(sports_pattern, name, re.IGNORECASE) is not None
 
     async def get_type_id(self, type):
         type_id = {
@@ -85,7 +76,7 @@ class FNP():
     async def upload(self, meta):
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
-        cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('name_notag'))
+        cat_id = await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('is_sports', False))
         type_id = await self.get_type_id(meta['type'])
         resolution_id = await self.get_res_id(meta['resolution'])
         await common.unit3d_edit_desc(meta, self.tracker)
@@ -219,7 +210,7 @@ class FNP():
         params = {
             'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
             'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('name_notag')),
+            'categories[]' : await self.get_cat_id(meta['category'], meta.get('anime', False), meta.get('is_sports', False)),
             'types[]' : await self.get_type_id(meta['type']),
             'resolutions[]' : await self.get_res_id(meta['resolution']),
             'name' : ""

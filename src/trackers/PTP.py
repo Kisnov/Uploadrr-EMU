@@ -571,106 +571,60 @@ class PTP():
             output = ""
         return output
 
-    def convert_bbcode(self, desc):
-        desc = desc.replace("[spoiler", "[hide").replace("[/spoiler]", "[/hide]")
-        desc = desc.replace("[center]", "[align=center]").replace("[/center]", "[/align]")
-        desc = desc.replace("[left]", "[align=left]").replace("[/left]", "[/align]")
-        desc = desc.replace("[right]", "[align=right]").replace("[/right]", "[/align]")
-        desc = desc.replace("[code]", "[quote]").replace("[/code]", "[/quote]")
-        return desc
 
-    async def edit_desc(self, meta): #TODO Change to GENRATOR + Support Multi-Disc/Episode Screens
-        from prep import Prep 
-        prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=self.config)
-        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", 'r', encoding="utf-8").read()
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding="utf-8") as desc:
-            images = meta['image_list']
+    async def edit_desc(self, meta, common):
+        base_path = f"{meta['base_dir']}/tmp/{meta['uuid']}"
+        base_text = open(f"{base_path}/DESCRIPTION.txt", 'r', encoding="utf-8").read()
+
+        with open(f"{base_path}/[{self.tracker}]DESCRIPTION.txt", 'w', encoding="utf-8") as desc:
             discs = meta.get('discs', [])
-            # For Discs
+
+            # For Discs (BD/DVD)
             if len(discs) >= 1:
-                for i in range(len(discs)):
-                    each = discs[i]
+                for i, each in enumerate(discs):
                     if each['type'] == "BDMV":
                         desc.write(f"[mediainfo]{each['summary']}[/mediainfo]\n\n")
-                        if i == 0:
-                            base2ptp = self.convert_bbcode(base)
-                            if base2ptp.strip() != "":
-                                desc.write(base2ptp)
-                                desc.write("\n\n")
-                            mi_dump = each['summary']
-                        else:
-                            mi_dump = each['summary']
-                            if meta.get('vapoursynth', False) is True:
-                                use_vs = True
-                            else:
-                                use_vs = False
-                            ds = multiprocessing.Process(target=prep.disc_screenshots, args=(f"FILE_{i}", each['bdinfo'], meta['uuid'], meta['base_dir'], use_vs, [], meta.get('ffdebug', False), 2))
-                            ds.start()
-                            while ds.is_alive() is True:
-                                await asyncio.sleep(1)
-                            new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}",f"FILE_{i}-*.png")
-                            images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})   
 
-                    if each['type'] == "DVD":
+                    elif each['type'] == "DVD":
                         desc.write(f"[b][size=3]{each['name']}:[/size][/b]\n")
                         desc.write(f"[mediainfo]{each['ifo_mi_full']}[/mediainfo]\n")
-                        desc.write(f"[mediainfo]{each['vob_mi_full']}[/mediainfo]\n")
-                        desc.write("\n")
-                        if i == 0:
-                            base2ptp = self.convert_bbcode(base)
-                            if base2ptp.strip() != "":
-                                desc.write(base2ptp)
-                                desc.write("\n\n")
-                        else:
-                            ds = multiprocessing.Process(target=prep.dvd_screenshots, args=(meta, i, 2))
-                            ds.start()
-                            while ds.is_alive() is True:
-                                await asyncio.sleep(1)
-                            new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}", f"{meta['discs'][i]['name']}-*.png")
-                            images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})  
-                        
-                    if len(images) > 0: 
-                        for each in range(len(images[:int(meta['screens'])])):
-                            raw_url = images[each]['raw_url']
-                            desc.write(f"[img]{raw_url}[/img]\n")
-                    desc.write("\n")
-            # For non-discs
+                        desc.write(f"[mediainfo]{each['vob_mi_full']}[/mediainfo]\n\n")
+
+                await common._write_images(desc, meta, self.tracker)
+
+                base2ptp = common.gazelle_bbcode(base_text)
+                if base2ptp.strip():
+                    desc.write("\n" + base2ptp + "\n")
+
+            # For non-discs 
             elif len(meta.get('filelist', [])) >= 1:
-                for i in range(len(meta['filelist'])):
-                    file = meta['filelist'][i]
+                for i, file in enumerate(meta['filelist']):
                     if i == 0:
-                        # Add This line for all web-dls
-                        if meta['type'] == 'WEBDL' and meta.get('service_longname', '') != '' and meta.get('description', None) is None and self.web_source is True:
+                        if meta['type'] == 'WEBDL' and meta.get('service_longname') and not meta.get('description') and self.web_source:
                             desc.write(f"[quote][align=center]This release is sourced from {meta['service_longname']}[/align][/quote]")
-                        mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'r', encoding='utf-8').read()
+
+                        # First file gets pre-generated mediainfo
+                        mi_path = f"{base_path}/MEDIAINFO.txt"
+                        mi_dump = open(mi_path, 'r', encoding='utf-8').read()
                     else:
-                        # Export Mediainfo
-                        mi_dump = MediaInfo.parse(file, output="STRING", full=False, mediainfo_options={'inform_version' : '1'})
-                        # mi_dump = mi_dump.replace(file, os.path.basename(file))
-                        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/TEMP_PTP_MEDIAINFO.txt", "w", newline="", encoding="utf-8") as f:
+                        # Generate mediainfo for other files (if multi-file)
+                        from pymediainfo import MediaInfo
+                        mi_dump = MediaInfo.parse(file, output="STRING", full=False, mediainfo_options={'inform_version': '1'})
+                        temp_path = f"{base_path}/TEMP_PTP_MEDIAINFO.txt"
+                        with open(temp_path, 'w', newline="", encoding="utf-8") as f:
                             f.write(mi_dump)
-                        mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/TEMP_PTP_MEDIAINFO.txt", "r", encoding="utf-8").read()
-                        # Generate and upload screens for other files 
-                        s = multiprocessing.Process(target=prep.screenshots, args=(file, f"FILE_{i}", meta['uuid'], meta['base_dir'], meta, 2))
-                        s.start()
-                        while s.is_alive() is True:
-                            await asyncio.sleep(3)
-                        new_screens = glob.glob1(f"{meta['base_dir']}/tmp/{meta['uuid']}",f"FILE_{i}-*.png")
-                        images, dummy = prep.upload_screens(meta, 2, 1, 0, 2, new_screens, {})
+                        mi_dump = open(temp_path, 'r', encoding='utf-8').read()
 
                     desc.write(f"[mediainfo]{mi_dump}[/mediainfo]\n")
-                    if i == 0:
-                        base2ptp = self.convert_bbcode(base)
-                        if base2ptp.strip() != "":
-                            desc.write(base2ptp)
-                            desc.write("\n\n")    
-                    if len(images) > 0: 
-                        for each in range(len(images[:int(meta['screens'])])):
-                            raw_url = images[each]['raw_url']
-                            desc.write(f"[img]{raw_url}[/img]\n")
-                    desc.write("\n")
 
-        
+                # Write screenshots
+                await common._write_images(desc, meta, self.tracker)
+
+                # Convert and write BBCode text
+                base2ptp = common.gazelle_bbcode(base_text)
+                if base2ptp.strip():
+                    desc.write("\n" + base2ptp + "\n")
+
 
     async def get_AntiCsrfToken(self, meta):
         if not os.path.exists(f"{meta['base_dir']}/data/cookies"):
@@ -731,7 +685,7 @@ class PTP():
         common = COMMON(config=self.config)
         await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         resolution, other_resolution = self.get_resolution(meta)
-        await self.edit_desc(meta)
+        await self.edit_desc(meta, common)
         desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "r").read()
         ptp_subtitles = self.get_subtitles(meta)
         ptp_trumpable = None
