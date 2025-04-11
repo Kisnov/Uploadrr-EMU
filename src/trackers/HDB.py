@@ -11,6 +11,7 @@ from torf import Torrent
 from unidecode import unidecode
 
 from src.console import console
+from src.basetorrent import TorrentMaker
 from src.exceptions import UploadException
 from src.trackers.COMMON import COMMON
 
@@ -54,18 +55,10 @@ class HDB:
         if meta['category'] == 'MUSIC':
             cat_id = 4
         # 5 = Sport
-        if self.is_sports(meta['name_notag']):
+        if meta.get('is_sports', False):
             cat_id = 5
     
         return cat_id
-
-    def is_sports(self, name):
-        sports_pattern = r'(?:EFL.*|.*mlb.*|.*formula1.*|.*nascar.*|.*nfl.*|.*wrc.*|.*wwe.*|' \
-                        r'.*fifa.*|.*boxing.*|.*rally.*|.*ufc.*|.*ppv.*|.*uefa.*|.*nhl.*|' \
-                        r'.*nba.*|.*motogp.*|.*moto2.*|.*moto3.*|.*gamenight.*|.*darksport.*|' \
-                        r'.*overtake.*)'
-
-        return re.search(sports_pattern, name, re.IGNORECASE) is not None  
 
     async def get_type_codec_id(self, meta):
         codecmap = {
@@ -216,7 +209,6 @@ class HDB:
 
     async def upload(self, meta, disctype):
         common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         await self.edit_desc(meta)
         manual_name = meta.get('manual_name')
         hdb_name = await self.edit_name(meta)
@@ -245,12 +237,9 @@ class HDB:
         torrent = Torrent.read(torrent_path)
         if torrent.piece_size > 16777216:
             console.print("[red]Piece size is OVER 16M and does not work on HDB. Generating a new .torrent")
-            torrent = self.prep.create_torrent(
-                meta=meta,
-                path=meta['path'],
-                output_filename=f"[{self.tracker}]{meta['clean_name']}",
-                piece_size_max=16777216
-            )
+            torrentmaker = TorrentMaker(self.config)
+            await torrentmaker.create(meta, meta['filepath'], "BASE", piece_size_max=16)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url) 
 
         torrent_filename = unidecode(os.path.basename(meta['video'] if len(meta['filelist']) == 1 else meta['path']).replace(' ', '.'))
         async with aiofiles.open(torrent_path, 'rb') as torrent_file:

@@ -11,7 +11,9 @@ from rich.prompt import Confirm
 from torf import Torrent
 
 from src.console import console
+from src.basetorrent import TorrentMaker
 from src.trackers.COMMON import COMMON
+
 class MTV():
 
     def __init__(self, config):
@@ -40,15 +42,11 @@ class MTV():
         common = COMMON(config=self.config)
         cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/MTV.pkl")
 
-        torrent_filename = "BASE"
-        if not Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent").piece_size <= 8388608: 
+        if not Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent").piece_size <= 8388608:
             console.print("[red]Piece size is OVER 8M and does not work on MTV. Generating a new .torrent")
-            from src.prep import Prep
-            prep = Prep(screens=meta['screens'], img_host=meta['imghost'], config=self.config)
-            prep.create_torrent(meta, Path(meta['path']), "MTV", piece_size_max=8)
-            torrent_filename = "MTV"
-            # Hash to f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent"
-        await common.edit_torrent(meta, self.tracker, self.source_flag, torrent_filename=torrent_filename)
+            torrentmaker = TorrentMaker(self.config)
+            await torrentmaker.create(meta, meta['filepath'], "BASE", piece_size_max=8)
+        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
    
         # getting category HD Episode, HD Movies, SD Season, HD Season, SD Episode, SD Movies
         cat_id = await self.get_cat_id(meta)
@@ -87,8 +85,6 @@ class MTV():
         with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb') as f:
             tfile = f.read()
             f.close()
-
-        ## todo need to check the torrent and make sure its not more than 8MB
 
         # need to pass the name of the file along with the torrent
         files = {
