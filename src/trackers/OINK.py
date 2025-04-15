@@ -26,7 +26,8 @@ class OINK():
     async def get_cat_id(self, category_name):
         category_id = {
             'MOVIE': '1', 
-            'TV': '2', 
+            'TV': '2',
+            'MUSIC': '3',
             }.get(category_name, '0')
         return category_id
 
@@ -37,7 +38,9 @@ class OINK():
             'WEBDL': '4', 
             'WEBRIP': '5', 
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
+            'FLAC': '7',
+            'MP3': '8',
             }.get(type, '0')
         return type_id
 
