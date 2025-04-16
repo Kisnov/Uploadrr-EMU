@@ -715,8 +715,11 @@ class PTP():
             data["other_resolution"] = other_resolution
         if meta.get('personalrelease', False) is True:
             data["internalrip"] = "on"
-        # IF SPECIAL (idk how to check for this automatically)
-            # data["special"] = "on"
+
+        # Rifftrax and Extras uploads should be marked as special for PTP
+        elif "rifftrax" or "extras" in meta.get('edition', '').lower():
+            data["special"] = "on"
+
         if int(str(meta.get("imdb_id", "0")).replace('tt', '')) == 0:
             data["imdb"] = "0"
         else:

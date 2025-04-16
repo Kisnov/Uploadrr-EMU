@@ -545,7 +545,7 @@ async def do_the_thing(base_dir):
                         else:
                             dupes = await ptp.search_existing(groupID, meta)
                             dupes = await common.filter_dupes(dupes, meta)
-                            meta, skipped = dupe_check(dupes, meta)
+                            meta, skipped = dupe_check(dupes, meta, config, skipped_details, path)
                             if skipped:
                                 skipped_files += 1
                                 skipped_details.append((path, "PTP"))

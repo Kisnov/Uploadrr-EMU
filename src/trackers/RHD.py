@@ -86,7 +86,7 @@ class RHD():
             bd_dump = None
         desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'r', encoding='utf-8').read()
         open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
-        rhd_name = await self.get_name(meta)
+        rhd_name = await self.edit_name(meta)
         manual_name = meta.get('manual_name')
         nfo_file = meta.get('nfo_file', None)
         files = {'torrent': open_torrent}
@@ -94,7 +94,7 @@ class RHD():
             open_nfo = open(nfo_file, 'rb') 
             files['nfo'] = open_nfo
         data = {
-            'name' : rhd_name if not manual_name else manual_name,
+            'name' : manual_name or rhd_name,
             'description' : desc,
             'mediainfo' : mi_dump,
             'bdinfo' : bd_dump, 
@@ -137,7 +137,8 @@ class RHD():
         }
 
         if meta['debug']:
-            log.debug("[blue]DATA 2 SEND[/blue]:")
+            console.print(f'\n[red]RHD NAME:[/red][blue]{rhd_name}')
+            log.debug(f"[blue]DATA 2 SEND[/blue]:")
             console.print(Pretty(data))
 
         else:
@@ -195,17 +196,18 @@ class RHD():
 
             return success
 
-
     def get_language_tag(self, meta):
         audio_languages = []
         text_languages = []
         lang_tag = ""
+        audio_codec = ""
         ignored_keywords = ["commentary", "music", "director", "cast", "party"]
         
         if meta['is_disc'] != "BDMV":
             with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/MediaInfo.json", 'r', encoding='utf-8') as f:
                 mi = json.load(f)
 
+            german_audio_tracks = []
             for track in mi['media']['track']:
                 if track.get('@type') == 'Audio':
                     title = track.get('Title', '').lower()
@@ -213,6 +215,23 @@ class RHD():
                         language = track.get('Language_String', '').lower()
                         if language:
                             audio_languages.append(language)
+                            if 'german' in language:
+                                channels = track.get('Channels', '0')
+                                format_str = track.get('Format_String', '')
+                                if format_str == 'DTS XLL':
+                                    format_str = 'DTS HD-MA'
+                                elif format_str == 'MLP FBA':
+                                    format_str = 'TrueHD'
+                                elif format_str == 'E-AC-3':
+                                    format_str = 'DDP'
+                                elif format_str == 'AC-3':
+                                    format_str = 'DD'
+                                channel_notation = {'6': '5.1','8': '7.1'}.get(channels, f"{channels}.0")
+                                codec = f"{format_str} {channel_notation}"
+                                german_audio_tracks.append({'codec': codec, 'channels': int(channels)})
+            # Select German track with most channels
+            if german_audio_tracks:
+                audio_codec = max(german_audio_tracks, key=lambda x: x['channels'])['codec']
             
             text_language_list = mi['media']['track'][0].get('Text_Language_List', '')
             text_languages = [lang.strip().lower() for lang in text_language_list.split(',')] if text_language_list else []
@@ -226,6 +245,28 @@ class RHD():
             subtitle_languages = re.findall(r"Subtitle:\s*([^/]+)", bd_summary, re.IGNORECASE)
             audio_languages = [lang.strip().lower() for lang in audio_languages] if audio_languages else []
             text_languages = [lang.strip().lower() for lang in subtitle_languages] if subtitle_languages else []
+
+            # Extract German audio codec
+            german_audio_tracks = []
+            for line in bd_summary.split('\n'):
+                if 'Audio:' in line and 'German' in line:
+                    match = re.search(r"Audio:.*?/ ([^/]+) / (\d\.\d)", line, re.IGNORECASE)
+                    if match:
+                        format_str, channel_notation = match.groups()
+                        format_str = format_str.strip()
+                        if format_str == 'DTS-HD Master Audio':
+                            format_str = 'DTS HD-MA'
+                        elif format_str == 'Dolby Digital Plus':
+                            format_str = 'DDP'
+                        elif format_str == 'Dolby Digital':
+                            format_str = 'DD'
+                        channels = 6 if channel_notation == '5.1' else 8 if channel_notation == '7.1' else 2 if channel_notation == '2.0' else '1.0'
+                        codec = f"{format_str} {channel_notation}"
+                        german_audio_tracks.append({'codec': codec, 'channels': channels})
+
+            # Select German track with most channels
+            if german_audio_tracks:
+                audio_codec = max(german_audio_tracks, key=lambda x: x['channels'])['codec']
 
         has_german_audio = any('german' in lang for lang in audio_languages)
         has_german_subtitles = any('german' in lang for lang in text_languages)
@@ -246,52 +287,49 @@ class RHD():
                 console.print(f"[yellow] Uploading Anyway in.. {i}", end='\r')
                 time.sleep(1)
 
-        return lang_tag
-        
-    async def edit_name(self, meta: Dict) -> str:
-            name = meta['name']
+        return lang_tag, audio_codec
 
-            category = meta.get('category', '')
-            media_type = meta.get('type', '')
-            is_disc = meta.get('is_disc', '')
-            title = meta.get('title', '')
-            alt_title = meta.get('aka', '')
-            year = meta.get('year', '')
-            tag = meta.get('tag', '')
-            three_d = meta.get('3D', '')
-            season = meta.get('season', '')
-            episode = meta.get('episode', '')
-            episode_title = meta.get('episode_title', '')
-            part = meta.get('part', '')
-            lang_tag = self.get_language_tag(meta)
+    async def edit_name(self, meta):
+        rhd_name = meta.get('clean_name', '')
 
-            if alt_title:
-                if category == "MOVIE" and media_type == "DISC" and is_disc == "BDMV":
-                    if alt_title not in name:
-                        name = name.replace(title, f"{title} [{alt_title}]")
+        lang_tag, audio_codec = self.get_language_tag(meta)
 
-            # Insert lang_tag after 3D (movies) or season/episode/part/episode_title (TV)
-            if lang_tag and lang_tag not in name:
-                if category == "MOVIE":
-                    insert_pos = name.find(three_d) + len(three_d) + 1 if three_d in name else name.find(year) + len(year) + 1
-                else:  # TV
-                    after_part = name.find(part) + len(part) + 1 if part in name else -1
-                    after_episode_title = name.find(episode_title) + len(episode_title) + 1 if episode_title in name else -1
-                    after_episode = name.find(f"{season}{episode}") + len(f"{season}{episode}") + 1 if f"{season}{episode}" in name else -1
-                    insert_pos = max(after_part, after_episode_title, after_episode, name.find(year) + len(year) + 1)
-                name = f"{name[:insert_pos]}{lang_tag} {name[insert_pos:]}"
+        # Replace audio with German audio_codec
+        if meta.get('audio') and audio_codec:
+            rhd_name = rhd_name.replace(meta['audio'], audio_codec)
 
-            if tag:
-                if '- ' in tag:
-                    tag = tag.replace('- ', '-')
-                name = name.replace(meta.get('tag', ''), tag)
-            elif '-NOGRP' not in name:
-                name += '-NOGRP'
+        _known = {
+            part.upper()
+            for part in [meta.get('cut'),
+                meta.get('edition'),
+                meta.get('ratio'),
+                meta.get('repack'),
+                meta.get('resolution') if meta.get('resolution') != "OTHER" else "",
+                meta.get('source'),
+                meta.get('uhd')
+            ]
+            if part
+        }
 
-            if lang_tag == "GERMAN DL":
-                name = name.replace("Dual-Audio ", "")
+        if lang_tag:
+            name_parts = rhd_name.split()
+            existing_lang_tags = {"GERMAN", "GERMAN DL", "GERMAN ML", "GERMAN SUBBED"}
+            name_parts = [part for part in name_parts if part.upper() not in existing_lang_tags]
 
-            return ' '.join(name.split())
+            insert_index = next(
+                (i for i, part in enumerate(name_parts) if part.upper() in _known),
+                len(name_parts)
+            )
+            name_parts.insert(insert_index, lang_tag)
+            rhd_name = ' '.join(name_parts)
+
+        if lang_tag == "GERMAN DL":
+            rhd_name = rhd_name.replace("Dual-Audio ", "")
+
+        if not meta.get('tag') and not (rhd_name.endswith("-NOGRP") or rhd_name.endswith("-NOGROUP")):
+            rhd_name += " -NOGRP"
+
+        return ' '.join(rhd_name.split())
 
 
     async def search_existing(self, meta):
