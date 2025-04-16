@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 # import discord
 import asyncio
+import contextlib
 import requests
 import re
 import langcodes
 import httpx
 import platform
 from rich.pretty import Pretty
+import traceback
 
 from src.trackers.COMMON import COMMON
 from src.console import console, log
@@ -26,6 +28,7 @@ class LDU():
         self.announce_url = f"{self.domain}/announce/{pid}"
         self.banned_groups = ['']
         self.allowed_imghosts = []
+        self.timeout = httpx.Timeout(60.0)
         pass
     
     async def get_cat_id(self, meta):
@@ -175,6 +178,7 @@ class LDU():
             if backdrop:
                 url_string += f"[url=torrent-banner={backdrop} ] [/url]"
             desc += url_string        
+        torrent_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent"    
         nfo_file = meta.get('nfo_file', None)
 
         data = {
@@ -228,38 +232,45 @@ class LDU():
             log.debug("[magenta]DATA 2 SEND[/magenta]:")
             console.print(Pretty(data))
             return False
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             files = {}
-            torrent_content = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb').read()
-            files['torrent'] = (f"{meta['clean_name']}.torrent", torrent_content, 'application/x-bittorrent')
+            with contextlib.ExitStack() as stack:
+                torrent_file = stack.enter_context(open(torrent_path, 'rb'))
+                files['torrent'] = ('torrent.torrent', torrent_file, 'application/x-bittorrent')
 
-            if nfo_file:
-                nfo_content= open(nfo_file, 'rb').read()
-                files['nfo'] = ('nfo.nfo', nfo_content, 'application/octet-stream')
+                if nfo_file:
+                    nfo_content = stack.enter_context(open(nfo_file, 'rb'))
+                    files['nfo'] = ('nfo.nfo', nfo_content, 'application/octet-stream')
 
-            try:
-                response = await client.post(
-                    self.upload_url, data=data, files=files if files else None,
-                    headers=headers, params=params
-                )
-                if 200 <= response.status_code < 300:
-                    response_json = response.json()
-                    success = response_json.get('success', False)
-                    if success:
-                        console.print("[bold green]Torrent uploaded successfully!")
-                    else:
-                        message = response_json.get('message', 'No message provided')
-                        console.print(f"[red]Upload failed: {message}[/red]")
-                        if 'data' in response_json:
-                            console.print(f"[cyan]Error details:[/cyan] {response_json['data']}")
-                    return success
-                else:
-                    log.error(f"[red]Encountered HTTP Error: {response.status_code}[/red]")
-                    console.print(f"[blue]Server Response[/blue]: {response.text}")
+                try:
+                    response = await client.post(
+                        self.upload_url, data=data, files=files if files else None,
+                        headers=headers, params=params
+                    )
+                    response.raise_for_status()
+                    if 200 <= response.status_code < 300:
+                        try:
+                            response_json = response.json()
+                        except ValueError:
+                            log.error(f"Unexpected response:\n{response.text}")
+                            return False
+                        success = response_json.get('success', False)
+                        if success:
+                            console.print("[bold green]Torrent uploaded successfully!")
+                        else:
+                            message = response_json.get('message', 'No message provided')
+                            console.print(f"[red]Upload failed: {message}[/red]")
+                            if 'data' in response_json:
+                                console.print(f"[cyan]Error details:[/cyan] {response_json['data']}")
+                        return success
+                except httpx.HTTPStatusError as http_err:
+                    console.print(f"[red]HTTP Error:[/red] {http_err}")
+                    console.print(f"[cyan]Response:[/cyan] {http_err.response.text}")
+                    return False        
+                except Exception as e:
+                    log.error(f"[red]Encountered Error: {e}[/red]")
+                    log.error(traceback.format_exc())
                     return False
-            except Exception as e:
-                log.error(f"[red]Encountered Error: {e}[/red]")
-                return False
 
 
     def get_language_tag(self, meta):
@@ -372,10 +383,14 @@ class LDU():
                 found = value
                 break
 
-        if found and re.search(rf"\b{found}\b", name):
-            parts = re.split(rf"\b{found}\b", name, 1)
+        if found and re.search(rf"\b{re.escape(found)}\b", name):
+            parts = re.split(rf"\b{re.escape(found)}\b", name, 1)
             name = f"{parts[0].strip()} [{found} {parts[1].strip()}"
-            name = name.replace(tag, f"{tag}]")        
+            if not meta.get("no_tag", False):
+                actual_tag = tag if tag else "-NOGRP"
+                name += f"{actual_tag}]"
+            else:
+                name += "]"
         name = name.replace(year, f'({year})')
 
         lang_tag = self.get_language_tag(meta)

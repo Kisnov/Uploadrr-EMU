@@ -16,8 +16,8 @@ class BLU():
         self.source_flag = 'BLU'
         self.domain = 'https://blutopia.cc'
         self.torrent_url = f'{self.domain}/api/torrents/' #For API use
-        self.search_url = f'{self.torrent_url}/filter'
-        self.upload_url = f'{self.torrent_url}/upload'
+        self.search_url = f'{self.domain}/api/filter'
+        self.upload_url = f'{self.torrent_url}upload'
         pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
         self.announce_url = f"{self.domain}/announce/{pid}"
         self.signature = None
@@ -62,7 +62,7 @@ class BLU():
         else:
             anon = 0
 
-        if meta['bdinfo'] != None:
+        if meta['bdinfo'] not in (None, ''):
             mi_dump = None
             bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
         else:
