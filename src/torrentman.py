@@ -11,10 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
-from rich.progress import BarColumn, Progress, SpinnerColumn, TimeRemainingColumn
 from torf import Torrent
 
-from src.console import console, log
+from src.console import log
+from src.progress import ProgressManager
 
 class TorrentMaker:
     def __init__(self, config):
@@ -23,6 +23,11 @@ class TorrentMaker:
 
     async def create(self, meta: dict, path: Path, piece_size_max: Optional[int] = None) -> Torrent:
         """Create a new torrent file with consistent content rules across tools."""
+        progress = ProgressManager.get_instance()
+        if not progress:
+            log.error("ProgressManager not initialized")
+            raise RuntimeError("ProgressManager not initialized")
+
         try:
             piece_size_max = int(piece_size_max) if piece_size_max is not None else 0
             path = self._prepare_path(meta, path)
@@ -31,7 +36,7 @@ class TorrentMaker:
             torrent = self._initialize(path, exclude, include)
             piece_size, piece_size_text = self._calculate_piece_size(torrent.size, piece_size_max)
             
-            console.print(f"[bold yellow]Creating .torrent with piece size {piece_size_text}...")
+            progress.update(f"Creating .torrent with piece size {piece_size_text}...")
             
             torrent_creation = meta.get('torrent_creation')
             log.debug(f"Tool: {torrent_creation}")
@@ -44,10 +49,9 @@ class TorrentMaker:
             log.debug(f"Output path: {output_path}")
             log.debug(f"Using method: {torrent_creation}")
 
-
             await self._generate(torrent, path, output_path, piece_size, torrent_creation)
             
-            console.print("[bold green].torrent created", end="\r")
+            progress.update(".torrent created")
             return torrent
         except ValueError as e:
             log.error(f"Invalid input: {e}")
@@ -111,7 +115,9 @@ class TorrentMaker:
                 return size, text
         return 24, "16MiB"
 
-    async def _generates(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int, method: Optional[str]):
+
+
+    async def _generate(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int, method: Optional[str]):
         """Generate torrent file with consistent content rules."""
         exclude_globs = torrent.exclude_globs
         include_globs = torrent.include_globs
@@ -120,6 +126,7 @@ class TorrentMaker:
             threads = os.cpu_count()
 
         output_path = output_path.resolve()
+        progress = ProgressManager.get_instance()
 
         if method == 'torrenttools':
             if self._check_tool('torrenttools'):
@@ -141,8 +148,14 @@ class TorrentMaker:
                     args.extend(['--include', pattern])
                 args.append(str(path))
                 await self._hash_spinner(args, "torrenttools")
+                
+                # Validate output torrent
+                if not output_path.exists() or output_path.stat().st_size == 0:
+                    log.warning(f"Empty or missing torrent file at {output_path}. Falling back to torf...")
+                    await self.use_torf(torrent, path, output_path, piece_size)
+                    return
             else:
-                console.print("[bold red]torrenttools not found in PATH, falling back to torf...")
+                progress.update("torrenttools not found in PATH, falling back to torf...")
                 await self.use_torf(torrent, path, output_path, piece_size)
 
         elif method == 'mktorrent':
@@ -151,7 +164,7 @@ class TorrentMaker:
                     try:
                         output_path.unlink()
                     except OSError as e:
-                        log.error(f"[bold]Failed to remove {output_path} ({e}), falling back to torf...")
+                        log.error(f"Failed to remove {output_path} ({e}), falling back to torf...")
                         await self.use_torf(torrent, path, output_path, piece_size)
                         return
 
@@ -164,6 +177,13 @@ class TorrentMaker:
                             target_dir.mkdir()
                             self._filter_directory_with_symlinks(path, target_dir, exclude_globs, include_globs)
 
+                            # Validate temporary directory contents
+                            temp_files = list(target_dir.rglob('*'))
+                            if not temp_files:
+                                log.warning(f"No files in temporary directory {target_dir} after filtering. Falling back to torf...")
+                                await self.use_torf(torrent, path, output_path, piece_size)
+                                return
+
                             args = [
                                 'mktorrent',
                                 '-a', self.tracker,
@@ -173,9 +193,16 @@ class TorrentMaker:
                                 '-o', str(output_path),
                                 target_dir
                             ]
-                            await self._hash_spinner(args, "mktorrent")                        
+                            await self._hash_spinner(args, "mktorrent")
+
+                            # Validate output torrent
+                            if not output_path.exists() or output_path.stat().st_size == 0:
+                                log.warning(f"Empty or missing torrent file at {output_path}. Falling back to torf...")
+                                await self.use_torf(torrent, path, output_path, piece_size)
+                                return
+                            
                     except (OSError, subprocess.CalledProcessError) as e:
-                        log.error(f"[bold]mktorrent failed ({e}), falling back to torf...")
+                        log.error(f"mktorrent failed ({e}), falling back to torf...")
                         await self.use_torf(torrent, path, output_path, piece_size)
                 else:
                     args = [
@@ -189,48 +216,89 @@ class TorrentMaker:
                     ]
                     try:
                         await self._hash_spinner(args, "mktorrent")
+
+                        # Validate output torrent
+                        if not output_path.exists() or output_path.stat().st_size == 0:
+                            log.warning(f"Empty or missing torrent file at {output_path}. Falling back to torf...")
+                            await self.use_torf(torrent, path, output_path, piece_size)
+                            return
+                        
                     except subprocess.CalledProcessError as e:
-                        console.print(f"[bold red]mktorrent failed ({e}), falling back to torf...")
+                        log.error(f"mktorrent failed ({e}), falling back to torf...")
                         await self.use_torf(torrent, path, output_path, piece_size)
             else:
-                console.print("[bold red]mktorrent not found in PATH, falling back to torf...")
+                progress.update("mktorrent not found in PATH, falling back to torf...")
                 await self.use_torf(torrent, path, output_path, piece_size)
 
         else:  # Default to torf
             await self.use_torf(torrent, path, output_path, piece_size)
 
-    async def _use_torf(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int) -> None:
-        """Fallback to torf with consistent settings."""
+    async def use_torf(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int) -> None:
+        """Fallback to torf with consistent settings and ProgressManager feedback."""
+        progress = ProgressManager.get_instance()
+        if not progress:
+            log.error("ProgressManager not initialized")
+            return
+
         torrent.piece_size = 2**piece_size
         torrent.piece_size_max = 16777216
+        progress.update("Starting torf hashing...")
         torrent.generate(callback=self._torf_callback, interval=5)
         torrent.write(output_path, overwrite=True)
         torrent.verify_filesize(path)
-
+        progress.update("Torf hashing complete")
 
     def _filter_directory_with_symlinks(self, source_path: Path, dest_path: Path, exclude_globs: list, include_globs: list) -> None:
-        """Filter directory contents using symlinks to match exclusion rules for mktorrent."""
+        """Filter directory contents using symlinks to match exclusion rules for mktorrent, preserving directory structure."""
         source_path = Path(source_path)
         dest_path = Path(dest_path)
         
-        for item in source_path.rglob('*'):
+        # Collect all files, including hidden ones
+        all_files = list(source_path.rglob('*')) + list(source_path.rglob('.*'))
+        log.debug(f"Found {len(all_files)} items in {source_path}: {[str(f) for f in all_files]}")
+        
+        included_files = []
+        for item in all_files:
+            if not item.is_file():
+                log.debug(f"Skipping {item.name} (not a file, likely a directory)")
+                continue
+                
             relative_path = item.relative_to(source_path)
             item_name = item.name
             
-            if any(glob.fnmatch.fnmatch(item_name, pat) for pat in exclude_globs):
-                continue
-            if include_globs and not any(glob.fnmatch.fnmatch(item_name, pat) for pat in include_globs):
+            # Check exclusion
+            matching_exclude_patterns = [pat for pat in exclude_globs if glob.fnmatch.fnmatch(item_name, pat)]
+            if matching_exclude_patterns:
+                log.debug(f"Excluding {relative_path} (matches exclude pattern(s): {', '.join(matching_exclude_patterns)})")
                 continue
                 
+            if include_globs and not any(glob.fnmatch.fnmatch(item_name, pat) for pat in include_globs):
+                log.debug(f"Excluding {relative_path} (does not match include pattern)")
+                continue
+
             dest_item = dest_path / relative_path
             dest_item.parent.mkdir(parents=True, exist_ok=True)
-            if item.is_file():
+            try:
                 os.symlink(item, dest_item)
-
+                included_files.append(str(relative_path))
+            except OSError as e:
+                log.warning(f"Failed to create symlink for {relative_path}: {e}")
+                continue
+        
+        log.debug(f"Included {len(included_files)} files in temporary directory {dest_path}: {included_files}")
+        if not included_files:
+            log.warning(f"No files included in temporary directory {dest_path}. Check exclude/include patterns or source directory contents.")
+            
     async def _hash_spinner(self, args, tool_name):
-        """Execute subprocess with a live spinner for feedback"""
+        """Execute subprocess with feedback via ProgressManager."""
+        progress = ProgressManager.get_instance()
+        if not progress:
+            log.error("ProgressManager not initialized")
+            return
+
         log.ddebug(f"Starting {tool_name} with args: {args}")
         try:
+            progress.update(f"Hashing with {tool_name}...")
             process = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=subprocess.PIPE,
@@ -238,24 +306,20 @@ class TorrentMaker:
             )
             log.ddebug(f"{tool_name} process started with PID: {process.pid}")
             
-            with Progress(
-                SpinnerColumn(),
-                "[progress.description]{task.description}"
-            ) as progress:
-                task = progress.add_task(f"Hashing with {tool_name}...", total=None)
-                start_time = time.time()
-                stdout, stderr = await process.communicate()               
-                end_time = time.time()
-                elapsed_time = end_time - start_time
-                log.ddebug(f"{tool_name} stdout: {stdout.decode().strip()}")
-                log.ddebug(f"{tool_name} stderr: {stderr.decode().strip()}")
-                log.debug(f"Hashed in {elapsed_time:.2f} seconds")
+            start_time = time.time()
+            stdout, stderr = await process.communicate()
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            log.ddebug(f"{tool_name} stdout: {stdout.decode().strip()}")
+            log.ddebug(f"{tool_name} stderr: {stderr.decode().strip()}")
+            log.debug(f"Hashed in {elapsed_time:.2f} seconds")
 
-                if process.returncode != 0:
-                    safe_args = args.copy()
-                    safe_args[2] = "OMITTED"
-                    log.error(f"[bold red]{tool_name} failed with code {process.returncode}: {stderr.decode()}")
-                    raise subprocess.CalledProcessError(process.returncode, args, stderr=stderr)
+            if process.returncode != 0:
+                safe_args = args.copy()
+                safe_args[2] = "OMITTED"
+                log.error(f"[bold red]{tool_name} failed with code {process.returncode}: {stderr.decode()}")
+                raise subprocess.CalledProcessError(process.returncode, args, stderr=stderr)
 
         except FileNotFoundError:
             log.error(f"[bold red]{tool_name} not found in system PATH")
@@ -271,35 +335,29 @@ class TorrentMaker:
                 process.terminate()
                 await process.wait()
                 log.debug(f"{tool_name} process forcefully terminated")
+            progress.update("Hashing complete")
 
     def _check_tool(self, tool_name: str) -> bool:
         return shutil.which(tool_name) is not None
 
     def _torf_callback(self, torrent: Torrent, filepath: str, pieces_done: int, pieces_total: int) -> None:
-        """Progress callback for torf torrent generation."""
-        if not hasattr(self, 'progress'):
-            self.progress = Progress(
-                "[progress.description]{task.description}",
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.1f}%",
-                TimeRemainingColumn()
-            )
-            self.task = self.progress.add_task("Hashing...", total=pieces_total)
-            self.progress.start()
-            self.start_time = time.time()        
+        """Progress callback for torf torrent generation using ProgressManager."""
+        progress = ProgressManager.get_instance()
+        if not progress:
+            return
 
-        self.progress.update(self.task, completed=pieces_done)
+        percentage = (pieces_done / pieces_total) * 100 if pieces_total > 0 else 0
+        elapsed_time = time.time() - getattr(self, 'start_time', time.time())
+        self.start_time = time.time()  # Initialize start_time if not set
+        
+        progress.update(f"Hashing with torf: {percentage:.1f}% ({pieces_done}/{pieces_total} pieces)")
+        
         if pieces_done >= pieces_total:
-            end_time = time.time()
-            elapsed_time = end_time - self.start_time 
-            log.debug(f" Hashed in {elapsed_time:.2f} seconds")
-            self.progress.stop()
-            del self.progress
-            del self.start_time
+            log.debug(f"Hashed in {elapsed_time:.2f} seconds")
 
     async def create_random_torrents(self, base_dir: Path, uuid: str, num: int, path: Path) -> None:
         """Create multiple randomized torrent copies."""
-        manual_name = re.sub(r"[^0-9a-zA-Z\[\]\'\-]+", ".", os.path.basename(path))
+        manual_name = re.sub(r"[^0-9a-zA-Z\[\]\'\-]+", ".", Path(path).name)
         base_path = Path(base_dir) / "tmp" / uuid / "BASE.torrent"
         base_torrent = Torrent.read(str(base_path))
         
@@ -339,3 +397,35 @@ class TorrentMaker:
         
         output_path = base_dir / "tmp" / uuid / "BASE.torrent"
         await asyncio.to_thread(base_torrent.write, str(output_path), overwrite=True)
+
+# Avoid loading in TorrentMaker Intsance
+async def edit_torrent(meta: dict, tracker: str, source_flag: str, announce_url: str, comment: Optional[str] = None) -> None:
+    """Edit an existing torrent by updating tracker, source flag, and/or comment.""" 
+    try:
+        torrent_path = Path(meta['base_dir']) / "tmp" / meta['uuid']
+        base_torrent_path = torrent_path / "BASE.torrent"
+        
+        if not base_torrent_path.exists():
+            log.error(f"Base torrent not found at {base_torrent_path}")
+            return
+
+        new_torrent = Torrent.read(base_torrent_path)
+        
+        # Clean up unnecessary metadata keys
+        valid_meta_keys = {'creation date', 'encoding', 'info'}
+        for key in list(new_torrent.metainfo.keys()):
+            if key not in valid_meta_keys:
+                new_torrent.metainfo.pop(key, None)
+
+        new_torrent.metainfo['created by'] = "Uploadrr"
+        new_torrent.metainfo['announce'] = announce_url.strip()
+        new_torrent.metainfo['info']['source'] = source_flag
+        if comment:
+            new_torrent.metainfo['comment'] = comment
+
+        output_path = torrent_path / f"[{tracker}]{meta['clean_name']}.torrent"
+        Torrent.copy(new_torrent).write(output_path, overwrite=True)
+        
+    except Exception as e:
+        log.error(f"Failed to edit torrent: {e}")
+        raise
