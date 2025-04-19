@@ -1,87 +1,99 @@
 import vapoursynth as vs
-core = vs.core
 from awsmfunc import ScreenGen, DynamicTonemap, FrameInfo, zresize
 import random
-import argparse
-from typing import Union, List
+import asyncio
 from pathlib import Path
-import os, sys
 from functools import partial
 
 # Modified version of https://git.concertos.live/AHD/ahd_utils/src/branch/master/screengn.py
-def vs_screengn(source, encode, filter_b_frames, num, dir):
-    # prefer ffms2, fallback to lsmash for m2ts
-    if str(source).endswith(".m2ts"):
-        src = core.lsmas.LWLibavSource(source)
-    else:
-        src = core.ffms2.Source(source, cachefile=f"{os.path.abspath(dir)}{os.sep}ffms2.ffms2")
+core = vs.core
 
-    # we don't allow encodes in non-mkv containers anyway
+async def vs_screengn(
+    source: Path,
+    encode: Path = None,
+    filter_b_frames: bool = False,
+    num: int = 5,
+    dir: Path = Path("."),
+    seed: int = None,
+):
+    dir = Path(dir)
+    source = Path(source)
     if encode:
-        enc = core.ffms2.Source(encode)
+        encode = Path(encode)
 
-    # since encodes are optional we use source length
+    if seed is not None:
+        random.seed(seed)
+
+    # Prefer ffms2, fallback to lsmash for m2ts
+    if source.suffix.lower() == ".m2ts":
+        src = core.lsmas.LWLibavSource(str(source))
+    else:
+        cachefile = dir / "ffms2.ffms2"
+        src = core.ffms2.Source(str(source), cachefile=str(cachefile))
+
+    enc = None
+    if encode:
+        enc = core.ffms2.Source(str(encode))
+
     num_frames = len(src)
-    # these values don't really matter, they're just to cut off intros/credits
     start, end = 1000, num_frames - 10000
 
-    # filter b frames function for frameeval
-    def filter_ftype(n, f, clip, frame, frames, ftype="B"):
+    frames = []
+
+    def filter_ftype(n, f, clip, frame, frames_list, ftype="B"):
         if f.props["_PictType"].decode() == ftype:
-            frames.append(frame)
+            frames_list.append(frame)
         return clip
 
-    # generate random frame numbers, sort, and format for ScreenGen
-    # if filter option is on filter out non-b frames in encode
-    frames = []
-    if filter_b_frames:
-        with open(os.devnull, "wb") as f:
-            i = 0
-            while len(frames) < num:
-                frame = random.randint(start, end)
-                enc_f = enc[frame]
-                enc_f = enc_f.std.FrameEval(partial(filter_ftype, clip=enc_f, frame=frame, frames=frames), enc_f)
-                enc_f.output(f)
-                i += 1
-                if i > num * 10:
-                    raise ValueError("screengn: Encode doesn't seem to contain desired picture type frames.")
+    if filter_b_frames and enc:
+        i = 0
+        while len(frames) < num:
+            frame = random.randint(start, end)
+            enc_f = enc[frame]
+            enc_f = enc_f.std.FrameEval(
+                partial(filter_ftype, clip=enc_f, frame=frame, frames_list=frames),
+                enc_f
+            )
+            # Offload blocking frame output to avoid blocking event loop
+            await asyncio.to_thread(enc_f.output, open(Path("/dev/null"), "wb"))
+            i += 1
+            if i > num * 10:
+                raise ValueError("screengn: Encode doesn't seem to contain desired picture type frames.")
     else:
-        for _ in range(num):
-            frames.append(random.randint(start, end))
-    frames = sorted(frames)
-    frames = [f"{x}\n" for x in frames]
+        frames = sorted(random.randint(start, end) for _ in range(num))
 
-    # write to file, we might want to re-use these later
-    with open("screens.txt", "w") as txt:
-        txt.writelines(frames)
+    # Write frame numbers to file
+    screens_txt = dir / "screens.txt"
+    screens_txt.write_text("".join(f"{f}\n" for f in frames))
 
-    # if an encode exists we have to crop and resize
-    if encode:
-        if src.width != enc.width and src.height != enc.height:
-            ref = zresize(enc, preset=src.height)
-            crop = [(src.width - ref.width) / 2, (src.height - ref.height) / 2]
-            src = src.std.Crop(left=crop[0], right=crop[0], top=crop[1], bottom=crop[1])
-            if enc.width / enc.height > 16 / 9:
-                width = enc.width
-                height = None
-            else:
-                width = None
-                height = enc.height
-            src = zresize(src, width=width, height=height)
+    # Crop and resize src if encode dimensions mismatch
+    if encode and (src.width != enc.width or src.height != enc.height):
+        ref = zresize(enc, preset=src.height)
+        crop_l = int(round((src.width - ref.width) / 2))
+        crop_t = int(round((src.height - ref.height) / 2))
+        src = src.std.Crop(left=crop_l, right=crop_l, top=crop_t, bottom=crop_t)
 
-    # tonemap HDR
+        if enc.width / enc.height > 16 / 9:
+            width, height = enc.width, None
+        else:
+            width, height = None, enc.height
+
+        src = zresize(src, width=width, height=height)
+
+    # HDR Tonemap if needed
     tonemapped = False
-    if src.get_frame(0).props["_Primaries"] == 9:
+    primaries = src.get_frame(0).props.get("_Primaries", None)
+    if primaries == 9:
         tonemapped = True
         src = DynamicTonemap(src, src_fmt=False, libplacebo=False, adjust_gamma=True)
         if encode:
             enc = DynamicTonemap(enc, src_fmt=False, libplacebo=False, adjust_gamma=True)
 
-    # add FrameInfo
-    if tonemapped == True:
+    if tonemapped:
         src = FrameInfo(src, "Tonemapped")
-    ScreenGen(src, dir, "a")
+    ScreenGen(src, str(dir), "a")
+
     if encode:
-        if tonemapped == True:
+        if tonemapped:
             enc = FrameInfo(enc, "Encode (Tonemapped)")
-        ScreenGen(enc, dir, "b")
+        ScreenGen(enc, str(dir), "b")
