@@ -1,16 +1,21 @@
 import asyncio
 import datetime
 import logging
+import yaml
 from pathlib import Path
 
 import discord
 from discord.ext import commands
 
+
+config_path = Path(__file__).parent.parent / "data" / "config.yaml"
+
 def config_load():
     """
     Loads the bot configuration from the config file.
     """
-    from data.config import config  # Importing inside the function to avoid issues with module-level imports
+    with open(config_path, "r") as file:
+        config = yaml.safe_load(file)
     return config
 
 async def run():
