@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 
 import aiofiles
@@ -313,3 +314,36 @@ class MediaInfoHandler:
 
         return video_encode, video_codec, has_encode_settings, bit_depth
 
+    async def get_search_year(self, mi: dict, meta: dict) -> str:
+        year_pattern = r'\b\d{4}\b'
+        general_track = next((track for track in mi.get('media', {}).get('track', []) if track.get('@type') == 'General'), {})
+
+        for field in ['Movie', 'Title']:
+            value = general_track.get(field, '')
+            if value:
+                matches = re.findall(year_pattern, value.strip())
+                if matches:
+                    return matches[-1]
+
+        possible_fields = ['DATE', 'Released_Date', 'First_Air_Date']
+        combined_fields = list(general_track.items()) + list(general_track.get('extra', {}).items())
+
+        for key, value in combined_fields:
+            normalized_key = re.sub(r'[_\s]', '', key).lower()
+            for target in possible_fields:
+                if normalized_key == re.sub(r'[_\s]', '', target).lower():
+                    date_value = value.strip()
+                    if not date_value:
+                        continue
+                    try:
+                        cleaned_date = re.sub(r'^UTC\s*', '', date_value)
+                        parsed_date = datetime.strptime(cleaned_date, '%Y-%m-%d')
+                        return parsed_date.year
+                    except ValueError:
+                        if re.match(r'^\d{4}$', date_value):
+                            return date_value
+                        matches = re.findall(year_pattern, date_value)
+                        if matches:
+                            return matches[-1]
+
+        return ''
