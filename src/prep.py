@@ -1,14 +1,13 @@
 import asyncio
 import json
 import itertools
-import ntpath
 import os
 import re
 import time
 import urllib
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import anitopy
 import requests
@@ -37,40 +36,38 @@ class Prep():
         Database Identifiers (TMDB/IMDB/MAL/etc)
         Create Name
     """
-    base_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
                                              
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, base_dir: Path):
         self.config = config
+        self.base_dir = base_dir
         self._regions = None
         self._distributor_list = None
         self._services = None
         self.TMDb = TMDbHandler(config)
         self.IMDb = IMDbHandler()
-        self.mihandle = MediaInfoHandler(self.base_dir)
+        self.mihandle = MediaInfoHandler(base_dir)
 
     async def gather_prep(self, meta, mode):
         #Initialize gather
         meta.update(
             mode=mode,
-            isdir=os.path.isdir(meta['path']),
-            base_dir=self.base_dir,
+            is_dir=Path(meta['path']).is_dir(),
             is_music=False,
             is_video=False,
-            filelist={},
+            filelist=[],
             user_images=[],
             log_files=[],
             nfo_file='',
-            uuid=meta.get('uuid') or os.path.basename(meta['path'])
         )
 
         # Create temp directory
-        tmp_dir = Path(f"{meta['base_dir']}/tmp/{meta['uuid']}")
+        tmp_dir = self.base_dir / 'tmp' / f"{meta['uuid']}"
         await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
 
         log.debug(f"[cyan]ID: {meta['uuid']}")
 
         # File collection and initial processing
-        if meta['isdir']:
+        if meta['is_dir']:
             meta = await self._process_directory(meta, mode)
         else:
             meta = await self._process_single_file(meta, mode)
@@ -87,93 +84,87 @@ class Prep():
         meta = await self.gen_desc(meta)
         return meta
 
-    async def _process_directory(self, meta, mode):
+
+    async def _process_directory(self, meta: Dict, mode: str) -> Dict:
         """Process directory contents recursively with video priority."""
-        def collect_files_recursive(directory, meta):
-            # Collect all files recursively, sorted alphabetically
-            files = {}
-            total_size = 0
-            for path in sorted(Path(directory).rglob('*'), key=str):
-                if path.is_file() and not path.name.startswith('._'):
-                    rel_path = path.relative_to(directory)
-                    file_key = str(rel_path.parent / rel_path.name) if rel_path.parent.name != meta['uuid'] else f"BASE/{rel_path.name}"
-                    files[file_key] = str(path)
-                    total_size += path.stat().st_size
-            return files, total_size
+        path = Path(meta['path'])
+        video_extensions = {'.mkv', '.mp4', '.ts'}
+        music_extensions = {'.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav'}
+        image_extensions = {'.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif'}
 
+        all_files = []
+        total_size = 0
+        for file_path in sorted(path.rglob('*'), key=str):
+            if file_path.is_file() and not file_path.name.startswith('._'):
+                all_files.append(str(file_path))
+                total_size += file_path.stat().st_size
 
-        all_files, total_size = await asyncio.to_thread(collect_files_recursive, meta['path'], meta)
         meta['content_size'] = total_size
-        base_name = os.path.basename(meta['path'])
-        nfo_candidates = []
-        video_files = []
-        music_files = []
+        meta['filelist'] = all_files
 
         # Categorize files
-        for file_name, full_path in all_files.items():
-            ext = os.path.splitext(file_name)[1].lower()
-            if ext in ['.mkv', '.mp4', '.ts']:
-                video_files.append((file_name, full_path))
-            elif ext in ['.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
-                music_files.append((file_name, full_path))
-            elif ext in ['.jpg', '.jpeg', '.png', '.svg', '.ico', '.gif']:
-                meta['user_images'].append(full_path)
-            elif ext == '.nfo':
-                nfo_candidates.append((file_name, full_path))
-            elif ext == '.log':
-                meta['log_files'].append(full_path)
+        video_files = [f for f in all_files if Path(f).suffix.lower() in video_extensions]
+        music_files = [f for f in all_files if Path(f).suffix.lower() in music_extensions]
+        meta['user_images'] = [f for f in all_files if Path(f).suffix.lower() in image_extensions]
+        meta['log_files'] = [f for f in all_files if Path(f).suffix.lower() == '.log']
+        nfo_files = [f for f in all_files if Path(f).suffix.lower() == '.nfo']
+
+        base_name = path.name
+        for nfo in nfo_files:
+            if Path(nfo).name == f"{base_name}.nfo":
+                meta['nfo_file'] = nfo
+                break
+        else:
+            meta['nfo_file'] = nfo_files[0] if nfo_files else ''
 
         # Prioritize video if in base directory or dominant
-        base_video = any(f.startswith('BASE/') for f, _ in video_files)
+        base_video = any(Path(f).parent == path for f in video_files)
         video_count = len(video_files)
         music_count = len(music_files)
         log.debug(f"Found {video_count} video files, {music_count} music files")
 
         if video_count > 0 and (base_video or video_count > music_count * 2 or not meta.get('is_music')):
             meta['is_video'] = True
-            meta['filelist'] = {f: p for f, p in video_files}
+            meta['video_files'] = video_files  # Store for get_video
+            console.print(f"[yellow]Video files: {[Path(f).name for f in video_files]}")
         elif music_count > 0:
             meta['is_music'] = True
-            meta['filelist'] = {f: p for f, p in music_files}
+            meta['music_files'] = music_files
             console.print('[red]Processing as music')
             await self.get_music(meta, mode)
 
-        # Handle NFO files
-        if nfo_candidates:
-            for file_name, full_path in nfo_candidates:
-                if file_name == f"{base_name}.nfo":
-                    meta['nfo_file'] = full_path
-                    break
-            else:
-                meta['nfo_file'] = nfo_candidates[0][1]
         return meta
 
-    async def _process_single_file(self, meta, mode):
+    async def _process_single_file(self, meta: Dict, mode: str) -> Dict:
         """Process a single file with video priority and calculate size."""
-        file_extension = os.path.splitext(meta['path'])[1].lower()
+        file_path = Path(meta['path'])
+        file_extension = file_path.suffix.lower()
+
         try:
-            meta['content_size'] = await asyncio.to_thread(os.path.getsize, meta['path'])
+            meta['content_size'] = file_path.stat().st_size
         except (OSError, FileNotFoundError) as e:
             log.error(f"Error getting file size: {e}")
             meta['content_size'] = 0
 
-        if file_extension in ['.mkv', '.mp4', '.ts']:
+        meta['filelist'] = [str(file_path)]
+
+        if file_extension in {'.mkv', '.mp4', '.ts'}:
             meta['is_video'] = True
-            meta['filelist'] = {"BASE/" + os.path.basename(meta['path']): meta['path']}
-            base_name = os.path.splitext(meta['path'])[0]
-            match_nfo = f"{base_name}.nfo"
-            if await asyncio.to_thread(os.path.exists, match_nfo):
-                meta['nfo_file'] = match_nfo
-            elif not await asyncio.to_thread(os.path.exists, match_nfo) and meta.get('nfo'):
-                directory = os.path.dirname(meta['path'])
-                nfo_files = await asyncio.to_thread(lambda: [f for f in os.listdir(directory) if f.endswith('.nfo')])
+            meta['video_files'] = [str(file_path)]
+            base_name = file_path.stem
+            nfo_path = file_path.with_name(f"{base_name}.nfo")
+            if nfo_path.exists():
+                meta['nfo_file'] = str(nfo_path)
+            elif meta.get('nfo'):
+                nfo_files = [f for f in file_path.parent.iterdir() if f.suffix.lower() == '.nfo']
                 if nfo_files:
-                    meta['nfo_file'] = os.path.join(directory, nfo_files[0])
-        elif file_extension in ['.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav']:
-            if meta.get('is_music'):
-                meta['is_music'] = True
-                console.print('[red]Processing as music')
-                await self.process_single_music_file(meta, mode)
+                    meta['nfo_file'] = str(nfo_files[0])
+        elif file_extension in {'.aac', '.alac', '.flac', '.m4a', '.mp3', '.opus', '.wav'} and meta.get('is_music'):
+            meta['is_music'] = True
+            meta['music_files'] = [file_path]
+            console.print('[red]Processing as music')
+            await self.process_single_music_file(meta, mode)
+
         return meta
 
     async def _process_video_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -181,7 +172,6 @@ class Prep():
         # Initial setup
         meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.get_disc(meta)
         meta.update({
-            'filelist': [],
             'bdinfo': bdinfo,
             'video': None,
             'is_sports': False,
@@ -219,6 +209,7 @@ class Prep():
             )
             meta['filename'] = filename.split(' AKA ')[0] if " AKA " in filename.replace('.', ' ') else filename
             meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
+            meta['category'] = meta.get('category') or self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
 
         elif meta['is_disc'] == "DVD":
             disc_path = meta['discs'][0]['path']
@@ -238,6 +229,7 @@ class Prep():
                 )
             meta['dvd_size'] = await self.get_dvd_size(meta['discs'])
             meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
+            meta['category'] = meta.get('category') or self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
 
         elif meta['is_disc'] == "HDDVD":
             video, meta['scene'], meta['imdb'] = await is_scene(meta['path'], meta.get('imdb'))
@@ -253,31 +245,33 @@ class Prep():
                     export_text=False
                 )
             meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
+            meta['category'] = meta.get('category') or self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
 
         else:  # Non-disc case
-            videopath, meta['filelist'] = self.get_video(videoloc, meta.get('mode', 'discord'))
+            videopath, filelist = self.get_video(videoloc, meta.get('mode', 'discord'), meta.get('filelist', []))
             video, meta['scene'], meta['imdb'] = await is_scene(videopath, meta.get('imdb'))
-            guess_name = ntpath.basename(video).replace('-', ' ')
+            meta['video'] = str(videopath)
+            guess = guess or guessit(meta['video'])
+            meta['category'] = meta.get('category') or self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
+            if meta['category'] == 'TV':
+                guess_name = meta['uuid'].replace('-', " ") 
+            else:    
+                guess_name = Path(video).name.replace('-', " ")
             meta['filename'] = guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), {"excludes": ["country", "language"]}).get(
                 "title", guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})["title"]
             )
             meta['search_year'] = guessit(video).get('year', "")
-            meta['video'] = videopath
             if not meta.get('edit', False):
                 meta['mediainfo'] = await self.mihandle.exportInfo(
                     media_path=videopath,
-                    is_dir=meta.get('isdir', False),
+                    is_dir=meta.get('is_dir', False),
                     folder_id=meta['uuid'],
                     export_text=True
                 )
             meta['type'] = self.get_type(video, meta['scene'], meta['is_disc'])
-
-        guess = guess or guessit(meta['video'])
-        meta['category'] = self.get_cat(meta['video'], meta['is_disc'], meta.get('discs', [])) or guess.get('type', 'MOVIE').upper()
         if self.is_sports(meta['uuid']):
             meta['is_sports'] = True
             meta['category'] = 'SPORTS'
-
         return meta
 
     async def _assign_common_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -333,6 +327,8 @@ class Prep():
 
     async def _finalize_metadata(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         """Finalize metadata based on category and additional processing."""
+        if meta.get('search_year') in ('', None):
+            meta['search_year'] = await self.mihandle.get_search_year(meta.get('mediainfo', {}), meta)
         if meta['category'] in ("TV", "MOVIE"):
             meta['tmdb'] = meta.get('tmdb_manual', meta.get('tmdb'))
             if not meta.get('imdb') and meta.get('imdb_id'):
@@ -469,7 +465,7 @@ class Prep():
                     meta['image_list'] = blu_imagelist
 
     def load_json(self, filename): #Lazy-Load json's
-            filepath = os.path.join(self.base_dir, "data", filename)
+            filepath = self.base_dir/ "data"/ f"{filename}"
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     return json.load(f)
@@ -542,17 +538,17 @@ class Prep():
                     discs.append(disc)
         if is_disc == "BDMV":
             if meta.get('edit', False) is False:
-                discs, bdinfo = await parse.get_bdinfo(discs, meta['uuid'], meta['base_dir'], meta.get('discs', []))
+                discs, bdinfo = await parse.get_bdinfo(discs, meta['uuid'], self.base_dir, meta.get('discs', []))
             else:
-                discs, bdinfo = await parse.get_bdinfo(meta['discs'], meta['uuid'], meta['base_dir'], meta['discs'])
+                discs, bdinfo = await parse.get_bdinfo(meta['discs'], meta['uuid'], self.base_dir, meta['discs'])
         elif is_disc == "DVD":
             discs = await parse.get_dvdinfo(discs)
-            export = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8')
+            export = open(self.base_dir / 'tmp'/ f"{meta['uuid']}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8')
             export.write(discs[0]['ifo_mi'])
             export.close()
         elif is_disc == "HDDVD":
             discs = await parse.get_hddvd_info(discs)
-            export = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8')
+            export = open(self.base_dir / 'tmp'/ f"{meta['uuid']}/MEDIAINFO.txt", 'w', newline="", encoding='utf-8')
             export.write(discs[0]['evo_mi'])
             export.close()
         discs = sorted(discs, key=lambda d: d['name'])
@@ -564,33 +560,40 @@ class Prep():
     Get video files
 
     """
+    def get_video(self, videoloc: Union[str, Path], mode: str, meta_or_filelist: Union[Dict, List[str]] = None) -> Tuple[Union[Path, None], List[Path]]:
+        """Retrieve the primary video file and list of video files from meta or filelist."""
+        video_extensions = {'.mkv', '.mp4', '.ts'}
+        bonus_keywords = ('bonus', 'extra', 'bloopers', 'blooper', 'intro', 'trailer', 'sample', '0')
 
-    def get_video(self, videoloc, mode):
-        filelist = []
-        videoloc = os.path.normpath(os.path.abspath(videoloc))
-        video_extensions = ['.mkv', '.mp4', '.ts']
-        
-        if os.path.isdir(videoloc):
-            for file in os.listdir(videoloc):
-                full_path = os.path.join(videoloc, file)
-                if not file.startswith('._'):
-                    if os.path.isfile(full_path) and any(file.lower().endswith(ext) for ext in video_extensions):
-                        if not (file.lower().endswith('sample.mkv') or file.lower().startswith('!sample')):
-                            filelist.append(full_path)
+        def is_bonus_file(filename: Union[str, Path]) -> bool:
+            name = Path(filename).stem.lower()
+            return any(name.startswith(k) or name.endswith(k) for k in bonus_keywords)
 
-            if filelist:
-                video = sorted(filelist)[0]
-            else:
-                console.print(f"[red]No video files found in {videoloc}")
-                if mode == 'cli':
-                    exit()
-                return None, []
-        else:
-            video = videoloc
-            if not os.path.basename(videoloc).startswith('._') and os.path.splitext(videoloc)[1].lower() in video_extensions:
-                filelist.append(videoloc)
-        
-        return video, filelist
+        # Handle meta (dict) or filelist (list)
+        video_files = []
+        if isinstance(meta_or_filelist, dict):
+            video_files = [Path(f) for f in meta_or_filelist.get('video_files', [])]  # Convert strings to Path
+        elif isinstance(meta_or_filelist, list):
+            video_files = [Path(f) for f in meta_or_filelist if Path(f).suffix.lower() in video_extensions]  # Filter valid videos
+
+        # Fallback to scanning videoloc if no video files
+        if not video_files:
+            videoloc = Path(videoloc).resolve()
+            if videoloc.is_dir():
+                video_files = [f for f in videoloc.iterdir() if f.is_file() and f.suffix.lower() in video_extensions and not f.name.startswith('._')]
+            elif videoloc.suffix.lower() in video_extensions and not videoloc.name.startswith('._'):
+                video_files = [videoloc]
+
+        if not video_files:
+            console.print(f"[red]No video files found in {videoloc}")
+            if mode == 'cli':
+                exit()
+            return None, []
+
+        # Sort to prioritize non-bonus files
+        video_files = sorted(video_files, key=is_bonus_file)
+        primary_video = video_files[0]
+        return primary_video, video_files
 
     async def get_music(self, meta, mode):
         log.ddebug("Starting get_music")
@@ -781,7 +784,7 @@ class Prep():
         first_audio_file = tracks[0][2]
         mi = await self.mihandle.exportInfo(
                     media_path=first_audio_file,
-                    is_dir=meta.get('isdir', False),
+                    is_dir=meta.get('is_dir', False),
                     folder_id=meta['uuid'],
                     export_text=True
                 )
@@ -888,7 +891,7 @@ class Prep():
             meta['tracklist'] = tracklist
 
         if not os.path.exists(f"{base_dir}/tmp/{meta['uuid']}/MediaInfo.json"):
-            self.export_audio_info(tracks, meta['uuid'], meta['base_dir'])
+            self.export_audio_info(tracks, meta['uuid'], self.base_dir)
 
         if 'discogs_id' in meta and meta['discogs_id']:
             meta['keywords'] += f", Discogs: {meta['discogs_id']}"
@@ -1565,7 +1568,7 @@ class Prep():
         desclink = meta.get('desclink', None)
         auto_desc = meta.get('auto_desc', False)
         nfo_file = meta.get('nfo_file', None)
-        description_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
+        description_path = self.base_dir / 'tmp'/ f"{meta['uuid']}/DESCRIPTION.txt"
         descfile_content = ""
         custom_desc_written = False
 
@@ -1651,8 +1654,8 @@ class Prep():
                 if descfile and descfile.is_file():
                     with descfile.open('r') as f:
                         descfile_content = f.read()
-                        if not any(line.strip().startswith("# DESC_CONTROL:") for line in descfile_content.splitlines()):
-                            descfile_content = "# DESC_CONTROL: full\n" + descfile_content
+                        if not any(line.strip().startswith("# USE:") for line in descfile_content.splitlines()):
+                            descfile_content = "# USE: full\n" + descfile_content
                         description.write("\n" + descfile_content + "\n")
                         meta['description'] = "CUSTOM"
                         custom_desc_written = True
@@ -1679,7 +1682,7 @@ class Prep():
 
     
     async def tag_override(self, meta):
-        with open(f"{meta['base_dir']}/data/tags.json", 'r', encoding="utf-8") as f:
+        with open(self.base_dir / "data/tags.json", 'r', encoding="utf-8") as f:
             tags = json.load(f)
             f.close()
         
