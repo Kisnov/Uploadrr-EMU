@@ -1,48 +1,18 @@
-from torf import Torrent
 import os
 import traceback
 import requests
 import re
 import json
 import aiofiles
-from pathlib import Path
 from urllib.parse import urlparse
 from src.bbcode import BBCODE
-from src.console import console, log
+from src.console import console
 from dataclasses import dataclass
 
 class COMMON():
     def __init__(self, config):
         self.config = config
         pass
-
-    async def edit_torrent(self, meta, tracker, source_flag, announce_url): #TODO ADD announce_url everywhere
-        torrent_path = Path(meta['base_dir']) / "tmp" / meta['uuid']
-        base_torrent = torrent_path / "BASE.torrent"
-        if base_torrent.exists():
-            new_torrent = Torrent.read(base_torrent)
-            for key in list(new_torrent.metainfo):
-                if key not in ('announce', 'comment', 'creation date', 'created by', 'encoding', 'info'):
-                    new_torrent.metainfo.pop(key, None)
-                
-            new_torrent.metainfo['announce'] = announce_url.strip()
-            new_torrent.metainfo['info']['source'] = source_flag
-
-            tracker_torrent = torrent_path / f"[{tracker}]{meta['clean_name']}.torrent"
-            Torrent.copy(new_torrent).write(tracker_torrent, overwrite=True)
-
-    # Add tracker url, comment + source flag (BHTV, HDT)
-    async def add_tracker_torrent(self, meta, tracker, source_flag, new_tracker, comment):
-        base_path = Path(meta['base_dir']) / "tmp" / meta['uuid'] / "BASE.torrent"
-        if base_path.exists():
-            new_torrent = Torrent.read(base_path)
-            new_torrent.metainfo['announce'] = new_tracker
-            new_torrent.metainfo['comment'] = comment
-            new_torrent.metainfo['info']['source'] = source_flag
-
-            out_path = Path(meta['base_dir']) / "tmp" / meta['uuid'] / f"[{tracker}]{meta['clean_name']}.torrent"
-            Torrent.copy(new_torrent).write(out_path, overwrite=True)
-
 
     async def read_log_file(self, log_file):
         try:
@@ -80,6 +50,10 @@ class COMMON():
 
             bbcode = BBCODE()
 
+            # Write media elements (trailer/logo)
+            if not control.as_is and (control.include_trailer or control.include_logo):
+                await self._write_media_elements(descfile, meta, tracker, control)
+
             # Write disc info if enabled
             if control.include_disc_info and not control.as_is:
                 await self._write_disc_info(descfile, meta.get('discs', []))
@@ -100,10 +74,6 @@ class COMMON():
             if meta.get('is_music', False):
                 await self.create_music_description(meta, tracker)
                 return  # Music has its own flow, skip further processing
-
-            # Write media elements (trailer/logo)
-            if not control.as_is and (control.include_trailer or control.include_logo):
-                await self._write_media_elements(descfile, meta, tracker, control)
 
             # Write images
             if control.include_screens and not control.as_is:
@@ -151,29 +121,109 @@ class COMMON():
     async def _get_valid_images(self, meta, tracker, whitelist=None):
         whitelist = whitelist if whitelist is not None else []
         num_screens = int(meta.get('screens', 0)) or None
-        
-        if not whitelist:
-            return meta.get('image_list', [])[:num_screens]
+        per_episode = self.config["SCREENS"].get('per_episode', 0) if meta.get('per_episode_screens', True) else 0
+        if 'PTP' in meta.get('trackers', []):
+            per_episode = max(per_episode, 3)
 
         normalized_whitelist = {host.split('.')[0] if '.' in host else host for host in whitelist}
-        rehost_list = meta.get('rehost_list', {})
-        for host_key, images in rehost_list.items():
-            if host_key in normalized_whitelist:
-                return images[:num_screens]
 
-        # Fallback to image_list
-        valid_images = []
-        for image in meta.get('image_list', []):
-            domain = urlparse(image['web_url']).hostname or ''
-            domain_key = domain.split('.')[0] if domain else ''
-            if domain in whitelist or domain_key in normalized_whitelist:
-                valid_images.append(image)
-        
-        return valid_images[:num_screens]
+        def normalize_image_dict(d):
+            if isinstance(d, list):
+                return {'main': d, 'episodes': {}}
+            return {
+                'main': d.get('main', []),
+                'episodes': d.get('episodes', {})
+            }
+
+        image_list = normalize_image_dict(meta.get('image_list', {}))
+        rehost_list = normalize_image_dict(meta.get('rehost_list', {}))
+
+        result = {'main': [], 'episodes': {}}
+        if not whitelist:
+            result['main'] = image_list['main'][:num_screens]
+            if per_episode > 0:
+                for ep_name, ep_images in image_list['episodes'].items():
+                    result['episodes'][ep_name] = ep_images[:per_episode]
+
+            if meta.get("tv_pack"):
+                e01_key = next((k for k in result["episodes"].keys() if k.upper() == "E01"), None)
+                if e01_key:
+                    result["main"].extend(result["episodes"].pop(e01_key))
+            return result
+
+        # --- Rehost whitelist logic --- #
+
+        main_rehost = rehost_list['main']
+        if isinstance(main_rehost, dict):
+            for host_key, images in main_rehost.items():
+                if host_key in normalized_whitelist:
+                    result['main'] = images[:num_screens]
+                    break
+        elif isinstance(main_rehost, list):  # flat list fallback
+            for image in main_rehost:
+                domain = urlparse(image['web_url']).hostname or ''
+                domain_key = domain.split('.')[0] if domain else ''
+                if domain in whitelist or domain_key in normalized_whitelist:
+                    result['main'].append(image)
+                    if len(result['main']) >= num_screens:
+                        break
+
+        # Handle per-episode rehost
+        if per_episode > 0:
+            for ep_name, ep_images in rehost_list['episodes'].items():
+                if isinstance(ep_images, dict):
+                    for host_key, images in ep_images.items():
+                        if host_key in normalized_whitelist:
+                            result['episodes'][ep_name] = images[:per_episode]
+                            break
+                elif isinstance(ep_images, list):
+                    valid_ep_images = []
+                    for image in ep_images:
+                        domain = urlparse(image['web_url']).hostname or ''
+                        domain_key = domain.split('.')[0] if domain else ''
+                        if domain in whitelist or domain_key in normalized_whitelist:
+                            valid_ep_images.append(image)
+                            if len(valid_ep_images) >= per_episode:
+                                break
+                    if valid_ep_images:
+                        result['episodes'][ep_name] = valid_ep_images
+
+        # --- Fallback to image_list if rehost_list failed ---
+
+        if not result['main']:
+            for image in image_list['main']:
+                domain = urlparse(image['web_url']).hostname or ''
+                domain_key = domain.split('.')[0] if domain else ''
+                if domain in whitelist or domain_key in normalized_whitelist:
+                    result['main'].append(image)
+                    if len(result['main']) >= num_screens:
+                        break
+
+        if per_episode > 0:
+            for ep_name, ep_images in image_list['episodes'].items():
+                valid_ep_images = []
+                for image in ep_images:
+                    domain = urlparse(image['web_url']).hostname or ''
+                    domain_key = domain.split('.')[0] if domain else ''
+                    if domain in whitelist or domain_key in normalized_whitelist:
+                        valid_ep_images.append(image)
+                        if len(valid_ep_images) >= per_episode:
+                            break
+                if valid_ep_images:
+                    result['episodes'][ep_name] = valid_ep_images
+
+        # # Promote E01 to main if TV pack and per-episode writing is disabled #TODO I reverted to main -- prob need to remove
+        # if meta.get("tv_pack") and not meta.get("per_episode_screens", True):
+        #     e01_key = next((k for k in result["episodes"].keys() if k.upper() == "E01"), None)
+        #     if e01_key:
+        #         result["main"].extend(result["episodes"].pop(e01_key))
+
+        return result
 
     async def _write_images(self, descfile, meta, tracker, whitelist=None, control=None):
         images = await self._get_valid_images(meta, tracker, whitelist)
-        if not images:
+
+        if not images['main'] and not images['episodes']:
             return
 
         img_size = 350 if tracker == "CBR" else self.config["DEFAULT"].get("img_size", 500)
@@ -181,8 +231,9 @@ class COMMON():
             img_size = ""  # No size modification
         inline_imgs = int(self.config["DEFAULT"].get("inline_imgs", 0)) or 0
 
+        # Write main images
         await descfile.write("\n[center]")
-        for i, image in enumerate(images):
+        for i, image in enumerate(images['main']):
             try:
                 img_tag = f"[img={img_size}]" if img_size else "[img]"
                 await descfile.write(f"[url={image['web_url']}]{img_tag}{image['raw_url']}[/img][/url] ")
@@ -191,6 +242,26 @@ class COMMON():
             except (KeyError, TypeError):
                 continue
         await descfile.write("[/center]")
+
+        # Write episode images in spoilers if requested
+        if meta.get("tv_pack") and meta.get('per_episode_screens', True) and images['episodes']:
+            await descfile.write("\n[center][spoiler=Episode Screens]")
+            for ep_name, ep_images in images['episodes'].items():
+                if ep_name.upper() == "E01":
+                    continue  # E01 was already included in main images
+
+                display_name = "OVA" if ep_name == "OVA" else f"Episode {int(ep_name[1:])}"
+                await descfile.write(f"\n[spoiler={display_name}][center]")
+                for i, image in enumerate(ep_images):
+                    try:
+                        img_tag = f"[img={img_size}]" if img_size else "[img]"
+                        await descfile.write(f"[url={image['web_url']}]{img_tag}{image['raw_url']}[/img][/url] ")
+                        if inline_imgs and i % inline_imgs == inline_imgs - 1:
+                            await descfile.write("\n")
+                    except (KeyError, TypeError):
+                        continue
+                await descfile.write("[/center][/spoiler]")
+            await descfile.write("\n[/spoiler][/center]")
 
     async def _write_signature(self, descfile, meta, tracker):
         """Helper method to write signature"""
@@ -400,6 +471,14 @@ class COMMON():
         return cookies
 
 
+    def gazelle_bbcode_bbcode(self, desc):
+        desc = desc.replace("[spoiler", "[hide").replace("[/spoiler]", "[/hide]")
+        desc = desc.replace("[center]", "[align=center]").replace("[/center]", "[/align]")
+        desc = desc.replace("[left]", "[align=left]").replace("[/left]", "[/align]")
+        desc = desc.replace("[right]", "[align=right]").replace("[/right]", "[/align]")
+        desc = desc.replace("[code]", "[quote]").replace("[/code]", "[/quote]")
+        return desc
+
 
     async def ptgen(self, meta, ptgen_site="", ptgen_retry=3):
         ptgen = ""
@@ -412,7 +491,7 @@ class COMMON():
         if int(meta.get('imdb_id', '0')) != 0:
             data['search'] = f"tt{meta['imdb_id']}"
             ptgen = requests.get(url, params=data)
-            if ptgen.json()["error"] != None:
+            if ptgen.json()["error"] is not None:
                 for retry in range(ptgen_retry):
                     try:
                         ptgen = requests.get(url, params=params)
@@ -430,7 +509,7 @@ class COMMON():
             params['url'] = console.input("[red]Please enter [yellow]Douban[/yellow] link: ")
         try:
             ptgen = requests.get(url, params=params)
-            if ptgen.json()["error"] != None:
+            if ptgen.json()["error"] is not None:
                 for retry in range(ptgen_retry):
                     ptgen = requests.get(url, params=params)
                     if ptgen.json()["error"] is None:
