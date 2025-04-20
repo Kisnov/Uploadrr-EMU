@@ -13,6 +13,7 @@ from rich.prompt import Prompt
 from .anilist import AniListHandler
 from src.args import Args
 from src.console import console, log
+from src.progress import ProgressManager
 
 
 class TMDbHandler:
@@ -67,7 +68,7 @@ class TMDbHandler:
         return meta
 
     @cached(ttl=180)
-    async def get_tmdb_id(self, filename: str, search_year: str, meta: Dict, category: str, 
+    async def get_tmdb_id(self, filename: str, search_year: int, meta: Dict, category: str, 
                         untouched_filename: str = "", attempted: int = 0) -> Dict:
         """Search for TMDb ID based on filename and year with stricter year matching."""
         log.debug(f"Searching TMDb: filename={filename}, year={search_year}, category={category}, attempt={attempted}")
@@ -84,7 +85,7 @@ class TMDbHandler:
 
             # Filter results by year range (±4 years)
             if search_year not in (None, ''):
-                year_range = range(search_year - 4, search_year + 5)
+                year_range = range(int(search_year) - 4, int(search_year) + 5)
                 results = [
                     r for r in results 
                     if self._get_year_from_result(r, category) in year_range
@@ -115,19 +116,17 @@ class TMDbHandler:
 
     async def _fallback_tmdb_search(self, filename: str, search_year: int, meta: Dict, category: str, 
                                 untouched_filename: str, attempted: int) -> Dict:
-        """Fallback search logic for TMDb ID"""
+        """Fallback search logic for TMDb ID""" # TODO for adultt strip out common pefixes. SCORE Presents etc
         try:
             await self.rate_limit()
             endpoint = "/search/movie" if category == "MOVIE" else "/search/tv"
-            response = await self.client.get(endpoint, params={
-                "api_key": self.api_key, "query": filename, "include_adult": True
-            })
+            response = await self.client.get(endpoint, params={"api_key": self.api_key, "query": filename, "include_adult": True})
             response.raise_for_status()
             results = response.json().get('results', [])
 
             # Apply year filtering
-            if search_year is not None:
-                year_range = range(search_year - 4, search_year + 5)
+            if search_year not in (None,''):
+                year_range = range( int(search_year) - 4, int(search_year) + 5)
                 results = [
                     r for r in results 
                     if self._get_year_from_result(r, category) in year_range
@@ -151,10 +150,12 @@ class TMDbHandler:
                 if meta.get('unattended'):
                     meta['tmdb_not_found'] = True
                 else:
-                    tmdb_id = Prompt.ask("Please enter TMDb ID (tv/12345 or movie/12345): ")
+                    progress = ProgressManager.get_instance()
+                    with progress.pause_for_interaction():
+                            tmdb_id = Prompt.ask("Please enter TMDb ID (tv/12345 or movie/12345): ")
                     parser = Args(config=self.config)
                     meta['category'], meta['tmdb'] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get('category'))
-                    meta['tmdb_manual'] = meta['tmdb']
+                    meta['tmdb_manual'] = meta['tmdb']                    
         return meta
 
     async def tmdb_other_meta(self, meta: Dict) -> Dict:
