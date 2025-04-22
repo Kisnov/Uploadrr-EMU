@@ -13,7 +13,6 @@ import anitopy
 import requests
 from guessit import guessit
 from pymediainfo import MediaInfo
-from rich.traceback import install
 from tinytag import TinyTag
 
 from src.args import Args
@@ -25,8 +24,6 @@ from src.trackers.BLU import BLU
 from src.trackers.COMMON import COMMON
 from src.trackers.HDB import HDB
 from src.trackers.PTP import PTP
-
-install()
 
 class Prep():
     """
@@ -595,100 +592,102 @@ class Prep():
         primary_video = video_files[0]
         return primary_video, video_files
 
-    async def get_music(self, meta, mode):
-        log.ddebug("Starting get_music")
+    async def get_music(self, meta: Dict, mode: str) -> Dict:
+        log.debug("Starting get_music")
         meta['is_music'] = True
-        # base_dir = meta['base_dir']
-        musicloc = meta['path']
+        musicloc = Path(meta['path'])
         
         console.print(f"[yellow]Checking music directory: {musicloc}")
-        
+
         # Sort tracks, covers, and proof
         tracks, cover, back_cover, proof = self.sort_music(meta, musicloc)
         meta.update(
             track_count=len(tracks),
-            user_cover=cover,
-            back_cover=back_cover,
-            user_proof=proof,
+            user_cover=str(cover) if cover else None,
+            back_cover=str(back_cover) if back_cover else None,
+            user_proof=str(proof) if proof else None,
         )
-        
+
         if not self.has_sufficient_music_metadata(meta):
             await self.process_music(meta, self.base_dir, tracks)
             log.debug("Music processing completed")
-        
-        meta = await self.gen_desc(meta)
-        
+
         return meta
 
     """SORT MUSIC"""
 
-    def sort_music(self, meta, musicloc):
+    def sort_music(self, meta: Dict, musicloc: Path) -> Tuple[List[Tuple[str, str, Path]], Optional[Path], Optional[Path], Optional[Path]]:
+        """Sort music files, detect covers, and identify proof images."""
         cover, back_cover, proof = None, None, None
         tracks = []
+        music_extensions = {'.aac', '.ac3', '.alac', '.eac3', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav'}
 
+        # Convert filelist strings to Path objects
+        filelist = [Path(p) for p in meta['filelist']]
+
+        # Detect disc folders
         has_disc_folders = any(
-            any(folder_name.lower() in key.lower() for folder_name in ['disc', 'cd', 'record'])
-            for key in meta['filelist'].keys()
-        ) and not any(key.startswith("BASE/") for key in meta['filelist'].keys())
-
+            any(folder_name.lower() in p.parent.name.lower() for folder_name in ['disc', 'cd', 'record'])
+            for p in filelist if p.is_file()
+        )
         log.debug(f"[blue]Has disc folders: {has_disc_folders}")
 
-        for key, path in meta['filelist'].items():
-            if isinstance(key, str):
-                log.debug(f"[magenta]Processing file: {key}")
+        for file_path in filelist:
+            if not file_path.is_file() or file_path.name.startswith('._'):
+                continue
 
-                if key.startswith("BASE/"):
-                    file = key.replace("BASE/", "")
-                    track_match = re.match(r'([A-Z]|\d+)(?:[\s.-])?(.*)', file, re.IGNORECASE)
-                    if track_match:
-                        track_num = track_match.group(1)
-                        rest_of_file = track_match.group(2).strip()
-                    else:
-                        log.warning(f"[yellow]Could not extract track number from: {file}")
-                        continue
+            relative_path = file_path.relative_to(musicloc)
+            file_name = file_path.name
+            ext = file_path.suffix.lower()
 
-                    if len(track_num) == 3 and track_num.isdigit():
-                        disc_num = track_num[0]
-                        disc = f"Disc {int(disc_num)}"
-                        track = track_num[1:]
-                        file_parts = file.split('-')
-                        file = '-'.join([track] + file_parts[1:])
-                        log.debug(f"[yellow]Detected multi-disc album: {disc}, File: {file}")
-                    else:
-                        disc = "Disc 1"
-                        log.debug(f"[yellow]Detected single disc album: {disc}, File: {file}")
-
-                else:
-                    disc, file = key.split('/', 1) if '/' in key else ("Disc 1", key)
-
-                ext = os.path.splitext(file)[1].lower()
-
-                if ext in ['.aac', 'ac3', '.alac', '.flac', '.m4a', '.mp3', '.ogg', '.ogm', '.oga', '.ogv', '.ogx', '.opus', '.spx', '.wav']:
-                    if not (file.lower().endswith('sample.mp3') or file.lower().startswith('!sample')):
-                        if len(file.split()[0]) > 2 and file.split()[0].isdigit():
-                            file = re.sub(r'^\d{3}-', '01-', file)
-                            log.debug(f"[purple]Adjusted file for multi-disc: {file}")
-                        tracks.append((f"{disc}", file, path))
-                        log.debug(f"[green]Added music file: {disc}, File: {file}")
-
-            else:
+            # Handle music tracks
+            if ext in music_extensions and not (file_name.lower().endswith('sample.mp3') or file_name.lower().startswith('!sample')):
+                # Determine disc number
                 disc = "Disc 1"
-                file = key
+                if has_disc_folders:
+                    for part in relative_path.parts[:-1]:
+                        if any(folder_name.lower() in part.lower() for folder_name in ['disc', 'cd', 'record']):
+                            disc = part.title()
+                            break
 
-        # Check for alphanumeric track numbers to set source and adjust disc label
-        has_alpha_tracks = any(re.match(r'^[A-Z]\d*$', os.path.splitext(x[1])[0].split()[0], re.IGNORECASE) for x in tracks)
+                # Extract track number
+                track_match = re.match(r'([A-Z]|\d+)(?:[\s.-])?(.*)', file_name, re.IGNORECASE)
+                if not track_match:
+                    log.warning(f"[yellow]Could not extract track number from: {file_name}")
+                    continue
+
+                track_num = track_match.group(1)
+                rest_of_file = track_match.group(2).strip()
+
+                if len(track_num) == 3 and track_num.isdigit():
+                    disc_num = track_num[0]
+                    disc = f"Disc {int(disc_num)}"
+                    track = track_num[1:]
+                    file_name = f"{track}-{rest_of_file}"
+                    log.debug(f"[yellow]Detected multi-disc album: {disc}, File: {file_name}")
+                elif track_num.isdigit() and len(track_num) > 2:
+                    file_name = re.sub(r'^\d{3}-', '01-', file_name)
+                    log.debug(f"[purple]Adjusted file for multi-disc: {file_name}")
+
+                tracks.append((disc, file_name, file_path))
+                log.debug(f"[green]Added music file: {disc}, File: {file_name}")
+
+        # Check for alphanumeric track numbers to set source
+        has_alpha_tracks = any(
+            re.match(r'^[A-Z]\d*$', t[1].split()[0], re.IGNORECASE)
+            for t in tracks
+        )
         if has_alpha_tracks:
             meta['source'] = 'VINYL'
-            tracks = [(disc.replace("Disc 1", "Record"), file, path) for disc, file, path in tracks]
-        
-        #Sort tracks
-        def sort_key(x):
-            disc_num = re.search(r'\d+', x[0].split()[-1])
-            disc_number = int(disc_num.group()) if disc_num else 1  # Default to 1 if no number found
-            
-            track_part = os.path.splitext(x[1])[0].split()[0]
+            tracks = [(t[0].replace("Disc 1", "Record"), t[1], t[2]) for t in tracks]
+
+        # Sort tracks
+        def sort_key(track: Tuple[str, str, Path]) -> Tuple[int, int]:
+            disc_num = re.search(r'\d+', track[0].split()[-1])
+            disc_number = int(disc_num.group()) if disc_num else 1
+
+            track_part = track[1].split()[0]
             match = re.match(r'^([A-Z])?(\d+)(?:[\s\.\-_\,](\d+))?', track_part, re.IGNORECASE)
-            
             if match:
                 letter, number, sub_number = match.groups()
                 primary = (ord(letter.upper()) - ord('A') + 1) * 1000 if letter else 0
@@ -697,70 +696,66 @@ class Prep():
                 return (disc_number, primary + secondary + tertiary)
             elif track_part.isdigit():
                 return (disc_number, int(track_part))
-            else:
-                return (disc_number, 999)
-
-
-        # Handle cover and proof images
-
-        front_cover = ['front', 'cover', 'album', 'disc1', 'cd1']
-        back_covers = ['back_cover', 'rear', 'backside', 'back']
-
-        for path in meta['user_images']:
-            file = os.path.basename(path).lower().replace(' ', '')
-
-            if 'proof' in file:
-                proof = path
-                log.debug(f"[magenta]Assigned proof image: {proof}")
-                continue
-
-            ext = os.path.splitext(file)[1].lower()
-            if ext not in ['.jpg', '.jpeg']:
-                continue
-
-            if any(variant in file for variant in back_covers):
-                back_cover = path
-                log.debug(f"[yellow]Assigned back cover image: {back_cover}")
-                continue
-
-            if cover is None:
-                if any(variant in file for variant in front_cover):
-                    cover = path
-                    log.debug(f"[cyan]Found cover image: {cover}")
-                    continue
-
-            if cover is None and 'proof' not in file:
-                cover = path
-                log.debug(f"[cyan]Fallback cover image: {cover}")
+            return (disc_number, 999)
 
         tracks.sort(key=sort_key)
         log.debug(f"[blue]Sorted tracks: {tracks}")
+
+        # Handle cover and proof images
+        front_cover = ['front', 'cover', 'album', 'disc1', 'cd1']
+        back_covers = ['back_cover', 'rear', 'backside', 'back']
+
+        for img_path in meta['user_images']:
+            img_path = Path(img_path)
+            file_name = img_path.name.lower().replace(' ', '')
+            ext = img_path.suffix.lower()
+
+            if ext not in {'.jpg', '.jpeg'}:
+                continue
+
+            if 'proof' in file_name:
+                proof = img_path
+                log.debug(f"[magenta]Assigned proof image: {proof}")
+                continue
+
+            if any(variant in file_name for variant in back_covers):
+                back_cover = img_path
+                log.debug(f"[yellow]Assigned back cover image: {back_cover}")
+                continue
+
+            if cover is None and any(variant in file_name for variant in front_cover):
+                cover = img_path
+                log.debug(f"[cyan]Found cover image: {cover}")
+                continue
+
+            if cover is None and 'proof' not in file_name:
+                cover = img_path
+                log.debug(f"[cyan]Fallback cover image: {cover}")
+
         return tracks, cover, back_cover, proof
 
+    async def process_single_music_file(self, meta: Dict, mode: str) -> Dict:
+        """Process a single music file."""
+        musicloc = Path(meta['path'])
+        if musicloc.name.startswith('._'):
+            return meta
 
-    #SINGLES NEED TO BE REVAMPED TO NEW STRUCTURE
-    async def process_single_music_file(self, meta, mode):
-        musicloc = meta['path']
-        if not os.path.basename(musicloc).startswith('._'):
-            meta['filelist'] = {musicloc: musicloc}
-            meta['track_count'] = 1
-            
-            parent_dir = os.path.dirname(musicloc)
-            for entry in os.listdir(parent_dir):
-                if not entry.startswith('._'):
-                    full_path = os.path.join(parent_dir, entry)
-                    if os.path.isfile(full_path):
-                        if entry.lower() in ('cover.jpg', 'cover.jpeg', 'front.jpg', 'front.jpeg', 'album.jpg', 'album.jpeg'):
-                            meta['user_cover'] = full_path
-                            break  # Only need one cover
-                        elif entry.lower().endswith(('.jpg', '.jpeg')) and 'proof' in entry.lower():
-                            meta['user_proof'] = full_path
-                            break  # Only need one proof, likely not needed as singles mostly digital
+        meta['track_count'] = 1
+        parent_dir = musicloc.parent
 
-            if not self.has_sufficient_music_metadata(meta) or meta.get('mbid_manual'):
-                await self.process_music(meta, meta['base_dir'])
-            
-            meta = await self.gen_desc(meta)
+        # Look for cover and proof images
+        for entry in parent_dir.iterdir():
+            if entry.is_file() and not entry.name.startswith('._'):
+                if entry.name.lower() in ('cover.jpg', 'cover.jpeg', 'front.jpg', 'front.jpeg', 'album.jpg', 'album.jpeg'):
+                    meta['user_cover'] = str(entry)
+                elif entry.suffix.lower() in ('.jpg', '.jpeg') and 'proof' in entry.name.lower():
+                    meta['user_proof'] = str(entry)
+
+        if not self.has_sufficient_music_metadata(meta) or meta.get('mbid_manual'):
+            tracks = [("Disc 1", musicloc.name, musicloc)]
+            await self.process_music(meta, self.base_dir, tracks)
+
+        meta = await self.gen_desc(meta)
         return meta
 
 
