@@ -2,44 +2,65 @@ import json
 import os
 import re
 from datetime import datetime
+from typing import Dict, Optional
 
 import aiofiles
 from pathlib import Path
 from pymediainfo import MediaInfo
 
+from .args import Args
 from .console import console, log
 
 class MediaInfoHandler:
-    def __init__(self, base_dir: str):
-        self.base_dir = base_dir
+    _instance = None
 
-    async def exportInfo(self, media_path: str, is_dir: bool, folder_id: str, export_text: bool = True, dvd_patch: bool = False) -> dict:
-        """Export MediaInfo data to JSON and TXT"""
+    def __new__(cls, config=None, base_dir=None):
+        if cls._instance is None:
+            if config is None or base_dir is None:
+                raise ValueError("Must initialize with config and base_dir the first time.")
+            cls._instance = super().__new__(cls)
+            cls._instance.__init_singleton(config, base_dir)
+        return cls._instance
+
+    def __init_singleton(self, config: Dict, base_dir: str):
+        self.config = config
+        self.base_dir = base_dir
+        self._cache: Dict[str, dict] = {}
+
+    async def load(self, uuid: str, media_path: str, is_dir: bool, export_text: bool = True, dvd_patch: bool = False) -> dict:
+        """Load or generate MediaInfo data, caching the result."""
+        if uuid in self._cache:
+            return self._cache[uuid]
+
         media_path = os.path.normpath(media_path)
-        tmp_dir = Path(self.base_dir) / 'tmp' / folder_id
+        tmp_dir = Path(self.base_dir) / 'tmp' / uuid
         tmp_dir.mkdir(parents=True, exist_ok=True)
         basename = os.path.basename(media_path)
+        json_path = tmp_dir / "MediaInfo.json"
 
         try:
-            # Text output
-            if export_text and (dvd_patch or not (tmp_dir / "MEDIAINFO.txt").exists()):
+            # Generate MediaInfo if JSON doesn't exist or DVD patch is required
+            if not json_path.exists() or dvd_patch:
                 console.print("[bold yellow]Exporting MediaInfo...")
                 os.chdir(os.path.dirname(media_path))
-                media_info = MediaInfo.parse(media_path, output="STRING", full=False, mediainfo_options={'inform_version': '1'})
-                clean_path = media_info.replace(str(tmp_dir), folder_id) if dvd_patch else media_info.replace(media_path, basename)
-                async with aiofiles.open(tmp_dir / "MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
-                    await export.write(clean_path)
-                console.print("[bold green]MediaInfo text Exported.") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
-
-            # JSON output
-            if not (tmp_dir / "MediaInfo.json").exists() or dvd_patch:
                 media_info = MediaInfo.parse(media_path, output="JSON", mediainfo_options={'inform_version': '1'})
-                async with aiofiles.open(tmp_dir / "MediaInfo.json", 'w', encoding='utf-8') as export:
+                async with aiofiles.open(json_path, 'w', encoding='utf-8') as export:
                     await export.write(media_info)
                 console.print("[bold green]MediaInfo JSON Exported.")
 
-            async with aiofiles.open(tmp_dir / "MediaInfo.json", 'r', encoding='utf-8') as f:
-                return json.loads(await f.read())
+                # Text output
+                if export_text and (dvd_patch or not (tmp_dir / "MEDIAINFO.txt").exists()):
+                    media_info_text = MediaInfo.parse(media_path, output="STRING", full=False, mediainfo_options={'inform_version': '1'})
+                    clean_path = media_info_text.replace(str(tmp_dir), uuid) if dvd_patch else media_info_text.replace(media_path, basename)
+                    async with aiofiles.open(tmp_dir / "MEDIAINFO.txt", 'w', newline="", encoding='utf-8') as export:
+                        await export.write(clean_path)
+                    console.print("[bold green]MediaInfo text Exported.") if not dvd_patch else console.print("[dim]DVD[/dim] [bold green]MediaInfo Patched.")
+
+            # Load and cache the JSON
+            async with aiofiles.open(json_path, 'r', encoding='utf-8') as f:
+                media_info = json.loads(await f.read())
+                self._cache[uuid] = media_info
+                return media_info
 
         except FileNotFoundError:
             console.print(f"[bold red]File not found: {media_path}")
@@ -48,10 +69,21 @@ class MediaInfoHandler:
             console.print(f"[bold red]Error processing MediaInfo for {media_path}: {e}")
             raise
 
-    def get_resolution(self, guess, folder_id: str) -> str:
-        """Extract resolution from MediaInfo JSON."""
-        with open(f'{self.base_dir}/tmp/{folder_id}/MediaInfo.json', 'r', encoding='utf-8') as f:
-            mi = json.load(f)
+    async def exportInfo(self, media_path: str, is_dir: bool, uuid: str, export_text: bool = True, dvd_patch: bool = False) -> dict:
+        """Export MediaInfo data to JSON and TXT"""
+        return await self.load(uuid, media_path, is_dir, export_text, dvd_patch)
+
+    def get_resolution(self, guess, uuid: str) -> str:
+        """Extract resolution from cached MediaInfo JSON."""
+        mi = self._cache.get(uuid)
+        if not mi:
+            json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    mi = json.load(f)
+                    self._cache[uuid] = mi
+            else:
+                return "Unknown"        
             try:
                 width = int(mi['media']['track'][1].get('Width', 0))
                 height = int(mi['media']['track'][1].get('Height', 0))
@@ -109,7 +141,18 @@ class MediaInfoHandler:
         width_mapping = WIDTH_FALLBACK.get(width, "OTHER")
         return width_mapping.get(scan, width_mapping) if isinstance(width_mapping, dict) else width_mapping
 
-    def get_audio(self, mi: dict, meta: dict, bdinfo=None) -> tuple[str, str, bool]:
+    def get_audio(self, uuid: str, meta: dict, bdinfo=None) -> tuple[str, str, bool, bool]:
+        """Extract audio information from cached MediaInfo JSON."""
+        mi = self._cache.get(uuid)
+        if not mi:
+            json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    mi = json.load(f)
+                    self._cache[uuid] = mi
+            else:
+                return "Unknown", "Unknown", False, False
+
         if meta.get('is_music', False):
             if not mi or 'media' not in mi or 'track' not in mi.get('media', {}):
                 return "Unknown", "Unknown", False
@@ -263,9 +306,99 @@ class MediaInfoHandler:
         audio = f"{dual} {codec} {format_settings} {chan}{extra}".strip()
         return audio, chan, has_commentary, is_silent
 
+    def get_hdr(self, uuid: str, bdinfo: Optional[dict] = None) -> str:
+            """Extract HDR and Dolby Vision information from cached MediaInfo JSON."""
+            mi = self._cache.get(uuid)
+            if not mi:
+                json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+                if json_path.exists():
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        mi = json.load(f)
+                        self._cache[uuid] = mi
+                else:
+                    log.error(f"MediaInfo.json not found for uuid: {uuid}")
+                    return ""
 
+            try:
+                hdr = ""
+                dv = ""
 
-    def get_video_encode(self, mi: dict, type_: str, bdinfo=None) -> tuple[str, str, bool, str]:
+                if bdinfo:  # BDMV
+                    hdr_info = bdinfo['video'][0]['hdr_dv']
+                    hdr = "HDR10+" if "HDR10+" in hdr_info else "HDR" if hdr_info == "HDR10" else ""
+                    dv = "DV" if len(bdinfo['video']) > 1 and bdinfo['video'][1].get('hdr_dv') == "Dolby Vision" else ""
+                else:  # File-based media
+                    video_track = mi['media']['track'][1]
+                    try:
+                        if video_track.get('colour_primaries') in ("BT.2020", "REC.2020"):
+                            hdr_format = video_track.get('HDR_Format_Compatibility',
+                                                        video_track.get('HDR_Format_String',
+                                                                    video_track.get('HDR_Format', "")))
+                            if "HDR10+" in hdr_format:
+                                hdr = "HDR10+"
+                            elif "HDR10" in hdr_format:
+                                hdr = "HDR"
+                            elif not hdr_format and "PQ" in (video_track.get('transfer_characteristics'),
+                                                            video_track.get('transfer_characteristics_Original')):
+                                hdr = "PQ10"
+                            elif "HLG" in video_track.get('transfer_characteristics_Original', ''):
+                                hdr = "HLG"
+                            elif "BT.2020 (10-bit)" in video_track.get('transfer_characteristics_Original', ''):
+                                hdr = "WCG"
+                    except Exception:
+                        pass
+
+                    dv = "DV" if "Dolby Vision" in video_track.get('HDR_Format', '') or \
+                                "Dolby Vision" in video_track.get('HDR_Format_String', '') else ""
+
+                return f"{dv} {hdr}".strip()
+            except Exception as e:
+                log.error(f"Error in get_hdr for uuid {uuid}: {str(e)}")
+                return ""
+
+    def get_tmdb_imdb_from_mediainfo(self, uuid: str, category: str, is_disc: bool, tmdbid: str, imdbid: str) -> tuple[str, str, str]:
+            """Extract TMDb and IMDb IDs from cached MediaInfo JSON."""
+            mi = self._cache.get(uuid)
+            if not mi:
+                json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+                if json_path.exists():
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        mi = json.load(f)
+                        self._cache[uuid] = mi
+                else:
+                    log.error(f"MediaInfo.json not found for uuid: {uuid}")
+                    return category, tmdbid, imdbid  # Return unchanged values if no MediaInfo
+
+            try:
+                if not is_disc and mi['media']['track'][0].get('extra'):
+                    extra = mi['media']['track'][0]['extra']
+                    for key in extra:
+                        if key.lower().startswith('tmdb'):
+                            parser = Args(config=self.config)
+                            category, tmdbid = parser.parse_tmdb_id(id=extra[key], category=category)
+                        if key.lower().startswith('imdb'):
+                            try:
+                                imdbid = str(int(extra[key].replace('tt', ''))).zfill(7)
+                                imdbid = f"tt{imdbid}"  # Ensure IMDb ID is in 'tt' format
+                            except (ValueError, TypeError):
+                                log.debug(f"Invalid IMDb ID in mediainfo: {extra[key]}")
+                return category, tmdbid, imdbid
+            except Exception as e:
+                log.error(f"Error in get_tmdb_imdb_from_mediainfo for uuid {uuid}: {str(e)}")
+                return category, tmdbid, imdbid
+
+    def get_video_encode(self, uuid: str, type_: str, bdinfo=None) -> tuple[str, str, bool, str]:
+        """Extract video encode information from cached MediaInfo JSON."""
+        mi = self._cache.get(uuid)
+        if not mi:
+            json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    mi = json.load(f)
+                    self._cache[uuid] = mi
+            else:
+                return "Unknown", "Unknown", False, "0"
+
         video_encode = ""
         codec = ""
         bit_depth = "0"
@@ -314,36 +447,51 @@ class MediaInfoHandler:
 
         return video_encode, video_codec, has_encode_settings, bit_depth
 
-    async def get_search_year(self, mi: dict, meta: dict) -> str:
-        year_pattern = r'\b\d{4}\b'
-        general_track = next((track for track in mi.get('media', {}).get('track', []) if track.get('@type') == 'General'), {})
+    async def get_search_year(self, uuid: str, meta: dict) -> str:
+            """Extract search year from cached MediaInfo JSON."""
+            mi = self._cache.get(uuid)
+            if not mi:
+                json_path = Path(self.base_dir) / 'tmp' / uuid / "MediaInfo.json"
+                if json_path.exists():
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        mi = json.load(f)
+                        self._cache[uuid] = mi
+                else:
+                    log.error(f"MediaInfo.json not found for uuid: {uuid}")
+                    return ""
 
-        for field in ['Movie', 'Title']:
-            value = general_track.get(field, '')
-            if value:
-                matches = re.findall(year_pattern, value.strip())
-                if matches:
-                    return matches[-1]
+            if not mi or not mi.get('media', {}).get('track'):
+                return ""
 
-        possible_fields = ['DATE', 'Released_Date', 'First_Air_Date']
-        combined_fields = list(general_track.items()) + list(general_track.get('extra', {}).items())
+            year_pattern = r'\b\d{4}\b'
+            general_track = next((track for track in mi.get('media', {}).get('track', []) if track.get('@type') == 'General'), {})
 
-        for key, value in combined_fields:
-            normalized_key = re.sub(r'[_\s]', '', key).lower()
-            for target in possible_fields:
-                if normalized_key == re.sub(r'[_\s]', '', target).lower():
-                    date_value = value.strip()
-                    if not date_value:
-                        continue
-                    try:
-                        cleaned_date = re.sub(r'^UTC\s*', '', date_value)
-                        parsed_date = datetime.strptime(cleaned_date, '%Y-%m-%d')
-                        return parsed_date.year
-                    except ValueError:
-                        if re.match(r'^\d{4}$', date_value):
-                            return date_value
-                        matches = re.findall(year_pattern, date_value)
-                        if matches:
-                            return matches[-1]
+            for field in ['Movie', 'Title']:
+                value = general_track.get(field, '')
+                if value:
+                    matches = re.findall(year_pattern, value.strip())
+                    if matches:
+                        return matches[-1]
 
-        return ''
+            possible_fields = ['DATE', 'Released_Date', 'First_Air_Date']
+            combined_fields = list(general_track.items()) + list(general_track.get('extra', {}).items())
+
+            for key, value in combined_fields:
+                normalized_key = re.sub(r'[_\s]', '', key).lower()
+                for target in possible_fields:
+                    if normalized_key == re.sub(r'[_\s]', '', target).lower():
+                        date_value = value.strip()
+                        if not date_value:
+                            continue
+                        try:
+                            cleaned_date = re.sub(r'^UTC\s*', '', date_value)
+                            parsed_date = datetime.strptime(cleaned_date, '%Y-%m-%d')
+                            return str(parsed_date.year)
+                        except ValueError:
+                            if re.match(r'^\d{4}$', date_value):
+                                return date_value
+                            matches = re.findall(year_pattern, date_value)
+                            if matches:
+                                return matches[-1]
+
+            return ''
