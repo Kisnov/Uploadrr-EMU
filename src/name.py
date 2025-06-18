@@ -65,6 +65,9 @@ class NameGenerator:
     def preprocess_meta(meta: Dict) -> Dict:
         """Preprocess metadata to handle edge cases."""
         processed = meta.copy()
+        if processed.get("use_original_tite", False):
+            processed["title"] = processed["original_title"]
+            processed["aka"] = ""
         if processed.get("no_season", False):
             processed["season"] = ""
         if processed.get("no_year", False):
@@ -73,8 +76,14 @@ class NameGenerator:
             processed["aka"] = ""
         if processed.get("resolution") == "OTHER":
             processed["resolution"] = ""
-        if processed["category"] == "TV" and processed.get("search_year", "") != "":
-            processed["year"] = processed["year"]
+        if processed["category"] == "TV":
+            year = processed.get("year", "")
+            if year.isdigit():
+                processed["year"] = year
+            elif processed.get("search_year", "").isdigit():
+                processed["year"] = processed["search_year"]
+            elif processed.get("imdb_info", {}).get("year", "").isdigit():
+                processed["year"] = processed["imdb_info"]["year"]
         return processed
 
     @staticmethod

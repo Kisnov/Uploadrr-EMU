@@ -78,7 +78,7 @@ class DiscParse:
                             bdinfo_text.unlink()
                             log.debug(f"Removed temporary file: {bdinfo_text}")
                             
-                except Exception as e:
+                except Exception:
                     console.print(f"Error processing BDInfo: {traceback.format_exc()}")
                     await asyncio.sleep(5)
                     continue
@@ -102,7 +102,6 @@ class DiscParse:
         """Extract relevant sections from BDInfo text asynchronously with fallback."""
         text = await asyncio.to_thread(bdinfo_text.read_text, encoding='utf-8')
         
-        # Handle case where file might be just the summary or malformed
         files_section = ""
         quick_summary = ""
         ext_bd_summary = ""
@@ -266,7 +265,7 @@ class DiscParse:
         for each in discs:
             path = each.get('path')
             os.chdir(path)
-            files = glob(f"VTS_*.VOB")
+            files = glob("VTS_*.VOB")
             files.sort()
             # Switch to ordered dictionary
             filesdict = OrderedDict()

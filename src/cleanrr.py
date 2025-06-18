@@ -7,8 +7,7 @@
 import asyncio
 import signal
 import psutil
-from concurrent.futures import ThreadPoolExecutor
-from src.console import console, log
+from src.console import log
 
 running_subprocesses = set()
 

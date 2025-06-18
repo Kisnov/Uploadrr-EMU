@@ -17,7 +17,7 @@ class MediaInfoHandler:
     def __new__(cls, config=None, base_dir=None):
         if cls._instance is None:
             if config is None or base_dir is None:
-                raise ValueError("Must initialize with config and base_dir the first time.")
+                raise ValueError("config and base_dir not initialized")
             cls._instance = super().__new__(cls)
             cls._instance.__init_singleton(config, base_dir)
         return cls._instance
@@ -84,21 +84,21 @@ class MediaInfoHandler:
                     self._cache[uuid] = mi
             else:
                 return "Unknown"        
-            try:
-                width = int(mi['media']['track'][1].get('Width', 0))
-                height = int(mi['media']['track'][1].get('Height', 0))
-                scan = mi['media']['track'][1].get('ScanType', 'Progressive')
-                scan = "p" if scan == "Progressive" else "i"
-            except (KeyError, IndexError, ValueError):
-                width, height = 0, 0
-                scan = "p"
+        try:
+            width = int(mi['media']['track'][1].get('Width', 0))
+            height = int(mi['media']['track'][1].get('Height', 0))
+            scan = mi['media']['track'][1].get('ScanType', 'Progressive')
+            scan = "p" if scan == "Progressive" else "i"
+        except (KeyError, IndexError, ValueError):
+            width, height = 0, 0
+            scan = "p"
 
-            width_list = [3840, 2560, 1920, 1280, 1024, 854, 720, 15360, 7680, 0]
-            height_list = [2160, 1440, 1080, 720, 576, 540, 480, 8640, 4320, 0]
-            closest_width = self._closest(width_list, width)
-            closest_height = self._closest(height_list, height)
-            res = f"{closest_width}x{closest_height}{scan}"
-            return self._map_resolution(res, guess, closest_width, scan, closest_height, height)
+        width_list = [3840, 2560, 1920, 1280, 1024, 854, 720, 15360, 7680, 0]
+        height_list = [2160, 1440, 1080, 720, 576, 540, 480, 8640, 4320, 0]
+        closest_width = self._closest(width_list, width)
+        closest_height = self._closest(height_list, height)
+        res = f"{closest_width}x{closest_height}{scan}"
+        return self._map_resolution(res, guess, closest_width, scan, closest_height, height)
 
     @staticmethod
     def _closest(lst: list, value: int) -> int:

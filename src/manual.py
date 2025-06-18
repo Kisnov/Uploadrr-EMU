@@ -21,7 +21,7 @@ class ManualPackager:
         self.uploader = ScreenshotUploader(config, img_host, base_dir)
 
     async def package(self, meta: Dict) -> str | bool:
-        """Packages metadata and files for manual upload asynchronously."""
+        """Packages metadata and files for manual upload"""
         tag = f" / {meta['tag'][1:]}" if meta['tag'] else ""
         res = meta['source'] if meta['is_disc'] == "DVD" else meta['resolution']
 

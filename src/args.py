@@ -1,16 +1,16 @@
 from argparse import ArgumentParser, ArgumentTypeError
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import argparse
 import urllib.parse
-import os
 import datetime
 import re
 
 from src.console import console
 
 
-class ChoiceValidator:
-    """Argument validator for specific choices. (case-insensitive)"""
+class Choices:
+    """Case-Insensitive Choice Validator"""
     def __init__(self, valid_choices: List[str]):
         self.valid_choices = {choice.lower(): choice for choice in valid_choices}
         self.original_choices = valid_choices  # For error message 
@@ -43,37 +43,18 @@ class Args:
 
         # Core arguments
         parser.add_argument('path', nargs='*', help="Path to file/directory")
-        parser.add_argument('-fd', '--full-directory', dest='full_dir', action='store_true',
-                            help="Uploads folder and all content within"),
-        parser.add_argument('-s', '--screens', type=int, required=False, help="Number of screenshots", 
-                            default=int(self.config.get('SCREENS', {}).get('screen_count', 3)))
-
-        # Validators for choices
-        validators = {
-            'category': ChoiceValidator(['movie', 'tv', 'fanres', 'sports', 'music']),
-            'type': ChoiceValidator(['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv']),
-            'manual_source': ChoiceValidator(['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV']),
-            'resolution': ChoiceValidator(['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other']),
-            'torrent_creation': ChoiceValidator(['torf', 'torrenttools', 'mktorrent'])
-        }
+        parser.add_argument('-fd', '--full-directory', dest='full_dir', default=False, action='store_true', help="Uploads folder and all content within"),
+        parser.add_argument('-s', '--screens', type=int, required=False, help="Number of screenshots", default=int(self.config.get('SCREENS', {}).get('screen_count', 3)))
+        parser.add_argument('-ih', '--imghost', type=str, default=self.config['SCREENS'].get('img_host_1', 'imgbox'), help="Image host")
 
         # Define Choices
         arg_choices = {
-            'category': {'flags': ('-c', '--category'), 'type': validators['category'],
-                         'help': "Category [MOVIE, TV, FANRES, SPORTS, MUSIC]"},
-            'type': {'flags': ('-t', '--type'), 'type': validators['type'],
-                     'help': "Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]"},
-            'manual_source': {'flags': ('--source',), 'type': validators['manual_source'],
-                              'help': "Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]"},
-            'resolution': {'flags': ('-res', '--resolution'), 'type': validators['resolution'],
-                           'help': "Resolution [2160p, 1080p, etc.]"},
-            'imghost': {'flags': ('-ih', '--imghost'), 'type': str,
-                        'help': "Image host", 'default': self.config['SCREENS'].get('img_host_1', 'imgbox')},
-            'piece_size_max': {'flags': ('-ps', '--piece-size-max'), 'type': int,
-                               'choices': [1, 2, 4, 8, 16], 'help': "Maximum piece size in MiB"},
-            'torrent_creation': {'flags': ('-tc', '--torrent-creation'), 'type': validators['torrent_creation'],
-                                 'help': "Tool to create base .torrent",
-                                 'default': self.config['DEFAULT'].get('torrent_creation', 'torf')}
+            'category': {'flags': ('-c', '--category'), 'type': Choices(['movie', 'tv', 'fanres', 'sports', 'music']), 'help': "Category [MOVIE, TV, FANRES, SPORTS, MUSIC]"},
+            'type': {'flags': ('-t', '--type'), 'type': Choices(['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv']), 'help': "Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]"},
+            'manual_source': {'flags': ('--source',), 'type': Choices(['Blu-ray', 'BluRay', 'DVD', 'HDDVD', 'WEB', 'HDTV', 'UHDTV']), 'help': "Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]"},
+            'resolution': {'flags': ('-res', '--resolution'), 'type': Choices(['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other']),'help': "Resolution [2160p, 1080p, etc.]"},
+            'piece_size_max': {'flags': ('-ps', '--piece-size-max'), 'type': int, 'choices': [1, 2, 4, 8, 16], 'help': "Maximum piece size in MiB"},
+            'torrent_creation': {'flags': ('-tc', '--torrent-creation'), 'type': Choices(['torf', 'torrenttools', 'mktorrent']), 'help': "Tool to create base .torrent", 'default': self.config['DEFAULT'].get('torrent_creation', 'torf')}
         }
 
         for name, spec in arg_choices.items():
@@ -83,22 +64,17 @@ class Args:
         parser.add_argument('-tmdb', '--tmdb', nargs='*', type=str, dest='tmdb_manual', help="TMDb ID")
         parser.add_argument('-imdb', '--imdb', nargs='*', type=str, help="IMDb ID")
         parser.add_argument('-mal', '--mal', nargs='*', type=str, help="MAL ID")
-        parser.add_argument('-mbid', '--mbid', nargs='?', type=self.validate_mbid, dest='mbid_manual',
-                            help="MusicBrainz Release ID")
-        parser.add_argument('-discogs', '--discogs', nargs='*', type=str, dest='discogs_id',
-                            help="Discogs Release ID")
+        parser.add_argument('-mbid', '--mbid', nargs='?', type=self.validate_mbid, dest='mbid_manual',help="MusicBrainz Release ID")
+        parser.add_argument('-discogs', '--discogs', nargs='*', type=str, dest='discogs_id', help="Discogs Release ID")
 
         # Metadata arguments
-        parser.add_argument('-g', '--tag', nargs='*', type=str, help="Group tag")
+        parser.add_argument('-g', '--tag', type=str, help="Group tag")
         parser.add_argument('-serv', '--service', nargs='*', type=str, help="Streaming service")
-        parser.add_argument('-dist', '--distributor', nargs='*', type=str,
-                            help="Disc distributor (e.g., Criterion, BFI)")
-        parser.add_argument('-edition', '--edition', '--repack', nargs='*', type=str, dest='manual_edition',
-                            default="", help="Edition/Repack string (e.g., Director's Cut, REPACK)")
+        parser.add_argument('-dist', '--distributor', nargs='*', type=str, help="Disc distributor (e.g., Criterion, BFI)")
+        parser.add_argument('-edition', '--edition', '--repack', nargs='*', type=str, dest='manual_edition', default="", help="Edition/Repack string (e.g., Director's Cut, REPACK)")
         parser.add_argument('-season', '--season', nargs='*', type=str, help="Season (number)")
         parser.add_argument('-episode', '--episode', nargs='*', type=str, help="Episode (number)")
-        parser.add_argument('-daily', '--daily', nargs=1, type=datetime.date.fromisoformat, dest='manual_date',
-                            help="Air date of episode (YYYY-MM-DD)")
+        parser.add_argument('-daily', '--daily', nargs=1, type=datetime.date.fromisoformat, dest='manual_date', help="Air date of episode (YYYY-MM-DD)")
         parser.add_argument('-year', '--year', dest='manual_year', nargs='?', type=int, default=0, help="Year")
 
         # Boolean flags
@@ -128,6 +104,7 @@ class Args:
             ('-st --stream', 'stream', "Stream Optimized Upload"),
             ('-vs --vapoursynth', 'vapoursynth', "Use VapourSynth for screens"),
             ('-webdv --webdv', 'webdv', "Contains a Dolby Vision layer"),
+            ('-x --xxx', 'xxx', "itssaaa pr0n")
 
         ]
         for flags, dest, help_text in boolean_args:
@@ -140,13 +117,11 @@ class Args:
         parser.add_argument('-d', '--desc', nargs='*', help=r'\"[b]Custom Description[/b]\"')
         parser.add_argument('-pb', '--desclink', nargs='*', help=r'\"https://pastebin.com/URL\"')
         parser.add_argument('-df', '--descfile', nargs='*', help=r'\"\path\to\description.txt\"')
-        parser.add_argument('-aid', '--auto-insert-desc', dest='auto_desc', action='store_true',
-                            default=self.config['AUTO'].get('always_aid', False), help="Use existing .txt file for description")
+        parser.add_argument('-aid', '--auto-insert-desc', dest='auto_desc', action='store_true', default=self.config['AUTO'].get('always_aid', False), help="Use existing .txt file for description")
         parser.add_argument('-th', '--torrenthash', nargs='*', help="Torrent hash to reuse")
         parser.add_argument('-k', '--keywords', nargs='*', help="Comma-separated keywords")
         parser.add_argument('-reg', '--region', nargs='*', help="Region for discs")
-        parser.add_argument('-mt', '--manual-title', dest='manual_name', nargs='*', type=str,
-                            help='Manually override name, e.g., "Full Name"')
+        parser.add_argument('-mt', '--manual-title', dest='manual_name', nargs='*', type=str, help='Manually override name, e.g., "Full Name"')
         parser.add_argument('-client', '--client', nargs='*', help="Override default torrent client")
         parser.add_argument('-qbt', '--qbit-tag', dest='qbit_tag', nargs='*', help="qBittorrent tag")
         parser.add_argument('-qbc', '--qbit-cat', dest='qbit_cat', nargs='*', help="qBittorrent category")
@@ -157,10 +132,8 @@ class Args:
         parser.add_argument('-sq', '--show-queue', dest='show_queue', action='store_true', help="Show queued files")
         parser.add_argument('-delay', '--delay', dest='delay', type=int, help="Delay between queued torrents (seconds)")
         parser.add_argument('-ua', '--unattended', action='store_true', required=False, help= "Unattended Mode")
-        parser.add_argument('-fa', '--full-auto', dest='full_auto', nargs='?', const=True, default=False, type=str,
-                            help="Compiles Queue, Grabs Desc if Avail, Unnatended")
-        parser.add_argument('-q', '--quiet', action='store_true', default=self.config['AUTO'].get('keep_quiet', False),
-                            help="Quiet mode, live processing + summary only")                
+        parser.add_argument('-fa', '--full-auto', dest='full_auto', nargs='?', const=True, default=False, type=str, help="Compiles Queue, Grabs Desc if Avail, Unnatended")
+        parser.add_argument('-q', '--quiet', action='store_true', default=self.config['AUTO'].get('keep_quiet', False), help="Quiet mode, live processing + summary only")                
         parser.add_argument('-fl', '--freeleech', nargs='*', default=0, dest="freeleech", help="Freeleech percentage")
 
         return parser
@@ -176,10 +149,10 @@ class Args:
             args['auto_queue'] = args['full_auto']
 
         if not args['path']:
-            valid_paths = [p for p in before_args if os.path.exists(p)]
+            valid_paths = [p for p in before_args if Path(p).exists()]
             args['path'] = valid_paths if valid_paths else args['path']
         else:
-            args['path'] = [p for p in args['path'] if os.path.exists(p)]
+            args['path'] = [p for p in args['path'] if Path(p).exists()]
 
         if not args['path'] and not args.get('auto_queue'):
             console.print("[red]No valid paths provided.[/red]")
@@ -198,12 +171,12 @@ class Args:
             'imghost': lambda v: v.lower() if v else None,
             'piece_size_max': lambda v: v,
             'torrent_creation': lambda v: v.lower() if v else None,
-            'tag': lambda v: f"-{v}",
+            'tag': lambda v: f"-{v}" if isinstance(v, str) else "",
             'screens': int,
             'season': lambda v: ('manual_season', v),
             'episode': lambda v: ('manual_episode', v),
             'manual_date': lambda v: v,
-            'tmdb_manual': lambda v: self.parse_tmdb_id(v, meta.get('category')),
+            'tmdb_manual': lambda v: self.parse_tmdb_id(v[0], meta.get('category')) if isinstance(v, list) and v else ('', ''),
             'ptp': lambda v: self._parse_tracker_id(v, 'ptp', 'torrentid'),
             'blu': lambda v: self._parse_blu_id(v),
             'hdb': lambda v: self._parse_tracker_id(v, 'hdb', 'id'),
@@ -227,8 +200,6 @@ class Args:
                     meta[key] = self.list_to_string(value) if isinstance(value, list) else value
             elif key in ('manual_edition', 'freeleech'):
                 meta[key] = value if key != 'freeleech' else 100
-            elif key == 'tag' and value == []:
-                meta[key] = ""  # Empty tag list becomes empty string
             else:
                 meta[key] = meta.get(key, None)
 
@@ -248,13 +219,15 @@ class Args:
 
     def parse_tmdb_id(self, id: str, category: Optional[str]) -> Tuple[str, str]:
         try:
-            id = id.lower().lstrip()
-            if id.startswith('tv'):
-                return 'TV', id.split('/')[1]
-            elif id.startswith('movie'):
-                return 'MOVIE', id.split('/')[1]
+            id = id.strip().lower()
+            if '/' in id:
+                type_part, id_part = id.split('/', 1)
+                if type_part == 'tv':
+                    return 'TV', id_part
+                elif type_part == 'movie':
+                    return 'MOVIE', id_part
             return category or '', id
-        except IndexError:
+        except Exception:
             console.print(f"[red]Invalid TMDb ID format: {id}")
             return category or '', id
 

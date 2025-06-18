@@ -1,7 +1,10 @@
-from rich.console import Console
-from rich.theme import Theme
 import logging
+from rich.console import Console
 from rich.logging import RichHandler
+from rich.theme import Theme
+from rich.traceback import install
+
+install()
 
 log_colors = Theme({
     'logging.level.ddebug': 'bold magenta',
@@ -31,7 +34,7 @@ logging.addLevelName(logging.DDEBUG, 'DDEBUG')
 # Custom debug methods
 def uploadrr_debug(self, message, *args, **kws):
     if self.isEnabledFor(logging.UPLOADRR_DEBUG):
-        self._log(logging.UPLOADRR_DEBUG, message, args, **kws, stacklevel=2)
+        self._log(logging.UPLOADRR_DEBUG, message, args, **kws, stacklevel=3)
 
 def ddebug(self, message, *args, **kws):
     if self.isEnabledFor(logging.DDEBUG):

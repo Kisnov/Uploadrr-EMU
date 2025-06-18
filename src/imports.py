@@ -9,6 +9,7 @@ MODULE_TO_PIP = {
     "imdb": "IMDbPY",
     "jinja2": "Jinja2",
     "oxipng": "pyoxipng",
+    "PIL": "pillow",
     "qbittorrentapi": "qbittorrent-api",
     "yaml": "PyYAML",
 }
@@ -30,6 +31,7 @@ REQUIRED_MODULES = [
     "oxipng",
     "packaging",
     "pathlib",
+    "psutil",
     "pymediainfo",
     "pyimgbox",
     "pyotp",
