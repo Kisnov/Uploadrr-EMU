@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from src.console import log  # noqa: F401
+
+from src.utils.console import log  # noqa: F401
+
 
 class BaseImageHost(ABC):
     def __init__(self, config):

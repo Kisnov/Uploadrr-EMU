@@ -8,7 +8,7 @@ class FASTPIC(BaseImageHost):
         self.api_url = "https://fastpic.org/upload?api=1" 
         self.thumb_width = self.config['SCREENS'].get('size', '350')
 
-    async def upload(self, client, image_path):
+    async def upload(self, client, image_path, title=None):
         async with aiofiles.open(image_path, 'rb') as f:
             data = await f.read()
 
