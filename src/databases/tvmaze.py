@@ -1,8 +1,8 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import httpx
 
-from src.console import log
+from src.utils.console import log
 
 
 async def search_tvmaze(filename: str, year: Optional[str], imdbID: Optional[str], tvdbID: Optional[str]) -> Tuple[int, str, int]:
@@ -19,9 +19,9 @@ async def search_tvmaze(filename: str, year: Optional[str], imdbID: Optional[str
     """
     tvdbID = int(tvdbID or 0)
     tvmazeID = 0
-    imdbID = imdbID or '0'
+    imdbID = imdbID or "0"
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
         url, params = _build_tvmaze_request(filename, imdbID, tvdbID)
         try:
             response = await client.get(url, params=params)
@@ -32,11 +32,11 @@ async def search_tvmaze(filename: str, year: Optional[str], imdbID: Optional[str
                 # Pass the final URL (after redirect) to determine parsing logic
                 show = _parse_tvmaze_response(data, year, str(response.url))
                 if show:
-                    tvmazeID = show.get('id', 0)
+                    tvmazeID = show.get("id", 0)
                     if int(imdbID) == 0:
-                        imdbID = str(show.get('externals', {}).get('imdb', imdbID)).replace('tt', '')
+                        imdbID = str(show.get("externals", {}).get("imdb", imdbID)).replace("tt", "")
                     if tvdbID == 0:
-                        tvdbID = show.get('externals', {}).get('tvdb', tvdbID) or 0
+                        tvdbID = show.get("externals", {}).get("tvdb", tvdbID) or 0
             else:
                 log.debug(f"No results found for TVmaze query: {url} with params {params}")
         except httpx.HTTPStatusError as e:
@@ -44,7 +44,7 @@ async def search_tvmaze(filename: str, year: Optional[str], imdbID: Optional[str
             log.debug(f"Response headers: {e.response.headers}")
         except httpx.RequestError as e:
             log.error(f"TVmaze request failed: {str(e)}")
-    
+
     return tvmazeID, imdbID, tvdbID
 
 
@@ -60,14 +60,14 @@ def _parse_tvmaze_response(resp: dict, year: Optional[str], final_url: str) -> O
     # Handle direct show responses (from /lookup/shows or /shows/{id})
     if final_url.endswith("lookup/shows") or final_url.startswith("https://api.tvmaze.com/shows/"):
         return resp if resp else None
-    
+
     # Handle search results (list of shows)
     if not isinstance(resp, list):
         return None
-    
+
     if year:
         for each in resp:
-            premier_date = each.get('show', {}).get('premiered', '')
+            premier_date = each.get("show", {}).get("premiered", "")
             if premier_date and premier_date.startswith(str(year)):
-                return each.get('show')
-    return resp[0].get('show') if resp else None
+                return each.get("show")
+    return resp[0].get("show") if resp else None
