@@ -23,3 +23,12 @@ class UploadException(Exception):
         else: # else, the exception was raised without arguments ...
                  # ... pass the default message to the super constructor
                  super().__init__(default_message, **kwargs)
+
+class BDInfoExtractionError(Exception):
+    """Raised when BDInfo fails to extract information from a disc."""
+    def __init__(self, *args, **kwargs):
+        default_message = "Failed to extract BDInfo. Possibly due to corrupted or incomplete BDMV structure."
+        if args:
+            super().__init__(*args, **kwargs)
+        else:
+            super().__init__(default_message, **kwargs)

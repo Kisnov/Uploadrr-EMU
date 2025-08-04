@@ -6,10 +6,13 @@
 
 import asyncio
 import signal
+
 import psutil
-from src.console import log
+
+from src.utils.console import log
 
 running_subprocesses = set()
+
 
 async def cleanrr(thread_executor=None):
     """
@@ -72,14 +75,16 @@ async def cleanrr(thread_executor=None):
 
     log.debug("[green]Cleanup process completed.")
 
+
 class CleanupHandler:
     """
     A class to handle cleanup and SIGINT signals for a specific context.
-    
+
     Attributes:
         thread_executor (ThreadPoolExecutor, optional): Executor to manage.
         name (str): Identifier for logging purposes.
     """
+
     def __init__(self, thread_executor=None, name=""):
         self.thread_executor = thread_executor
         self._interrupted = False

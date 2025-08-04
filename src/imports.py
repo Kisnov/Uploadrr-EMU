@@ -1,5 +1,6 @@
 import importlib
-from src.console import console, log
+
+from src.utils.console import console, log
 
 MODULE_TO_PIP = {
     "bencode": "bencode.py",
@@ -46,6 +47,7 @@ REQUIRED_MODULES = [
     "yaml",
 ]
 
+
 def check_imports():
     missing_modules = []
     for module in REQUIRED_MODULES:
@@ -60,5 +62,6 @@ def check_imports():
         log.error("\nPlease install them with:")
         console.print(f"\n   [magenta] pip install {' '.join(missing_modules)}\n")
         exit(1)
-        
+
+
 check_imports()

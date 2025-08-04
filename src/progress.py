@@ -5,6 +5,7 @@ from rich.console import Group
 from rich.live import Live
 from rich.spinner import Spinner
 
+
 class ProgressManager:
     _instance: Optional["ProgressManager"] = None
 
@@ -14,7 +15,7 @@ class ProgressManager:
         return cls._instance
 
     def __init__(self, console, quiet: bool = False, unattended: bool = False):
-        if not hasattr(self, '_initialized'):  # Prevent re-initialization
+        if not hasattr(self, "_initialized"):  # Prevent re-initialization
             self.console = console
             self.quiet = quiet
             self.unattended = unattended
@@ -45,6 +46,21 @@ class ProgressManager:
         self.progress_widget.text = message
         if self.live:
             self.live.update(self.progress_group)
+
+    def screen_start(self, total_screenshots: int) -> None:
+        """Initialize upload progress with the total number of screenshots."""
+        self.total_screenshots = total_screenshots
+        self.uploaded_screenshots = 0
+        self.update(f"Uploading screenshots: 0/{total_screenshots}")
+
+    def screen_up(self, count: int = 1) -> None:
+        """Increment the count of uploaded screenshots and update the display."""
+        self.uploaded_screenshots += count
+        self.update(f"Uploading screenshots: {self.uploaded_screenshots}/{self.total_screenshots}")
+
+    def screen_done(self) -> None:
+        """Finalize the upload progress display."""
+        self.update("All screenshots uploaded")
 
     @contextmanager
     def pause_for_interaction(self):
