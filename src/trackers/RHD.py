@@ -1,359 +1,93 @@
-# -*- coding: utf-8 -*-
-import asyncio
-import requests
-import json
-import re
-import platform
-import time
-from typing import Dict
-from rich.pretty import Pretty
-from src.trackers.COMMON import COMMON
-from src.console import console, log
+from typing import Any, Dict
+
+from src.trackers.UNIT3D import Unit3d
 
 
-class RHD():
-    def __init__(self, config):
-        self.config = config
-        self.type = 'unit3d'
-        self.tracker = 'RHD'
-        self.source_flag = 'RocketHD'
-        self.domain = 'https://rocket-hd.cc'
-        self.search_url = f'{self.domain}/api/torrents/filter'
-        self.upload_url = f'{self.domain}/api/torrents/upload'
-        pid = config['TRACKERS'][self.tracker].get('PID', 'PASSKEY_HERE')
-        self.announce_url = f"{self.domain}/announce/{pid}"
-        self.banned_groups = ["1XBET", "MEGA", "MTZ", "Whistler", "WOTT", "Taylor.D", "HELD", "FSX", "FuN", "RobertDeNiro", "Oergel", "Jakopo", "MagicX"]
+class RHD(Unit3d):
+    tracker = "RHD"
+    source_flag = "RocketHD"
+    domain = "https://rocket-hd.cc"
+    allowed_imghosts = []
+    banned_groups = [  # Updated 25-08-29 == https://rocket-hd.cc/pages/1
+        "1XBET",
+        "MEGA",
+        "MTZ",
+        "Whistler",
+        "WOTT",
+        "Taylor.D",
+        "HELD",
+        "FSX",
+        "FuN",
+        "MagicX",
+        "w00t",
+        "PaTroL",
+        "BB",
+        "266 ers",
+        "GTF",
+        "JellyfinPlex",
+        "2BA",
+    ]
 
-        pass
-    
-    async def get_cat_id(self, category_name):
-        category_id = {
-            'MOVIE': '1', 
-            'TV': '2', 
-            }.get(category_name, '0')
-        return category_id
-
-    async def get_type_id(self, type):
-        type_id = {
-            'DISC': '1', 
-            'REMUX': '2',
-            'WEBDL': '4', 
-            'WEBRIP': '5', 
-            'HDTV': '6',
-            'ENCODE': '3'
-            }.get(type, '0')
-        return type_id
-
-    async def get_res_id(self, resolution):
-        resolution_id = {
-            '8640p':'10', 
-            '4320p': '1', 
-            '2160p': '2', 
-            '1440p' : '3',
-            '1080p': '3',
-            '1080i':'4', 
-            '720p': '5',  
-            '576p': '6', 
-            '576i': '7',
-            '480p': '8', 
-            '480i': '9'
-            }.get(resolution, '10')
-        return resolution_id
-
-    ###############################################################
-    ######   STOP HERE UNLESS EXTRA MODIFICATION IS NEEDED   ######
-    ###############################################################
-
-    async def upload(self, meta):
-        common = COMMON(config=self.config)
-        await common.edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
-        cat_id = await self.get_cat_id(meta['category'])
-        type_id = await self.get_type_id(meta['type'])
-        resolution_id = await self.get_res_id(meta['resolution'])
-        await common.unit3d_edit_desc(meta, self.tracker)
-        region_id = await common.unit3d_region_ids(meta.get('region'))
-        distributor_id = await common.unit3d_distributor_ids(meta.get('distributor'))
-        if meta['anon'] != 0 or self.config['TRACKERS'][self.tracker].get('anon', False):
-            anon = 1
-        else:
-            anon = 0
-
-        if meta['bdinfo'] not in (None, ''):
-            mi_dump = None
-            bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", 'r', encoding='utf-8').read()
-        else:
-            mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", 'r', encoding='utf-8').read()
-            bd_dump = None
-        desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", 'r', encoding='utf-8').read()
-        open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", 'rb')
-        rhd_name = await self.edit_name(meta)
-        manual_name = meta.get('manual_name')
-        nfo_file = meta.get('nfo_file', None)
-        files = {'torrent': open_torrent}
-        if nfo_file:
-            open_nfo = open(nfo_file, 'rb') 
-            files['nfo'] = open_nfo
-        data = {
-            'name' : manual_name or rhd_name,
-            'description' : desc,
-            'mediainfo' : mi_dump,
-            'bdinfo' : bd_dump, 
-            'category_id' : cat_id,
-            'type_id' : type_id,
-            'resolution_id' : resolution_id,
-            'tmdb' : meta['tmdb'],
-            'imdb' : meta['imdb_id'].replace('tt', ''),
-            'tvdb' : meta['tvdb_id'],
-            'mal' : meta['mal_id'],
-            'igdb' : 0,
-            'anonymous' : anon,
-            'stream' : meta['stream'],
-            'sd' : meta['sd'],
-            'keywords' : meta['keywords'],
-            'personal_release' : int(meta.get('personalrelease', False)),
-            'internal' : 0,
-            'featured' : 0,
-            'free' : 0,
-            'doubleup' : 0,
-            'sticky' : 0,
-        }
-        # Internal
-        if self.config['TRACKERS'][self.tracker].get('internal', False):
-            if meta['tag'] != "" and (meta['tag'][1:] in self.config['TRACKERS'][self.tracker].get('internal_groups', [])):
-                data['internal'] = 1
-                
-        if region_id != 0:
-            data['region_id'] = region_id
-        if distributor_id != 0:
-            data['distributor_id'] = distributor_id
-        if meta.get('category') == "TV":
-            data['season_number'] = int(meta.get('season_int', '0'))
-            data['episode_number'] = int(meta.get('episode_int', '0'))
-        headers = {
-            'User-Agent': f'Uploadrr / v1.0 ({platform.system()} {platform.release()})'
-        }
-        params = {
-            'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip()
-        }
-
-        if meta['debug']:
-            console.print(f'\n[red]RHD NAME:[/red][blue]{rhd_name}')
-            log.debug(f"[blue]DATA 2 SEND[/blue]:")
-            console.print(Pretty(data))
-
-        else:
-            success = 'Unknown'
-            try:
-                response = requests.post(url=self.upload_url, files=files, data=data, headers=headers, params=params)
-                
-                if response.status_code >= 200 and response.status_code < 300:
-                    response_json = response.json()
-                    success = response_json.get('success', False)
-                    data = response_json.get('data', {})
-
-                    if not success:
-                        message = response_json.get('message', 'No message provided')
-                        console.print(f"[red]Upload failed: {message}[/red]")
-                        if data:
-                            console.print(f"[cyan]Error details:[/cyan] {data}")
-
-                else:
-                    try:
-                        from bs4 import BeautifulSoup
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        error_heading = soup.find(class_='error__heading')
-                        error_body = soup.find(class_='error__body')
-                        
-                        if error_heading and error_body:
-                            console.print(f"[red]{error_heading.text.strip()}[/red]")
-                            console.print(f"[b][yellow]{error_body.text.strip()}[/yellow][/b]")
-                        else:
-                            console.print(f"[red]Encountered HTTP Error: {response.status_code}[/red]")
-                            console.print(f"[blue]Server Response[/blue]: {response.text}")
-                    except Exception as parse_error:
-                        console.print(f"[red]Failed to parse error response: {parse_error}[/red]")
-                        console.print(f"[blue]Server Response[/blue]: {response.text}")
-                    
-                    success = False
-                    data = {}
-
-            except requests.exceptions.RequestException as e:
-                console.print(f"[red]Encountered Error: {e}[/red]")
-                data = {}
-
-            if success == 'Unknown':
-                console.print("[bold yellow]Status of upload is unknown, please go check..")
-
-            elif success:
-                console.print("[bold green]Torrent uploaded successfully!")
-            else:
-                console.print("[bold red]Torrent upload failed.")
-            
-            try:
-                open_torrent.close()
-            except Exception as e:
-                console.print(f"[red]Failed to close torrent file: {e}[/red]")
-
-            return success
-
-    def get_language_tag(self, meta):
-        audio_languages = []
-        text_languages = []
+    async def edit_name(self, meta: Dict[str, Any]) -> str:
+        rhd_name = meta["name"]
         lang_tag = ""
-        audio_codec = ""
-        ignored_keywords = ["commentary", "music", "director", "cast", "party"]
-        
-        if meta['is_disc'] != "BDMV":
-            with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/MediaInfo.json", 'r', encoding='utf-8') as f:
-                mi = json.load(f)
-
-            german_audio_tracks = []
-            for track in mi['media']['track']:
-                if track.get('@type') == 'Audio':
-                    title = track.get('Title', '').lower()
-                    if not any(keyword in title for keyword in ignored_keywords):
-                        language = track.get('Language_String', '').lower()
-                        if language:
-                            audio_languages.append(language)
-                            if 'german' in language:
-                                channels = track.get('Channels', '0')
-                                format_str = track.get('Format_String', '')
-                                if format_str == 'DTS XLL':
-                                    format_str = 'DTS HD-MA'
-                                elif format_str == 'MLP FBA':
-                                    format_str = 'TrueHD'
-                                elif format_str == 'E-AC-3':
-                                    format_str = 'DDP'
-                                elif format_str == 'AC-3':
-                                    format_str = 'DD'
-                                channel_notation = {'6': '5.1','8': '7.1'}.get(channels, f"{channels}.0")
-                                codec = f"{format_str} {channel_notation}"
-                                german_audio_tracks.append({'codec': codec, 'channels': int(channels)})
-            # Select German track with most channels
-            if german_audio_tracks:
-                audio_codec = max(german_audio_tracks, key=lambda x: x['channels'])['codec']
-            
-            text_language_list = mi['media']['track'][0].get('Text_Language_List', '')
-            text_languages = [lang.strip().lower() for lang in text_language_list.split(',')] if text_language_list else []
-
-        else:
-            with open(f"{meta.get('base_dir')}/tmp/{meta.get('uuid')}/BD_SUMMARY_00", 'r', encoding='utf-8') as f:
-                bd_summary = f.read()
-            
-            # Extract audio and subtitle languages
-            audio_languages = re.findall(r"Audio:\s*([^/]+)", bd_summary, re.IGNORECASE)
-            subtitle_languages = re.findall(r"Subtitle:\s*([^/]+)", bd_summary, re.IGNORECASE)
-            audio_languages = [lang.strip().lower() for lang in audio_languages] if audio_languages else []
-            text_languages = [lang.strip().lower() for lang in subtitle_languages] if subtitle_languages else []
-
-            # Extract German audio codec
-            german_audio_tracks = []
-            for line in bd_summary.split('\n'):
-                if 'Audio:' in line and 'German' in line:
-                    match = re.search(r"Audio:.*?/ ([^/]+) / (\d\.\d)", line, re.IGNORECASE)
-                    if match:
-                        format_str, channel_notation = match.groups()
-                        format_str = format_str.strip()
-                        if format_str == 'DTS-HD Master Audio':
-                            format_str = 'DTS HD-MA'
-                        elif format_str == 'Dolby Digital Plus':
-                            format_str = 'DDP'
-                        elif format_str == 'Dolby Digital':
-                            format_str = 'DD'
-                        channels = 6 if channel_notation == '5.1' else 8 if channel_notation == '7.1' else 2 if channel_notation == '2.0' else '1.0'
-                        codec = f"{format_str} {channel_notation}"
-                        german_audio_tracks.append({'codec': codec, 'channels': channels})
-
-            # Select German track with most channels
-            if german_audio_tracks:
-                audio_codec = max(german_audio_tracks, key=lambda x: x['channels'])['codec']
-
-        has_german_audio = any('german' in lang for lang in audio_languages)
-        has_german_subtitles = any('german' in lang for lang in text_languages)
-        distinct_audio_languages = set(audio_languages)  # Remove duplicates
-
-        if has_german_audio and len(distinct_audio_languages) == 1:
-            lang_tag = "GERMAN"
-        elif has_german_audio and len(distinct_audio_languages) == 2:
-            lang_tag = "GERMAN DL"
-        elif has_german_audio and len(distinct_audio_languages) > 2:
-            lang_tag = "GERMAN ML"
-        elif not has_german_audio and has_german_subtitles:
-            lang_tag = "GERMAN SUBBED"
-
-        if not has_german_audio and not has_german_subtitles:
-            console.print('[bold red]WARN[/bold red]:[yellow][bold] NO GERMAN[/bold] track.')
-            for i in range(3, 0, -1):
-                console.print(f"[yellow] Uploading Anyway in.. {i}", end='\r')
-                time.sleep(1)
-
-        return lang_tag, audio_codec
-
-    async def edit_name(self, meta):
-        rhd_name = meta.get('clean_name', '')
-
-        lang_tag, audio_codec = self.get_language_tag(meta)
-
-        # Replace audio with German audio_codec
-        if meta.get('audio') and audio_codec:
-            rhd_name = rhd_name.replace(meta['audio'], audio_codec)
-
         _known = {
-            part.upper()
-            for part in [meta.get('cut'),
-                meta.get('edition'),
-                meta.get('ratio'),
-                meta.get('repack'),
-                meta.get('resolution') if meta.get('resolution') != "OTHER" else "",
-                meta.get('source'),
-                meta.get('uhd')
+            "4K",
+            "UHD",
+            "1080P",
+            "720P",
+            "HDR",
+            "DV",
+            "DOLBY.VISION",
+            "HDR10",
+            "HDR10+",
+            "HLG",
+            "REMUX",
+            "BLURAY",
+            "WEB-DL",
+            "WEBDL",
+            "WEB",
+            "HDTV",
+            "SD",
+        }
+        for track in meta.get("mediainfo", {}).get("media", {}).get("track", []):
+            if track.get("@type") == "Audio":
+                lang = track.get("Language", "").lower()
+                title = track.get("Title", "").lower()
+                if lang in ("de", "ger", "deu", "german") or "german" in title:
+                    lang_tag = "GERMAN"
+                    break
+            if track.get("@type") == "Text":
+                lang = track.get("Language", "").lower()
+                title = track.get("Title", "").lower()
+                if lang in ("de", "ger", "deu", "german") or "german" in title:
+                    lang_tag = "GERMAN SUBBED"
+                    break
+        if meta.get("dual_audio"):
+            lang_tag = "GERMAN DL"
+        if meta.get("uhd"):
+            lang_tag = lang_tag + " UHD" if lang_tag else "UHD"
+        name_parts = [
+            part
+            for part in [
+                meta.get("edition"),
+                meta.get("hybrid") + " HYBRID" if meta.get("hybrid") else "",
+                meta.get("source"),
+                meta.get("uhd"),
             ]
             if part
-        }
-
+        ]
         if lang_tag:
             name_parts = rhd_name.split()
             existing_lang_tags = {"GERMAN", "GERMAN DL", "GERMAN ML", "GERMAN SUBBED"}
             name_parts = [part for part in name_parts if part.upper() not in existing_lang_tags]
-
-            insert_index = next(
-                (i for i, part in enumerate(name_parts) if part.upper() in _known),
-                len(name_parts)
-            )
+            insert_index = next((i for i, part in enumerate(name_parts) if part.upper() in _known), len(name_parts))
             name_parts.insert(insert_index, lang_tag)
-            rhd_name = ' '.join(name_parts)
-
+            rhd_name = " ".join(name_parts)
         if lang_tag == "GERMAN DL":
             rhd_name = rhd_name.replace("Dual-Audio ", "")
-
-        if not meta.get('tag') and not (rhd_name.endswith("-NOGRP") or rhd_name.endswith("-NOGROUP")):
-            rhd_name += " -NOGRP"
-
-        return ' '.join(rhd_name.split())
-
-
-    async def search_existing(self, meta):
-        dupes = {}
-        console.print("[yellow]Searching for existing torrents on site...")
-        params = {
-            'api_token' : self.config['TRACKERS'][self.tracker]['api_key'].strip(),
-            'tmdbId' : meta['tmdb'],
-            'categories[]' : await self.get_cat_id(meta['category']),
-            'types[]' : await self.get_type_id(meta['type']),
-            'resolutions[]' : await self.get_res_id(meta['resolution']),
-            'name' : ""
-        }
-        if meta.get('edition', "") != "":
-            params['name'] = params['name'] + f" {meta['edition']}"
-        try:
-            response = requests.get(url=self.search_url, params=params)
-            response = response.json()
-            for each in response['data']:
-                result = each['attributes']['name']
-                size = each['attributes']['size']
-                dupes[result] = size
-        except Exception:
-            console.print('[bold red]Es kann nicht nach vorhandenen Torrents vor Ort gesucht werden. Entweder ist die Website nach unten oder Ihr API -Schlüssel ist falsch')
-            await asyncio.sleep(5)
-
-        return dupes
+        if not meta.get("tag") and not (rhd_name.endswith("-NOGRP") or rhd_name.endswith("-NOGROUP")):
+            rhd_name += "-NOGRP"
+            rhd_name = " ".join(rhd_name.split())
+            meta["rhd_name"] = rhd_name
+        return rhd_name
