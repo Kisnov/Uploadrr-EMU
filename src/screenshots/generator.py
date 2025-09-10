@@ -249,8 +249,16 @@ class ScreenshotGenerator:
     async def _generate_file(self, meta, filename, uuid, num_screens, file_path):
         if not Path(file_path).is_file():
             return []
-        probe = ffmpeg.probe(file_path)
-        length = float(probe["format"]["duration"])
+        try:
+            probe = ffmpeg.probe(file_path, select_streams="v:0")
+            format_info = ffmpeg.probe(file_path, show_format=True)
+            length = float(format_info["format"]["duration"])
+        except (ffmpeg.Error, KeyError, ValueError):
+            try:
+                probe = ffmpeg.probe(file_path)
+                length = float(probe["format"]["duration"])
+            except (ffmpeg.Error, KeyError, ValueError) as e:
+                raise RuntimeError(f"Failed to probe file {file_path}") from e
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
@@ -270,9 +278,9 @@ class ScreenshotGenerator:
         if vobs:
             vf_filters.append(self.config["SCREENS"].get("deinterlace_method", "yadif"))
         if hdr and self.config["SCREENS"].get("tonemap_hdr", True):
-            vf_filters.append("zscale=t=linear:npl=120,format=gbrpf32le,zscale=p=bt709")
+            vf_filters.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=709")
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
-            vf_filters.append("zscale=t=bt709:m=bt709:r=tv,format=rgb24")
+            vf_filters.append("zscale=t=bt709:m=bt709:r=full,format=rgb24")
         vf_filter = ",".join(vf_filters) or "scale=iw:ih"
 
         for attempt in range(retries):
@@ -290,14 +298,20 @@ class ScreenshotGenerator:
                     "1",
                     "-vf",
                     vf_filter,
+                    "-compression_level",
+                    "0",
+                    "-pred",
+                    "mixed",
                     output,
                 ]
-                log.ddebug(f" COMMAND CALLED:\n [blue]{args} \n")
+                log.debug(f" COMMAND CALLED:\n [blue]{args} \n")
                 if keyframe == "nokey":
                     args.insert(1, "-skip_frame")
                     args.insert(2, "nokey")
                 process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                 stdout, stderr = await process.communicate()
+                if process.returncode != 0:
+                    log.error(f"FFmpeg failed for {output} with returncode {process.returncode}: {stderr.decode()}")
                 if process.returncode == 0 and Path(output).exists():
                     size = Path(output).stat().st_size
                     if self.min_image_size <= size <= self.max_image_size and not self.is_monochromatic(output):
