@@ -196,7 +196,7 @@ async def main() -> None:
     finally:
         end_time = time.perf_counter()
         console.print("[magenta]see you soon ^.<", justify="center")
-        log.debug(f"Uploadrr v2 took {end_time - start_time:.4f} seconds.")
+        log.debug(f"Uploadrr v2 took {end_time - start_time:.4f} seconds too long.")
 
 
 if __name__ == "__main__":
