@@ -27,6 +27,7 @@ class RF(Unit3d):
             return True, False
         return False, False
 
-    async def get_type_id(self, type):
+    async def get_type_id(self, meta: Dict[str, Any]) -> str:
+        type = meta["type"]
         type_id = {"DISC": "43", "REMUX": "40", "WEBDL": "42", "WEBRIP": "45", "ENCODE": "41", "HDTV": "35"}.get(type, "0")
         return type_id
