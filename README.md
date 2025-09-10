@@ -1,9 +1,12 @@
 >[!WARNING]
-# BEWARE THIS BRANCH IS LIKELY BROKEN
+# BEWARE THIS BRANCH IS A WIP - Bugs are EXPECTED
 
-This branch is very much a WIP, I'm publishing to increase transparancy and open it up to PR's as this will be the future of Uploadrr.
+If I knew what I was doing or/and had time on my hands, this branch wouldnt get published in such bad shape.  
+I'm publishing to increase transparancy and open it up to PR's as this will be the future of Uploadrr.
 
-__NOT RECCOMENDED TO USE__ 
+Moving forward I'll try to commit early, commit often rather than the hodgepodge mess I've made of some bulkier commits.
+
+__USE AT YOUR OWN RISK__ 
 Again, things are likely broken. 
 
 The goal of this particular fork has always been, and will be; to hand control to the users.
