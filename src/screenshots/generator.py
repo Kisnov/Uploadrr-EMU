@@ -203,7 +203,9 @@ class ScreenshotGenerator:
         # length = self._get_length(bdinfo)
         file, length = self.get_main_m2ts_and_duration(meta, uuid)
         keyframe = "nokey" if ("VC-1" in bdinfo["video"][0]["codec"] or bdinfo["video"][0]["hdr_dv"]) else "none"
-        ss_times = self._generate_valid_ss_times(length, num_screens)
+        ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
+        if not ss_times or (len(ss_times) < num_screens):
+            ss_times = self._generate_valid_ss_times(length, num_screens)
         max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
         tasks = [
             self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, meta.get("ffdebug", False), hdr=meta["hdr"])
@@ -249,7 +251,9 @@ class ScreenshotGenerator:
             return []
         probe = ffmpeg.probe(file_path)
         length = float(probe["format"]["duration"])
-        ss_times = self._generate_valid_ss_times(length, num_screens)
+        ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
+        if not ss_times or (len(ss_times) < num_screens):
+            ss_times = self._generate_valid_ss_times(length, num_screens)
         max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
         tasks = [
             self._take_screenshot(
@@ -266,9 +270,9 @@ class ScreenshotGenerator:
         if vobs:
             vf_filters.append(self.config["SCREENS"].get("deinterlace_method", "yadif"))
         if hdr and self.config["SCREENS"].get("tonemap_hdr", True):
-            vf_filters.append("zscale=t=linear:npl=100,zscale=p=709")
+            vf_filters.append("zscale=t=linear:npl=120,format=gbrpf32le,zscale=p=bt709")
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
-            vf_filters.append("zscale=t=709:m=709:r=tv")
+            vf_filters.append("zscale=t=bt709:m=bt709:r=tv,format=rgb24")
         vf_filter = ",".join(vf_filters) or "scale=iw:ih"
 
         for attempt in range(retries):
@@ -370,17 +374,29 @@ class ScreenshotGenerator:
     def _is_sufficient(self, existing, meta, screens):
         if not existing:
             return False
+
+        def files_exist(section):
+            return all(
+                (img.get("img_url") or (self.base_dir / "tmp" / meta["uuid"] / img.get("local_file", ""))).exists() for img in section
+            )
+
         if meta.get("tv_pack") == 1:
             per_episode = self.config["SCREENS"].get("per_episode", 3)
             filelist = meta.get("filelist", [])
-            if not filelist:  # Handle empty filelist
-                return len(existing.get("main", [])) >= screens
-            return len(existing.get("main", [])) >= screens and all(
-                len(existing["episodes"].get(self._get_episode_identifier(path), [])) >= per_episode
-                for path in filelist
-                if self._is_video_file(path)
+            if not filelist:
+                return len(existing.get("main", [])) >= screens and files_exist(existing.get("main", []))
+            return (
+                len(existing.get("main", [])) >= screens
+                and files_exist(existing.get("main", []))
+                and all(
+                    len(existing["episodes"].get(self._get_episode_identifier(path), [])) >= per_episode
+                    and files_exist(existing["episodes"].get(self._get_episode_identifier(path), []))
+                    for path in filelist
+                    if self._is_video_file(path)
+                )
             )
-        return len(existing.get("main", [])) >= screens
+
+        return len(existing.get("main", [])) >= screens and files_exist(existing.get("main", []))
 
     def _find_largest_m2ts(self, bdinfo):
         stream_dir = Path(bdinfo["path"]) / "BDMV" / "STREAM"
