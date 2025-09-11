@@ -1,6 +1,39 @@
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.utils.console import log
+
+
+class TemplateContext:
+    """Base template context with core functionality."""
+
+    def __init__(self, meta: Dict[str, Any]):
+        self._meta = meta
+        self._overrides = {}
+
+    def set_overrides(self, overrides: Dict[str, Any]):
+        """Set tracker-specific overrides."""
+        self._overrides = overrides
+
+    def get(self, key: str, override: str = "") -> str:
+        """Get value with tracker-specific overrides taking precedence."""
+        if key in self._overrides and self._overrides[key] is not None:
+            return str(self._overrides[key])
+
+        # Fall back to meta
+        value = self._meta.get(key, override)
+        return str(value) if value is not None else ""
+
+    def __getattr__(self, key: str) -> str:
+        """Allow dot notation access with overrides."""
+        return self.get(key)
+
+    def to_dict(self) -> Dict[str, str]:
+        """Convert meta + overrides into a flat dict for template formatting."""
+        result = {}
+        keys = set(self._meta.keys()) | set(self._overrides.keys())
+        for key in keys:
+            result[key] = self.get(key)
+        return result
 
 
 class NameGenerator:
@@ -44,131 +77,161 @@ class NameGenerator:
             "default": "{artist} - {album} ({year}) {edition} [{source}{type} {bitrate}]",
         },
     }
-
-    POTENTIAL_MISSING = {
-        "MOVIE": {
-            "DISC": ["edition", "region", "distributor"],
-            "REMUX": ["edition", "description"],
-            "WEBDL": ["edition", "service"],
-            "WEBRIP": ["edition", "service"],
-            "default": [],
-        },
-        "TV": {
-            "DISC": ["edition", "region", "distributor"],
-            "REMUX": ["edition", "description"],
-            "WEBDL": ["edition", "service"],
-            "WEBRIP": ["edition", "service"],
-            "default": [],
-        },
-        "MUSIC": {"default": []},
-    }
     # fmt: on
-    @staticmethod
-    def preprocess_meta(meta: Dict) -> Dict:
-        """Preprocess metadata to handle edge cases."""
-        processed = meta.copy()
-        if processed.get("use_original_tite", False):
-            processed["title"] = processed["original_title"]
-            processed["aka"] = ""
-        if processed.get("no_season", False):
-            processed["season"] = ""
-        if processed.get("no_year", False):
-            processed["year"] = ""
-        if processed.get("no_aka", False):
-            processed["aka"] = ""
-        if processed.get("resolution") == "OTHER":
-            processed["resolution"] = ""
-        if processed["category"] == "TV":
-            year = processed.get("year", "")
-            if year.isdigit():
-                processed["year"] = year
-            elif processed.get("search_year", "").isdigit():
-                processed["year"] = processed["search_year"]
-            elif processed.get("imdb_info", {}).get("year", "").isdigit():
-                processed["year"] = processed["imdb_info"]["year"]
-        if processed.get("lang", "ENGLISH") == "ENGLISH":
-            processed["lang"] = ""
-        return processed
 
     @staticmethod
-    def get_template(category: str, media_type: str, source: str = None, is_disc: str = None) -> str:
+    def get_template(
+        category: str,
+        media_type: str,
+        source: str = None,
+        is_disc: str = None,
+        custom_templates: Optional[Dict] = None,
+        tracker: str = None,
+    ) -> str:
         """Retrieve the appropriate naming template."""
+        # Try custom templates first - handle flat structure
+        if custom_templates and category in custom_templates:
+            cat_templates = custom_templates[category]
+
+            # If it's a flat template (set or string), return it directly
+            if isinstance(cat_templates, (set, str)):
+                if isinstance(cat_templates, set):
+                    # Extract the template string from the set
+                    return next(iter(cat_templates)) if cat_templates else ""
+                return cat_templates
+
+            # If it's a dict (hierarchical structure), use the original logic
+            if media_type in cat_templates:
+                template_or_dict = cat_templates[media_type]
+                if isinstance(template_or_dict, dict):
+                    if media_type == "DISC" and is_disc:
+                        return template_or_dict.get(is_disc, "")
+                    elif media_type == "REMUX" and source:
+                        source_key = "BluRay"
+                        if "DVD" in source.upper():
+                            source_key = "DVD"
+                        elif "HDDVD" in source.upper():
+                            source_key = "HDDVD"
+                        return template_or_dict.get(source_key, "")
+                    return list(template_or_dict.values())[0] if template_or_dict else ""
+                return template_or_dict
+
+        # Fall back to built-in templates (original logic)
         templates = NameGenerator.NAMING_TEMPLATES.get(category, {})
         if category == "MUSIC":
             return templates.get(media_type, templates["default"])
         if media_type == "DISC":
             return templates[media_type].get(is_disc, "")
         if media_type == "REMUX":
+            source_key = "BluRay"
             if source:
                 if "DVD" in source.upper():
-                    key = "DVD"
-                elif "BLURAY" in source.upper():
-                    key = "BluRay"
+                    source_key = "DVD"
                 elif "HDDVD" in source.upper():
-                    key = "HDDVD"
-                else:
-                    key = source.split()[0]
-            else:
-                key = "BluRay"
-            return templates[media_type].get(key, "")
+                    source_key = "HDDVD"
+            return templates[media_type].get(source_key, "")
         return templates.get(media_type, "")
 
     @staticmethod
-    def get_potential_missing(category: str, media_type: str) -> List[str]:
-        """Retrieve potential missing fields."""
-        missing = NameGenerator.POTENTIAL_MISSING.get(category, {})
-        return missing.get(media_type, missing["default"])
-
-    @staticmethod
     def clean_filename(name: str) -> str:
+        """Clean filename of invalid characters."""
         invalid = r'<>:"/\|?*'
         for char in invalid:
             name = name.replace(char, "-")
-        return name.strip()
+        return " ".join(name.split())
+
+    @staticmethod
+    def _preprocess_meta_for_context(meta: Dict) -> Dict:
+        """Preprocess meta data for context usage."""
+        processed = meta.copy()
+
+        # Handle title variations
+        if processed.get("use_original_title", False):
+            processed["title"] = processed.get("original_title", "")
+
+        # Handle numeric fields
+        for field in ["season", "episode"]:
+            try:
+                val = processed.get(field, "")
+                if val and str(val).isdigit():
+                    processed[field] = f"{int(val):02d}"
+                else:
+                    processed[field] = ""
+            except (ValueError, TypeError):
+                processed[field] = ""
+
+        # Handle resolution
+        if processed.get("resolution") == "OTHER":
+            processed["resolution"] = ""
+
+        # Handle language defaults
+        if processed.get("lang", "ENGLISH") == "ENGLISH":
+            processed["lang"] = ""
+
+        return processed
 
     async def get_name(self, meta: Dict) -> Tuple[str, str, str, List[str]]:
-        """Generate the name based on metadata"""
-        meta = self.preprocess_meta(meta)
-        category, media_type = meta["category"], meta.get("type", "")
+        """Generate the main name using context."""
+        processed_meta = self._preprocess_meta_for_context(meta)
+        context = TemplateContext(processed_meta)
+
+        category, media_type = meta.get("category", ""), meta.get("type", "")
         source, is_disc = meta.get("source", ""), meta.get("is_disc", "")
 
-        log.debug(f"[cyan]CATEGORY: {category}, TYPE: {media_type}")
-        if meta.get("is_music", False):
-            log.debug(f"ARTIST: {meta['artist']}, ALBUM: {meta['album']}, YEAR: {meta['year']}, SOURCE: {source}")
-
-        # Get template and potential missing fields
         template = self.get_template(category, media_type, source, is_disc)
-        potential_missing = self.get_potential_missing(category, media_type)
 
-        # Handle MUSIC-specific formatting
-        if category == "MUSIC":
-            edition = meta.get("manual_edition", meta.get("edition", ""))
-            meta["edition"] = f"[{edition}]" if edition else ""
-            meta["bit_depth"] = f"{meta.get('bit_depth', '')}"
-            meta["source"] = f"{source} " if source else ""
+        if not template:
+            name_notag = "NO_TEMPLATE_FOUND"
+        else:
+            try:
+                formatted_dict = context.to_dict()
+                name_notag = template.format(**formatted_dict)
+                name_notag = " ".join(name_notag.split())
+            except (KeyError, ValueError) as e:
+                log.warning(f"Template formatting error: {e}")
+                name_notag = "TEMPLATE_ERROR"
 
-        placeholder_keys = [part.split("}")[0] for part in template.split("{")[1:]]
-        safe_meta = {key: str(meta.get(key, "")) if meta.get(key) is not None else "" for key in placeholder_keys}
-        name_notag = template
-        for key in safe_meta:
-            placeholder = f"{{{key}}}"
-            value = safe_meta[key]
-            name_notag = name_notag.replace(placeholder, value)
-
-        # Clean up multiple spaces and strip
-        name_notag = " ".join(name_notag.split())
-
-        # Add tag if applicable
         tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
-        name = name_notag + tag
-
-        # Use manual name if provided and not None, otherwise use generated name
-        name = meta.get("manual_name") if meta.get("manual_name") is not None else name
+        name = name_notag + tag if tag and not name_notag.endswith(tag) else name_notag
         clean_name = self.clean_filename(name)
 
-        # Log if no meaningful name was generated
-        if not name_notag or name_notag.isspace():
-            log.warning(f"[yellow]Generated name is empty for category: {category}, type: {media_type}, source: {source}")
-            return "Unnamed", name, clean_name, potential_missing
+        # Store in meta
+        meta.update({"name_notag": name_notag, "name": name, "clean_name": clean_name})
 
-        return name_notag, name, clean_name, potential_missing
+        return name_notag, name, clean_name, []
+
+    async def generate_tracker_name(
+        self, meta: Dict, tracker: str, custom_templates: Optional[Dict] = None, overrides: Optional[Dict] = None
+    ) -> str:
+        """Generate tracker-specific name with tracker-specific overrides."""
+        processed_meta = self._preprocess_meta_for_context(meta)
+        context = TemplateContext(processed_meta)
+
+        # Set tracker-specific overrides
+        if overrides:
+            context.set_overrides(overrides)
+
+        category, media_type = meta.get("category", ""), meta.get("type", "")
+        source, is_disc = meta.get("source", ""), meta.get("is_disc", "")
+
+        template = self.get_template(category, media_type, source, is_disc, custom_templates, tracker)
+
+        if not template:
+            tracker_name_notag = "NO_TEMPLATE_FOUND"
+        else:
+            try:
+                formatted_dict = context.to_dict()
+                tracker_name_notag = template.format(**formatted_dict)
+                tracker_name_notag = " ".join(tracker_name_notag.split())
+            except (KeyError, ValueError) as e:
+                log.warning(f"Tracker {tracker} template formatting error: {e}")
+                tracker_name_notag = "TEMPLATE_ERROR"
+
+        # Handle tag inclusion
+        tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
+        if "{tag}" in template:
+            tracker_name = tracker_name_notag  # Tag already included
+        else:
+            tracker_name = tracker_name_notag + tag
+
+        return tracker_name

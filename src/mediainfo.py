@@ -364,38 +364,38 @@ class MediaInfoHandler:
         lang = ""
         if meta.get("original_language") and not is_silent:
             original_lang = meta["original_language"].lower()
-            languages = set()  # Collect unique non-commentary, non-zxx, non-score languages
+            languages = set()
+            language_tracks = []
+
             for t in tracks:
                 if t.get("@type") != "Audio":
                     continue
-                lang = t.get("Language_String3", "").lower()
+                lang_code = t.get("Language_String2", "").lower()
+                l3 = t.get("Language_String3", "").lower()
                 title = t.get("Title", "").lower()
-                if "comment" in title or "score" in title or "review" in title or lang in ("", "zxx"):
+                if "comment" in title or "score" in title or "review" in title or l3 in ("", "zxx"):
                     continue  # Exclude commentary, isolated score, zxx
-                languages.add(lang)
+                languages.add(lang_code)
+                language_tracks.append(t)
 
             has_original = original_lang in languages
             num_languages = len(languages)
-            has_english = "eng" in languages
 
             if num_languages == 0:
                 lang = ""
-
-            elif has_original:
-                num_others = num_languages - 1
-                if num_others == 1:
-                    lang = "lang"
-                elif num_others > 1:
-                    lang = "MULTI"
-
-            else:
-                if has_english and original_lang != "en":
-                    lang = "DUBBED"
+            elif num_languages == 1:
+                if has_original:
+                    for t in language_tracks:
+                        if t.get("Language_String2", "").lower() == original_lang:
+                            lang = t.get("Language_String", "").split(" ")[0].upper()
+                            break
                 else:
-                    primary_lang_str = track.get("Language_String", "").split(" ")[0].upper() if track else ""
-                    lang = primary_lang_str or "DUBBED"
-                    if num_languages > 1:
-                        lang = "MULTI"
+                    lang = "DUBBED"
+            else:
+                if num_languages == 2:
+                    lang = "DUAL"
+                else:
+                    lang = "MULTI"
 
         # === Commentary Detection ===
         has_commentary = any("commentary" in t.get("Title", "").lower() for t in tracks if t.get("@type") == "Audio")
@@ -527,6 +527,7 @@ class MediaInfoHandler:
         codec = ""
         bit_depth = "0"
         has_encode_settings = False
+        hfr = ""
 
         try:
             track = mi["media"]["track"][1]
@@ -534,6 +535,8 @@ class MediaInfoHandler:
             format_profile = track.get("Format_Profile", format)
             has_encode_settings = bool(track.get("Encoded_Library_Settings"))
             bit_depth = track.get("BitDepth", "0")
+            frame_rate = float(track.get("FrameRate", 0))
+            hfr = "HDR" if frame_rate > 30 else ""
         except (KeyError, IndexError):
             format = bdinfo["video"][0]["codec"]
             format_profile = bdinfo["video"][0]["profile"]
@@ -569,7 +572,7 @@ class MediaInfoHandler:
 
         log.debug(f"vencode: {video_encode}, vcodec: {video_codec}, enc_set: {has_encode_settings}, bit_depth: {bit_depth}")
 
-        return video_encode, video_codec, has_encode_settings, bit_depth
+        return video_encode, video_codec, has_encode_settings, bit_depth, hfr
 
     async def get_search_year(self, uuid: str, meta: dict) -> str:
         """Extract search year from cached MediaInfo JSON."""

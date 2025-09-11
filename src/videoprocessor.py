@@ -268,7 +268,7 @@ class VideoProcessor:
         async def fetch_video_encode():
             if meta["is_disc"] != "BDMV":
                 return self.mihandle.get_video_encode(meta["uuid"], meta["type"], meta.get("bdinfo"))
-            return None, None, False, "0"
+            return None, None, False, "0", ""
 
         results = await asyncio.gather(
             fetch_resolution(), fetch_audio(), fetch_3d(), fetch_source(), fetch_uhd(), fetch_hdr(), fetch_video_encode()
@@ -289,7 +289,7 @@ class VideoProcessor:
                 # meta["region"] = self.get_region(meta.get("bdinfo"), meta.get("region")) # TODO Test + ERASE
                 meta["video_codec"] = get_video_codec(meta["bdinfo"])
         else:
-            meta["video_encode"], meta["video_codec"], meta["has_encode_settings"], meta["bit_depth"] = results[6]
+            meta["video_encode"], meta["video_codec"], meta["has_encode_settings"], meta["bit_depth"], meta["hfr"] = results[6]
 
         return meta
 
