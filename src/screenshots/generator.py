@@ -390,9 +390,16 @@ class ScreenshotGenerator:
             return False
 
         def files_exist(section):
-            return all(
-                (img.get("img_url") or (self.base_dir / "tmp" / meta["uuid"] / img.get("local_file", ""))).exists() for img in section
-            )
+            tmp_path = self.base_dir / "tmp" / meta["uuid"]
+            for img in section:
+                img_url = img.get("img_url")
+                if img_url and img_url.strip():
+                    continue
+                local_file = img.get("local_file", "")
+                if local_file and (tmp_path / local_file).exists():
+                    continue
+                return False
+            return True
 
         if meta.get("tv_pack") == 1:
             per_episode = self.config["SCREENS"].get("per_episode", 3)
@@ -403,8 +410,10 @@ class ScreenshotGenerator:
                 len(existing.get("main", [])) >= screens
                 and files_exist(existing.get("main", []))
                 and all(
-                    len(existing["episodes"].get(self._get_episode_identifier(path), [])) >= per_episode
-                    and files_exist(existing["episodes"].get(self._get_episode_identifier(path), []))
+                    (
+                        len(existing["episodes"].get(self._get_episode_identifier(path), [])) >= per_episode
+                        and files_exist(existing["episodes"].get(self._get_episode_identifier(path), []))
+                    )
                     for path in filelist
                     if self._is_video_file(path)
                 )
