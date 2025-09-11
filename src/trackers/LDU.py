@@ -142,14 +142,14 @@ class LDU(Unit3d):
                 if x["@type"] == "Audio":
                     commentary_found = "Title" in x and ("comment" in x["Title"].lower() or "review" in x["Title"].lower())
                     if not commentary_found:
-                        lang = x.get("Language_String3")
+                        lang = x.get("Language_String3").upper()
                         if lang != "???":
                             audio_lang.append(lang)
 
             # Subs
             for x in mi["media"]["track"]:
                 if x["@type"] == "Text":
-                    lang = x.get("Language_String3")
+                    lang = x.get("Language_String3").upper()
                     if lang != "???":
                         sub_lang.append(lang)
 
