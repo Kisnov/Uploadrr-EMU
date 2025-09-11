@@ -140,6 +140,7 @@ class Args:
             ("-ffdebug --ffdebug", "ffdebug", "Show ffmpeg info during screenshots"),
             ("-hc --hardcoded-subs", "hardcoded_subs", "Contains hardcoded subs"),
             ("-m --manual", "manual", "Manual mode, returns DDL links"),
+            ("-modq --mod-queue", "modq", "Opt into Mod Queue"),
             ("-nfo --nfo", "nfo", "Use .nfo in directory for description"),
             ("-nh --nohash", "nohash", "Don't hash .torrent"),
             ("--no-aka", "no_aka", "Remove AKA from title"),

@@ -101,6 +101,7 @@ class Unit3d:
         await common.unit3d_edit_desc(meta, self.tracker)
         # region_id = await common.unit3d_region_ids(meta.get("region"))
         anon = 1 if (meta.get("anon", 0) or self.config["TRACKERS"][self.tracker].get("anon", False)) else 0
+        modq = 1 if meta.get("modq", False) or self.config["TRACKERS"][self.tracker].get("modq", False) else 0
 
         # Prepare file contents with context managers
         tmp_dir = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
@@ -144,6 +145,7 @@ class Unit3d:
             "free": 0,
             "doubleup": 0,
             "sticky": 0,
+            "mod_queue_opt_in": modq,
         }
 
         if not is_music:
