@@ -101,14 +101,10 @@ class HUNO(Unit3d):
         return False, False
 
     async def get_extra_data(self, meta: Dict[str, Any]) -> Dict[str, Any]:
-        return {"plex_friendly": await self.is_plex_friendly(meta)}
-
-    def get_basename(self, meta):
-        path = next(iter(meta["filelist"]), meta["path"])
-        return os.path.basename(path)
+        return {"stream": await self.is_plex_friendly(meta)}
 
     async def get_typeid(self, meta: Dict[str, Any]) -> str:
-        basename = self.get_basename(meta)
+        basename = meta["uuid"]
         type = meta["type"]
 
         if type == "REMUX":

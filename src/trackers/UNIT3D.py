@@ -138,7 +138,7 @@ class Unit3d:
             "stream": meta["stream"],
             "sd": meta["sd"],
             "keywords": meta["keywords"],
-            "personal_release": int(meta.get("personal_release", False)),
+            "personal_release": int(meta.get("personalrelease", False)),
             "internal": 0,
             "featured": 0,
             "free": 0,
