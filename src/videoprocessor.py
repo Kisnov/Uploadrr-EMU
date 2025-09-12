@@ -260,7 +260,6 @@ class VideoProcessor:
             opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
             guess = self._cached_guessit(meta["path"], opts)
             return self.get_uhd(meta["type"], guess, meta["resolution"], meta["path"])
-            # return self.get_uhd(meta['type'], self._cached_guessit(meta['path']), meta['resolution'], meta['path'])
 
         async def fetch_hdr():
             return self.mihandle.get_hdr(meta["uuid"], meta.get("bdinfo"))

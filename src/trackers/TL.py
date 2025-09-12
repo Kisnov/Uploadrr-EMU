@@ -1,11 +1,14 @@
-# -*- coding: utf-8 -*-
+import contextlib
 import platform
+import re
 from pathlib import Path
 
-import requests
+import aiofiles
+import httpx
+from rich.pretty import Pretty
 
 from src.trackers.COMMON import COMMON
-from src.utils.console import console
+from src.utils.console import console, log
 from src.utils.torrentman import edit_torrent
 
 
@@ -36,21 +39,25 @@ class TL:
         self.source_flag = "TorrentLeech.org"
         self.upload_url = "https://www.torrentleech.org/torrents/upload/apiupload"
         self.banned_groups = [""]
-
-        self.announce_key = self.config["TRACKERS"][self.tracker]["announce_key"]
-        self.announce_url = f"https://tracker.torrentleech.org/a/{self.announce_key}/announce"
-        pass
+        announce = self.config["TRACKERS"][self.tracker]["announce_key"]
+        if announce.startswith("https://"):
+            self.announce_url = announce
+            self.announce_key = announce.split("/a/")[1].split("/announce")[0]
+        else:
+            self.announce_url = f"https://tracker.torrentleech.org/a/{announce}/announce"
+            self.announce_key = announce
+        self.timeout = httpx.Timeout(60.0)
 
     async def get_cat_id(self, common, meta):
+        res = meta.get("resolution")
         if meta.get("anime", 0):
             return self.CATEGORIES["Anime"]
-
         if meta["category"] == "MOVIE":
             if meta["original_language"] != "en":
                 return self.CATEGORIES["MovieForeign"]
             elif "Documentary" in meta["genres"]:
                 return self.CATEGORIES["MovieDocumentary"]
-            elif meta["uhd"]:
+            elif meta["uhd"] and res in ("1440p", "2160p", "4320p", "8640p"):
                 return self.CATEGORIES["Movie4K"]
             elif meta["is_disc"] in ("BDMV", "HDDVD") or (meta["type"] == "REMUX" and meta["source"] in ("BluRay", "HDDVD")):
                 return self.CATEGORIES["MovieBluray"]
@@ -75,7 +82,6 @@ class TL:
                 return self.CATEGORIES["TvEpisodes"]
             else:
                 return self.CATEGORIES["TvEpisodesHd"]
-
         raise NotImplementedError("Failed to determine TL category!")
 
     async def upload(self, meta):
@@ -84,30 +90,45 @@ class TL:
         cat_id = await self.get_cat_id(common, meta)
         await common.unit3d_edit_desc(meta, self.tracker)
 
-        open_desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "a+")
+        desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
+        info_filename = "BD_SUMMARY_00" if meta["bdinfo"] is not None else "MEDIAINFO"
+        info_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"{info_filename}.txt"
+        torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
 
-        info_filename = "BD_SUMMARY_00" if meta["bdinfo"] is not None else "MEDIAINFO_CLEANPATH"
-        open_info = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/{info_filename}.txt", "r", encoding="utf-8")
-        open_desc.write("\n\n")
-        open_desc.write(open_info.read())
-        open_info.close()
+        async with aiofiles.open(desc_path, "r", encoding="utf-8") as f:
+            desc = await f.read()
+        desc = desc.replace("[center]", "<center>").replace("[/center]", "</center>")
+        desc = re.sub(r"\[spoiler=.*?\]", "[spoiler]", desc, flags=re.IGNORECASE)
+        async with aiofiles.open(desc_path, "w", encoding="utf-8") as f:
+            await f.write(desc)
 
-        open_desc.seek(0)
-        open_torrent = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", "rb")
-        files = {"nfo": open_desc, "torrent": (self.get_name(meta) + ".torrent", open_torrent)}
-        data = {"announcekey": self.announce_key, "category": cat_id}
-        headers = {"User-Agent": f"Uploadrr ({platform.system()} {platform.release()})"}
+        async with contextlib.AsyncExitStack() as stack:
+            open_desc = await stack.enter_async_context(aiofiles.open(desc_path, "a+", encoding="utf-8"))
+            open_info = await stack.enter_async_context(aiofiles.open(info_path, "r", encoding="utf-8"))
 
-        if meta["debug"] == False:
-            response = requests.post(url=self.upload_url, files=files, data=data, headers=headers)
-            if not response.text.isnumeric():
-                console.print(f"[red]{response.text}")
-        else:
-            console.print("[cyan]Request Data:")
-            console.print(data)
-        open_torrent.close()
-        open_desc.close()
+            await open_desc.write("\n\n")
+            await open_desc.write(await open_info.read())
 
-    def get_name(self, meta):
-        path = Path(meta["path"])
-        return path.stem if path.is_file() else path.name
+        with contextlib.ExitStack() as stack:
+            torrent_file = stack.enter_context(open(torrent_path, "rb"))
+            desc_file = stack.enter_context(open(desc_path, "rb"))
+
+            files = {
+                "torrent": (meta["name"], torrent_file, "application/x-bittorrent"),
+                "nfo": ("nfo.nfo", desc_file, "application/octet-stream"),
+            }
+
+            data = {"announcekey": self.announce_key, "category": cat_id}
+            headers = {"User-Agent": f"Uploadrr v2 ({platform.system()} {platform.release()})"}
+
+            if meta.get("debug", False):
+                log.debug("[magenta]DATA 2 SEND[/magenta]:")
+                console.print(Pretty(data))
+                return "DEBUG"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(self.upload_url, files=files, data=data, headers=headers)
+                if not response.text.isnumeric():
+                    log.error(f"[red]{response.text}")
+                    return False
+                return True

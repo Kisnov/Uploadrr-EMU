@@ -93,7 +93,7 @@ async def handle_special_tracker(
 
     if tracker == "AR":
         return await upload_to_ar(tracker_instance, meta, path, skipped_details, config)
-    elif tracker in ["BHD", "DC"]:
+    elif tracker in ["BHD", "DC", "TL"]:
         success, skipped_files = await upload_to_tracker(
             tracker_instance,
             tracker,
@@ -106,7 +106,8 @@ async def handle_special_tracker(
             meta.get("debug", False),
         )
         return success
-    elif tracker in ["THR", "PTP", "TL"]:
+
+    elif tracker in ["THR", "PTP"]:
         console.print(f"Apologies, {tracker} hasn't been implemented yet.")
         return False
 
