@@ -25,8 +25,13 @@ async def search_tvmaze(filename: str, year: Optional[str], imdbID: Optional[str
         url, params = _build_tvmaze_request(filename, imdbID, tvdbID)
         try:
             response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
+            # 404 is expected for non-tv, don't report
+            if response.status_code != 404:
+                response.raise_for_status()
+            else:
+                log.debug(f"TVmaze lookup returned 404 for {params}, likely a movie or invalid ID")
+                return tvmazeID, imdbID, tvdbID
+            data = response.json() if response.status_code != 404 else None
 
             if data:
                 # Pass the final URL (after redirect) to determine parsing logic
