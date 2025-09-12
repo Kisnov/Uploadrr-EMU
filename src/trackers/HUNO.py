@@ -103,10 +103,9 @@ class HUNO(Unit3d):
     async def get_extra_data(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         return {"stream": await self.is_plex_friendly(meta)}
 
-    async def get_typeid(self, meta: Dict[str, Any]) -> str:
+    async def get_type_id(self, meta: Dict[str, Any]) -> str:
         basename = meta["uuid"]
         type = meta["type"]
-
         if type == "REMUX":
             return "2"
         elif type in ("WEBDL", "WEBRIP"):
