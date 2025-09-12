@@ -151,7 +151,6 @@ class Args:
             ("--no-year", "no_year", "Remove Year from title"),
             ("-pr --personal-release", "personalrelease", "Personal Release"),
             ("-random --random", "random", "Randomize queue order"),
-            ("-reconfig --reconfig", "reconfig", "Auto update config"),
             ("-rh --rehash", "rehash", "Force hash .torrent"),
             ("-sdc --skip-dupe-check", "skip_dupe_check", "Skip duplicate check"),
             ("-siu --skip-imagehost-upload", "skip_imghost_upload", "Skip uploading to an image host"),

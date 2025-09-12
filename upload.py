@@ -4,8 +4,6 @@ import time
 from pathlib import Path
 from typing import Dict, List
 
-from packaging import version
-
 import src.utils.imports  # noqa: F401
 from src.args import Args
 from src.cleanrr import CleanupHandler
@@ -15,7 +13,7 @@ from src.prep import Prep
 from src.progress import ProgressManager
 from src.screenshots.manager import ScreenshotManager
 from src.utils.checks import pre_upload_checks
-from src.utils.config import check_python_version, load_yaml_config, reconfigure
+from src.utils.config import check_python_version, load_yaml_config
 from src.utils.console import console, log, set_log_level
 from src.utils.loads import load_trackers
 from src.utils.meta import edit_meta, load_existing_meta, save_meta
@@ -46,9 +44,6 @@ class Uploadrr:
         meta = {"base_dir": str(base_dir)}
         meta, _, _ = self.parser.parse(sys.argv[1:], meta)  # Note: parser returns meta, parser, _
         set_log_level(debug=meta.get("debug", False), ddebug=meta.get("deep_debug", False), quiet=meta.get("quiet", False))
-
-        if meta.get("reconfig", False):
-            reconfigure(config_path, legacy_config)
 
         trackers = normalize_trackers(meta)
         tracker_registry = load_trackers(trackers, self.config)
@@ -181,11 +176,12 @@ async def main() -> None:
     check_python_version()
     if not config_path.exists():
         if legacy_config.exists():
-            reconfigure(config_path, legacy_config, Legacy=True)
+            log.error("Legacy Config detected, please create a new yaml config, thank you!")
+            sys.exit(1)
+        else:
+            log.error("No Config detected, please setup config before starting, thank you!")
+            sys.exit(1)
     config = load_yaml_config(config_path)
-    if "version" not in config or version.parse(config.get("version")) < version.parse("2.0.0"):
-        reconfigure(config_path, legacy_config)
-        config = load_yaml_config(config_path)
     uploadrr = Uploadrr(config)
     try:
         await uploadrr.do_the_thing(base_dir)

@@ -12,7 +12,7 @@ Again, things are likely broken.
 The goal of this particular fork has always been, and will be; to hand control to the users.
 
 This branch uses __YAML__ for its config. 
-!Reconfiguration needs to be tweaked for it to resolve without issues. I jumped the gun when I rewrote it and now it certainly won't work as there has been many, many changes since!
+Unfortunately that means remaking a config *sigh*
 
 
 
