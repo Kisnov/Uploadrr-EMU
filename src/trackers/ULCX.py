@@ -63,7 +63,9 @@ class ULCX(Unit3d):
         edition = meta.get("edition", "")
         uuid = meta["uuid"]
         keyword_list = [k.strip() for k in keywords.lower().split(",")]
-        if ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation"])) and adult:
+        if meta.get("xxx") or (
+            ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation", "sex"])) and adult
+        ):
             console.print("[bold red]ULCX strictly prohibits Porn/Hentai.")
             return True, True
         elif adult:

@@ -107,7 +107,9 @@ class OTW(Unit3d):
         adult = meta.get("adult", False)
         keywords = meta.get("keywords", "")
         keyword_list = [k.strip() for k in keywords.lower().split(",")]
-        if ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation"])) and adult:
+        if meta.get("xxx") or (
+            ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation", "sex"])) and adult
+        ):
             console.print("[bold red]OldToons strictly prohibits Porn/Hentai.")
             return True, True
         elif adult:

@@ -19,8 +19,10 @@ class RF(Unit3d):
         if meta["category"] != "MOVIE":
             console.print("[bold red]Content not Supported: ReelFLiX only support Movies.")
             return True, True
-        elif ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic"])) and adult:
-            console.print("[bold red]Porn is strictly prohibited on ReelFlix")
+        elif meta.get("xxx") or (
+            ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation", "sex"])) and adult
+        ):
+            console.print("[bold red]ReelFlix strictly prohibits Porn/Hentai.")
             return True, True
         elif adult:
             console.print("[bold red]Flagged as adult content. ReelFlix bans all porn/erotica.")

@@ -34,7 +34,9 @@ class RTF(Unit3d):
         if datetime.date.today().year - meta["year"] <= 9:
             console.print("[bold red]RetroFlix requires uploads to be more than 10 Years old!")
             return True, True
-        elif ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic"])) and adult:
+        elif meta.get("xxx") or (
+            ("XXX" in path or any(keyword in keyword_list for keyword in ["porn", "hentai", "erotic", "animation", "sex"])) and adult
+        ):
             console.print("[bold red]Porn is strictly prohibited on RetroFlix")
             return True, True
         elif adult:
