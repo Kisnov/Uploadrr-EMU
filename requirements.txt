@@ -16,7 +16,6 @@ pillow
 psutil
 pyimgbox
 pyotp
-pyoxipng
 pyrobase
 pymediainfo
 pyyaml

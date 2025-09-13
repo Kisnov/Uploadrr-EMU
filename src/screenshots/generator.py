@@ -22,7 +22,7 @@ class ScreenshotGenerator:
         self.base_dir = base_dir
         self.tmp_dir = None
         self.min_image_size = 75000
-        self.max_image_size = 10000000
+        self.max_image_size = 3000000
         self.cache = {}  # Simple in-memory cache: {uuid: List[Dict]}
 
     async def generate_screenshots(self, meta: Dict, filename: str, uuid: str) -> Dict:
@@ -71,13 +71,6 @@ class ScreenshotGenerator:
             if pm:
                 pm.update("Creating contact sheet")
             await self._generate_contact_sheet(result["main"][:contact_screens], meta, tmp_dir / "contact_sheet.png", rows, columns)
-
-        # -- OPTIMIZE -- #
-        if self.config["SCREENS"].get("optimize", False):
-            if pm:
-                pm.update("Optimizing screenshots")
-            optimize_tasks = [self._optimize_image((tmp_dir / img["local_file"])) for img in result["main"]]
-            await asyncio.gather(*optimize_tasks)
 
         self.cache[uuid] = result
         if pm:
@@ -282,6 +275,8 @@ class ScreenshotGenerator:
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
             vf_filters.append("zscale=t=bt709:m=bt709:r=full,format=rgb24")
         vf_filter = ",".join(vf_filters) or "scale=iw:ih"
+        optimize = self.config["SCREENS"].get("optimize", False)
+        o_lvl = 0 if not optimize else (6 if optimize is True else min(optimize, 10))
 
         for attempt in range(retries):
             try:
@@ -299,7 +294,7 @@ class ScreenshotGenerator:
                     "-vf",
                     vf_filter,
                     "-compression_level",
-                    "0",
+                    o_lvl,
                     "-pred",
                     "mixed",
                     output,
@@ -490,16 +485,6 @@ class ScreenshotGenerator:
             return 6, 3  # noqa: E701
         else:
             return 8, 3  # noqa: E701
-
-    async def _optimize_image(self, image_path: str):
-        """Run oxipng to losslessly optimize the PNG."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "oxipng", "-o4", "--strip", "all", image_path, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-            )
-            await proc.communicate()
-        except Exception as e:
-            log.debug(f"Failed to optimize {image_path}: {e}")
 
     @staticmethod
     def kill_orphaned_ffmpeg() -> None:
