@@ -127,8 +127,8 @@ class HUNO(Unit3d):
         from src.name import NameGenerator
 
         template = {
-            "MOVIE": "{title} ({year}) {distributor} {edition} {hc} ({resolution} {scale} {service} {3D} {source} {profile} {hfr} {hdr} {audio} {lang} - {tag}) {repack}",
-            "TV": "{title} ({year}) {season}{episode} {hc} ({resolution} {scale} {service} {3D} {source} {profile} {hfr} {hdr} {audio} {lang} - {tag}) {repack}",
+            "MOVIE": "{title} ({year}) {distributor} {edition} {hc} ({resolution} {scale} {service} {3D} {uhd} {source} {profile} {hfr} {hdr} {audio} {lang} - {tag}) {repack}",
+            "TV": "{title} ({year}) {season}{episode} {hc} ({resolution} {scale} {service} {3D} {uhd} {source} {profile} {hfr} {hdr} {audio} {lang} - {tag}) {repack}",
         }
 
         overrides = self._get_overrides(meta)
