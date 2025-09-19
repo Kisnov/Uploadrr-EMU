@@ -88,7 +88,6 @@ class CleanupHandler:
     def __init__(self, thread_executor=None, name=""):
         self.thread_executor = thread_executor
         self._interrupted = False
-        self._loop = asyncio.get_running_loop()
         self.name = name or "Unnamed"
         self._register_signal_handlers()
 
@@ -100,8 +99,12 @@ class CleanupHandler:
         """Handle SIGINT by marking interrupted and cancelling tasks."""
         log.debug(f"Received SIGINT in {self.name}, initiating cleanup...")
         self._interrupted = True
-        for task in asyncio.all_tasks(self._loop):
-            task.cancel()
+        try:
+            loop = asyncio.get_running_loop()
+            for task in asyncio.all_tasks(loop):
+                task.cancel()
+        except RuntimeError:
+            pass
 
     @property
     def interrupted(self):
