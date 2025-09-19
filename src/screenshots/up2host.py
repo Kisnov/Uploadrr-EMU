@@ -33,8 +33,8 @@ class ScreenshotUploader:
             module = import_module(f"src.screenshots.imghosts.{module_name}")
             host_class = getattr(module, class_name)
             return host_class(self.config)
-        except (ImportError, AttributeError) as e:
-            log.warning(f"[Uploader] Failed to load host '{module_name}': {e}")
+        except (ImportError, AttributeError, KeyError) as e:
+            log.warning(f"[Uploader] Failed to load host '{module_name}'): {e}")
             return None
 
     async def upload_screenshots(
@@ -50,11 +50,22 @@ class ScreenshotUploader:
                     per_episode = self.config["SCREENS"].get("per_episode", 3)
                     for ep_screens in screens["episodes"].values():
                         total_to_upload += min(len(ep_screens), per_episode)
+                if "contact_sheets" in screens:
+                    contact_images = (
+                        screens["contact_sheets"] if isinstance(screens["contact_sheets"], list) else [screens["contact_sheets"]]
+                    )
+                    total_to_upload += len(contact_images)
                 pm.screen_start(total_to_upload)
 
-            result = {"main": [], "episodes": {}}
+            result = {"main": [], "episodes": {}, "contact_sheets": []}
 
             for section, images in screens.items():
+                if section == "contact_sheets" and images:
+                    images = [
+                        {"local_file": img} if isinstance(img, str) else img
+                        for img in (images if isinstance(images, list) else [images])
+                    ]
+
                 if section == "main":
                     uploaded = await self._upload_batch(
                         meta, images, viable_hosts, f"main screenshots for {meta['name']}", meta.get("screens", 3)
@@ -77,19 +88,47 @@ class ScreenshotUploader:
                             up["local_file"] = ep_screens[i]["local_file"]
                         result["episodes"][ep_name] = uploaded
 
+                elif section == "contact_sheets":
+                    uploaded = await self._upload_batch(meta, images, viable_hosts, f"contact sheet for {meta['name']}", len(images))
+                    log.debug(f"Uploaded {len(uploaded)} contact images: {[img.get('img_url', '') for img in uploaded]}")
+                    for i, up in enumerate(uploaded):
+                        up["local_file"] = images[i]["local_file"]
+                    result["contact_sheets"] = uploaded
+
             if pm:
                 pm.screen_done()
             return result
 
     async def _upload_batch(self, meta, images, viable_hosts, label, max_images):
-        log.debug(f"_upload_batch: {len(images)} images for {label}: {[img['local_file'] for img in images]}")
+        # Ensure images is a list of dicts
+        images = [{"local_file": img} if isinstance(img, str) else img for img in (images if isinstance(images, list) else [images])]
+        log.debug(f"_upload_batch: {len(images)} images for {label}: {[img['local_file'] for img in images if 'local_file' in img]}")
         if not images:
             log.debug(f"No images to upload for {label}")
             return []
+
+        # Adult host override logic
+        hosts_to_use = viable_hosts[:]
+        adult = True if meta.get("xxx", False) and (self.config.get("ADULT") is not None) else False
+        if adult:
+            adult_config = self.config["ADULT"]
+            if adult_config.get("image_hosts") == "imgbox":
+                hosts_to_use = ["imgbox"]
+            else:
+                adult_hosts = [
+                    key[:-4] for key in adult_config if key.endswith("_api") and key != "tpdb_api" and adult_config.get(key)
+                ]
+                if adult_hosts:
+                    hosts_to_use = adult_hosts
+                    if "imgbox" not in adult_hosts:
+                        hosts_to_use.append("imgbox")  # Fallback to imgbox
+                else:
+                    hosts_to_use = ["imgbox"]  # No valid adult hosts, use imgbox
+        log.debug(f"adult = {adult}, meta['xxx'] = {meta['xxx']}, config = {self.config['ADULT']}")
         last_exc = None
-        for host in viable_hosts:
+        for host in hosts_to_use:
             try:
-                uploaded = await self._upload_with_retries(host, images, meta, meta["name"], max_images)
+                uploaded = await self._upload_with_retries(host, images, meta, meta["name"], max_images, adult=adult)
                 if uploaded:
                     log.debug(f"Successfully uploaded {len(uploaded)} images to {host} for {label}")
                     return uploaded
@@ -105,16 +144,18 @@ class ScreenshotUploader:
         log.error(err_msg)
         return []
 
-    async def _upload_with_retries(self, host_name, images, meta, title, max_images, max_retries=3):
+    async def _upload_with_retries(self, host_name, images, meta, title, max_images, adult=False, max_retries=3):
         pm = ProgressManager.get_instance()
         host = self._load_host(host_name)
         if not host:
-            log.error(f"[Uploader] Skipping upload: could not load host '{host_name}'")
+            log.error(f"[Uploader] Skipping upload: could not load host '{host_name}' (adult={adult})")
             return []
 
         tmp_dir = self.base_dir / "tmp" / meta["uuid"]
         image_paths = [
-            (tmp_dir / img["local_file"]).as_posix() for img in images[:max_images] if Path(tmp_dir / img["local_file"]).exists()
+            (tmp_dir / img["local_file"]).as_posix()
+            for img in images[:max_images]
+            if "local_file" in img and Path(tmp_dir / img["local_file"]).exists()
         ]
         log.debug(f"Preparing to upload {len(image_paths)} images: {image_paths}")
 
@@ -122,13 +163,15 @@ class ScreenshotUploader:
             try:
                 results = []
                 if hasattr(host, "upload_batch"):
-                    batch_results = await host.upload_batch(self.client, image_paths, title=title)
+                    log.debug(f"Trying {host} in upload_batch")
+                    batch_results = await host.upload_batch(self.client, image_paths, title=title, adult=adult)
                     successful = sum(1 for r in batch_results if r and all(k in r for k in ("img_url", "raw_url", "web_url")))
                     if pm:
                         pm.screen_up(successful)
                     results = batch_results
                 else:
-                    tasks = [host.upload(self.client, path, title) for path in image_paths]
+                    log.debug(f"Trying {host} in upload")
+                    tasks = [host.upload(self.client, path, title=title, adult=adult) for path in image_paths]
                     for f in asyncio.as_completed(tasks):
                         try:
                             r = await f

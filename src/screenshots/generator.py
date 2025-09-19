@@ -3,6 +3,7 @@ import glob
 import os
 import random
 import re
+import sys
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -15,15 +16,30 @@ from src.mediainfo import MediaInfoHandler
 from src.progress import ProgressManager
 from src.utils.console import log
 
+# from .contact_sheet import ContactSheetGenerator
+
+try:
+    import oxipng
+
+    OXIPNG_AVAILABLE = True
+except ImportError:
+    OXIPNG_AVAILABLE = False
+    log.warning("pyoxipng not available. PNG optimization will use ffmpeg only.")
+
 
 class ScreenshotGenerator:
     def __init__(self, config, base_dir):
         self.config = config
         self.base_dir = base_dir
+        self.mihandle = MediaInfoHandler(config, base_dir)
+        # self.contact = ContactSheetGenerator(config, base_dir, self.mihandle)
         self.tmp_dir = None
         self.min_image_size = 75000
-        self.max_image_size = 3000000
         self.cache = {}  # Simple in-memory cache: {uuid: List[Dict]}
+
+        self.screens = self.config.get("SCREENS", {})
+        self.use_oxipng = self.screens.get("use_oxipng", False) and OXIPNG_AVAILABLE
+        self.pyoxipng_level = self.screens.get("oxipng_level", 4)  # Default level 4
 
     async def generate_screenshots(self, meta: Dict, filename: str, uuid: str) -> Dict:
         """Generate screenshots for the given media, reusing existing ones if valid."""
@@ -35,7 +51,7 @@ class ScreenshotGenerator:
         contact_screens = 0
         rows = columns = None
         if meta.get("xxx", False):
-            contact_cfg = self.config["SCREENS"].get("contact_sheet", {})
+            contact_cfg = self.screens.get("contact_sheets", {})
             rows = contact_cfg.get("row")
             columns = contact_cfg.get("column")
             if rows is None or columns is None:
@@ -66,15 +82,39 @@ class ScreenshotGenerator:
         else:
             result = await self._generate_file_screenshots(meta, filename, uuid, screens, contact_screens)
 
+        if pm:
+            pm.update("Screenshot generation complete")
+
         # -- CONTACT SHEETS -- #
         if contact_screens > 0 and result.get("main"):
             if pm:
                 pm.update("Creating contact sheet")
-            await self._generate_contact_sheet(result["main"][:contact_screens], meta, tmp_dir / "contact_sheet.png", rows, columns)
 
-        self.cache[uuid] = result
-        if pm:
-            pm.update("Screenshot generation complete")
+            meta_with_cache = meta.copy()
+            meta_with_cache["cached_screenshots"] = self.cache.get(uuid, [])
+            video_files = meta.get("video_files", [meta.get("video")])
+            max_sheets = self.screens["contact_sheets"].get("max", 1)
+            num_sheets = min(len(video_files), max_sheets)
+
+            result["contact_sheets"] = []
+            for idx, vf in enumerate(video_files[:num_sheets]):
+                out_path = tmp_dir / f"contact_sheet_{idx + 1}.png"
+                await self.contact.generate_contact_sheet(result["main"][:contact_screens], meta_with_cache, out_path, rows, columns)
+                result["contact_sheets"].append({"local_file": out_path.name})
+
+        # -- OPTIMIZATION with oxipng -- #
+        if self.use_oxipng and OXIPNG_AVAILABLE:
+            if pm:
+                pm.update("Optimizing with oxipng")
+            optimize_tasks = [self._optimize_image((tmp_dir / img["local_file"])) for img in result["main"]]
+            await asyncio.gather(*optimize_tasks)
+            if pm:
+                pm.update("Optimization Complete")
+
+        if uuid in self.cache:
+            del self.cache[uuid]
+        self.cache.clear()
+
         return result
 
     async def _generate_file_screenshots(self, meta, filename, uuid, screens, contact_screens):
@@ -89,25 +129,31 @@ class ScreenshotGenerator:
         ]
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
+        ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
 
         if num_to_generate > 0:
             new_screenshots = await self._generate_file(meta, filename, uuid, num_to_generate, meta.get("video"))
-            all_screenshots = [
-                {"local_file": Path(path).name, "ss_time": t}
-                for path, t in [(img, 0) for img in existing_screenshots] + new_screenshots
-            ]
+            existing_pairs = [(img, ss_time_map.get(Path(img).name, 0)) for img in existing_screenshots]
+            combined = existing_pairs + new_screenshots
+            all_screenshots = [{"local_file": Path(path).name, "ss_time": t} for path, t in combined]
         else:
-            all_screenshots = [{"local_file": Path(img).name, "ss_time": 0} for img in existing_screenshots]
+            all_screenshots = [
+                {"local_file": Path(img).name, "ss_time": ss_time_map.get(Path(img).name, 0)} for img in existing_screenshots
+            ]
 
+        self.cache[uuid] = all_screenshots
         return {"main": all_screenshots[:screens], "episodes": {}}
 
     async def _generate_tv_pack_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for TV pack, reusing valid existing ones per episode."""
-        per_episode = self.config["SCREENS"].get("per_episode", 3)
+        per_episode = self.screens.get("per_episode", 3)
 
         tmp_dir = self.base_dir / "tmp" / uuid
         filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
         result = {"main": [], "episodes": {}}
+
+        ss_time_map_main = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
+        episodes_images = meta.get("image_list", {}).get("episodes", {})
 
         for ep_path in filelist:
             if not self._is_video_file(ep_path):
@@ -124,15 +170,22 @@ class ScreenshotGenerator:
             ]
             num_existing = len(existing_screenshots)
             num_to_generate = num_needed - num_existing
+            ep_ss_map = (
+                {img["local_file"]: img.get("ss_time", 0) for img in episodes_images.get(ep_name, [])} if episodes_images else {}
+            )
 
             if num_to_generate > 0:
                 new_screenshots = await self._generate_file(meta, ep_filename, uuid, num_to_generate, ep_path)
-                ep_screens = [
-                    {"local_file": Path(path).name, "ss_time": t}
-                    for path, t in [(img, 0) for img in existing_screenshots] + new_screenshots
+                existing_pairs = [
+                    (img, ep_ss_map.get(Path(img).name, ss_time_map_main.get(Path(img).name, 0))) for img in existing_screenshots
                 ]
+                combined = existing_pairs + new_screenshots
+                ep_screens = [{"local_file": Path(path).name, "ss_time": t} for path, t in combined]
             else:
-                ep_screens = [{"local_file": Path(img).name, "ss_time": 0} for img in existing_screenshots]
+                ep_screens = [
+                    {"local_file": Path(img).name, "ss_time": ep_ss_map.get(Path(img).name, ss_time_map_main.get(Path(img).name, 0))}
+                    for img in existing_screenshots
+                ]
 
             if ep_name == "E01":
                 result["main"] = ep_screens[:screens]
@@ -153,17 +206,20 @@ class ScreenshotGenerator:
         ]
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
+        ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
 
         if num_to_generate > 0:
             bdinfo = meta["bdinfo"]
             new_screenshots = await self._generate_bdmv(meta, filename, uuid, bdinfo, num_to_generate)
-            all_screenshots = [
-                {"local_file": Path(path).name, "ss_time": t}
-                for path, t in [(img, 0) for img in existing_screenshots] + new_screenshots
-            ]
+            existing_pairs = [(img, ss_time_map.get(Path(img).name, 0)) for img in existing_screenshots]
+            combined = existing_pairs + new_screenshots
+            all_screenshots = [{"local_file": Path(path).name, "ss_time": t} for path, t in combined]
         else:
-            all_screenshots = [{"local_file": Path(img).name, "ss_time": 0} for img in existing_screenshots]
+            all_screenshots = [
+                {"local_file": Path(img).name, "ss_time": ss_time_map.get(Path(img).name, 0)} for img in existing_screenshots
+            ]
 
+        self.cache[uuid] = all_screenshots
         return {"main": all_screenshots[:screens], "episodes": {}}
 
     async def _generate_dvd_screenshots(self, meta, filename, uuid, screens, contact_screens):
@@ -179,21 +235,22 @@ class ScreenshotGenerator:
         ]
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
+        ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
 
         if num_to_generate > 0:
             new_screenshots = await self._generate_dvd(meta, filename, num_to_generate)
-            all_screenshots = [
-                {"local_file": Path(path).name, "ss_time": t}
-                for path, t in [(img, 0) for img in existing_screenshots] + new_screenshots
-            ]
+            existing_pairs = [(img, ss_time_map.get(Path(img).name, 0)) for img in existing_screenshots]
+            combined = existing_pairs + new_screenshots
+            all_screenshots = [{"local_file": Path(path).name, "ss_time": t} for path, t in combined]
         else:
-            all_screenshots = [{"local_file": Path(img).name, "ss_time": 0} for img in existing_screenshots]
+            all_screenshots = [
+                {"local_file": Path(img).name, "ss_time": ss_time_map.get(Path(img).name, 0)} for img in existing_screenshots
+            ]
 
+        self.cache[uuid] = all_screenshots
         return {"main": all_screenshots[:screens], "episodes": {}}
 
     async def _generate_bdmv(self, meta, filename, uuid, bdinfo, num_screens):  # TODO Perfect this. NN to test on TV BDMV
-        # file = self._find_longest_file(bdinfo)
-        # length = self._get_length(bdinfo)
         file, length = self.get_main_m2ts_and_duration(meta, uuid)
         keyframe = "nokey" if ("VC-1" in bdinfo["video"][0]["codec"] or bdinfo["video"][0]["hdr_dv"]) else "none"
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
@@ -242,51 +299,138 @@ class ScreenshotGenerator:
     async def _generate_file(self, meta, filename, uuid, num_screens, file_path):
         if not Path(file_path).is_file():
             return []
+        ffdebug = meta.get("ffdebug", False)
+        keyframe = "none"
         try:
-            probe = ffmpeg.probe(file_path, select_streams="v:0")
-            format_info = ffmpeg.probe(file_path, show_format=True)
+            probe = await self._ffprobe(file_path, "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", ffdebug=ffdebug)
+            format_info = await self._ffprobe(file_path, "-show_format", ffdebug=ffdebug)
+
             length = float(format_info["format"]["duration"])
-        except (ffmpeg.Error, KeyError, ValueError):
+            frame_rate_str = probe["streams"][0]["r_frame_rate"]
+            num, denom = map(int, frame_rate_str.split("/"))
+            frame_rate = num / denom
+
+        except (KeyError, ValueError, RuntimeError) as e:
             try:
-                probe = ffmpeg.probe(file_path)
+                probe = await self._ffprobe(file_path, "-show_format", ffdebug=ffdebug)
                 length = float(probe["format"]["duration"])
-            except (ffmpeg.Error, KeyError, ValueError) as e:
-                raise RuntimeError(f"Failed to probe file {file_path}") from e
+                frame_rate = 23.976  # Fallback
+                log.warning(f"Failed to probe frame rate for {file_path}: {e}")
+            except (KeyError, ValueError, RuntimeError) as e2:
+                log.error(f"Failed to probe file {file_path}: {e2}")
+                raise RuntimeError(f"Failed to probe file {file_path}") from e2
+
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
+
+        keyframes = []
+        if self.screens.get("keyframes_only", False):
+            try:
+                # ±30 seconds to ensure keyframes are captured
+                intervals = ",".join(f"{max(0, t - 30)}%{t + 30}" for t in ss_times)
+                keyframe_probe = await self._ffprobe(
+                    file_path,
+                    "-select_streams",
+                    "v:0",
+                    "-skip_frame",
+                    "nokey",  # Only show keyframes (I-frames)
+                    "-show_entries",
+                    "frame=pkt_pts_time,key_frame",
+                    "-show_frames",
+                    "-read_intervals",
+                    intervals,
+                    ffdebug=ffdebug,
+                )
+                if ffdebug:
+                    log.debug(f"Raw ffprobe output for keyframes: {keyframe_probe}")
+                keyframes = []
+                for frame in keyframe_probe.get("frames", []):
+                    if frame.get("key_frame") == 1:
+                        try:
+                            keyframes.append(float(frame["pts_time"]))
+                        except (ValueError, KeyError):
+                            continue  # Skip malformed frames
+                if not keyframes:
+                    log.warning(f"No keyframes found for {file_path} in intervals {intervals}. Using original ss_times.")
+                else:
+                    log.debug(f"Found {len(keyframes)} keyframes for {file_path}")
+            except Exception as e:
+                error_msg = f"Failed to probe keyframes for {file_path}: {e}"
+                log.warning(error_msg)
+                keyframes = []
+
+        adjusted_ss_times = []
+        if keyframes:
+            keyframe = "nokey"
+            for t in ss_times:
+                closest_keyframe = min(keyframes, key=lambda x: abs(x - t))
+                adjusted_ss_times.append(closest_keyframe)
+                log.debug(f"Adjusted ss_time {t} to keyframe {closest_keyframe}")
+        else:
+            adjusted_ss_times = ss_times
+
         max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
         tasks = [
             self._take_screenshot(
-                file_path, f"{filename}-{max_idx + 1 + i}.png", t, "none", meta.get("ffdebug", False), hdr=meta.get("hdr")
+                file_path,
+                f"{filename}-{max_idx + 1 + i}.png",
+                t,
+                keyframe,
+                meta.get("ffdebug", False),
+                hdr=meta.get("hdr"),
+                frame_rate=frame_rate,
+                adjusted_ss_time=t,
             )
-            for i, t in enumerate(ss_times)
+            for i, t in enumerate(adjusted_ss_times)
         ]
         results = await asyncio.gather(*tasks)
         return await self._validate_and_retry(meta, results, file_path, filename, length, "none", num_screens)
 
-    async def _take_screenshot(self, file, output, ss_time, keyframe, ffdebug, retries=3, vobs=None, hdr=None):
+    async def _take_screenshot(
+        self, file, output, ss_time, keyframe, ffdebug, retries=3, vobs=None, hdr=None, frame_rate=23.976, adjusted_ss_time=None
+    ):
         loglevel = "verbose" if (ffdebug or log.ddebug) else "error"
         vf_filters = []
         if vobs:
-            vf_filters.append(self.config["SCREENS"].get("deinterlace_method", "yadif"))
-        if hdr and self.config["SCREENS"].get("tonemap_hdr", True):
+            vf_filters.append(self.screens.get("deinterlace_method", "yadif"))
+        if hdr and self.screens.get("tonemap_hdr", True):
             vf_filters.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=709")
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
             vf_filters.append("zscale=t=bt709:m=bt709:r=full,format=rgb24")
+        if self.screens.get("frame_stats", False):
+            font = str(Path(__file__).parent / "fonts" / "Dosis.ttf")
+            if sys.platform == "win32":
+                font = font.replace("\\", "\\\\").replace(":", "\\:")
+            frame_time = adjusted_ss_time if adjusted_ss_time is not None else ss_time
+            frame_num = int(round(frame_time * frame_rate))
+            stats = (
+                "drawtext=fontfile='{}':"
+                "fontsize=24:fontcolor=white:x=10:y=10:box=1:boxcolor=black@0.5:boxborderw=5:"
+                "text='%{{pict_type}}-Frame \nFrame\\: {}  \n%{{pts\\:hms}}'"
+            ).format(font, frame_num)
+            vf_filters.append(stats)
+
         vf_filter = ",".join(vf_filters) or "scale=iw:ih"
-        optimize = self.config["SCREENS"].get("optimize", False)
-        o_lvl = 0 if not optimize else (6 if optimize is True else min(optimize, 10))
+
+        optimize = self.screens.get("optimize", False)
+        if self.use_oxipng or not optimize:
+            o_lvl = 0
+        else:
+            o_lvl = 6 if optimize is True else min(optimize, 10)
 
         for attempt in range(retries):
             try:
+                # Build base args
                 args = [
                     "ffmpeg",
                     "-y",
                     "-loglevel",
                     loglevel,
+                    "-hide_banner",
                     "-ss",
                     str(ss_time),
+                    "-copyts",
                     "-i",
                     file,
                     "-vframes",
@@ -294,49 +438,69 @@ class ScreenshotGenerator:
                     "-vf",
                     vf_filter,
                     "-compression_level",
-                    o_lvl,
+                    str(o_lvl),
                     "-pred",
                     "mixed",
                     output,
                 ]
-                log.debug(f" COMMAND CALLED:\n [blue]{args} \n")
+
                 if keyframe == "nokey":
                     args.insert(1, "-skip_frame")
                     args.insert(2, "nokey")
+
+                log.debug(f" COMMAND CALLED:\n [blue]{args} \n")
+
                 process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                 stdout, stderr = await process.communicate()
+                stderr_text = stderr.decode("utf-8", errors="ignore")
+                if ffdebug:
+                    log.info(f"ffmpeg stderr:\n{stderr_text}")
+
                 if process.returncode != 0:
                     log.error(f"FFmpeg failed for {output} with returncode {process.returncode}: {stderr.decode()}")
+                    continue
+
                 if process.returncode == 0 and Path(output).exists():
                     size = Path(output).stat().st_size
-                    if self.min_image_size <= size <= self.max_image_size and not self.is_monochromatic(output):
+                    if self.min_image_size <= size and not self.is_monochromatic(output):
                         return (output, ss_time)
                     log.debug(f"Discarding {output}: {'monochromatic' if self.is_monochromatic(output) else 'invalid size'}")
                     Path(output).unlink()
+
             except Exception as e:
                 log.error(f"FFmpeg failed for {output}: {e}")
                 if Path(output).exists():
                     Path(output).unlink()
+
         return None
 
     async def _validate_and_retry(self, meta, results, file, filename, length, keyframe, num_screens, vobs=None):
+        """Validate screenshots and retry missing ones"""
+
         valid = [
             (r[0], r[1])
             for r in results
-            if r and Path(r[0]).exists() and self.min_image_size <= Path(r[0]).stat().st_size <= self.max_image_size
+            if r and Path(r[0]).exists() and self.min_image_size <= Path(r[0]).stat().st_size and not self.is_monochromatic(r[0])
         ]
-        if len(valid) < num_screens:
-            missing = num_screens - len(valid)
-            new_times = self._generate_valid_ss_times(length, missing, avoid_times={t for _, t in valid})
+
+        missing = num_screens - len(valid)
+        if missing > 0:
+            used_times = {t for _, t in valid}
+            new_times = self._generate_valid_ss_times(length, missing, avoid_times=used_times)
+            start_idx = len(valid) + 1
             tasks = [
                 self._take_screenshot(
-                    file, f"{filename}-{i}.png", t, keyframe, meta.get("ffdebug", False), vobs=vobs, hdr=meta.get("hdr")
+                    file, f"{filename}-{start_idx + i}.png", t, keyframe, meta.get("ffdebug", False), vobs=vobs, hdr=meta.get("hdr")
                 )
                 for i, t in enumerate(new_times)
             ]
             retry_results = await asyncio.gather(*tasks)
-            valid.extend([r for r in retry_results if r and Path(r[0]).exists()])
-        return valid[:num_screens]
+            valid.extend([
+                r
+                for r in retry_results
+                if r and Path(r[0]).exists() and self.min_image_size <= Path(r[0]).stat().st_size and not self.is_monochromatic(r[0])
+            ])
+        return valid
 
     def _generate_valid_ss_times(self, length, num_screens, avoid_times=None):
         avoid_times = avoid_times or set()
@@ -351,19 +515,6 @@ class ScreenshotGenerator:
                     times.add(t)
                     break
         return sorted(times)
-
-    async def _generate_contact_sheet(self, screenshots, meta, output_path, rows, columns):
-        thumbnail_width = 400
-        thumbnail_height = int(thumbnail_width * (Image.open(screenshots[0][0]).size[1] / Image.open(screenshots[0][0]).size[0]))
-        width = 2 * 3 + columns * thumbnail_width + (columns - 1) * 3
-        height = 3 + 100 + rows * thumbnail_height + (rows - 1) * 3
-        sheet = Image.new("RGB", (width, height), (0, 0, 0))
-        for i, (path, _) in enumerate(screenshots[: rows * columns]):
-            img = Image.open(path).resize((thumbnail_width, thumbnail_height), Image.Resampling.LANCZOS)
-            x = 3 + (i % columns) * (thumbnail_width + 3)
-            y = 103 + (i // columns) * (thumbnail_height + 3)
-            sheet.paste(img, (x, y))
-        sheet.save(output_path)
 
     def is_monochromatic(self, image_path, sample_size=100):
         try:
@@ -397,7 +548,7 @@ class ScreenshotGenerator:
             return True
 
         if meta.get("tv_pack") == 1:
-            per_episode = self.config["SCREENS"].get("per_episode", 3)
+            per_episode = self.screens.get("per_episode", 3)
             filelist = meta.get("filelist", [])
             if not filelist:
                 return len(existing.get("main", [])) >= screens and files_exist(existing.get("main", []))
@@ -430,7 +581,6 @@ class ScreenshotGenerator:
 
     def get_main_m2ts_and_duration(self, meta: dict, uuid: str) -> Tuple[str, float]:
         """Returns the path and duration (in seconds) of the largest .m2ts file in a BD structure."""
-        mih = MediaInfoHandler()
         stream_path = Path(meta["path"]) / "BDMV" / "STREAM"
 
         if not stream_path.exists():
@@ -441,7 +591,7 @@ class ScreenshotGenerator:
             raise FileNotFoundError(f"No .m2ts files found in {stream_path}")
 
         largest = max(m2ts_files, key=lambda p: p.stat().st_size)
-        cached = mih._cache.get(uuid)
+        cached = self.mihandle._cache.get(uuid)
         duration = None
         if cached:
             for track in cached.get("media", {}).get("track", []):
@@ -485,6 +635,44 @@ class ScreenshotGenerator:
             return 6, 3  # noqa: E701
         else:
             return 8, 3  # noqa: E701
+
+    async def _ffprobe(self, file_path: str, *extra_args, ffdebug=False) -> dict:
+        """Run ffprobe asynchronously and return parsed JSON output."""
+        import json
+
+        cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", *extra_args, str(file_path)]  # Use str(file_path) for safety
+        if ffdebug or log.ddebug:
+            log.debug(f"Running ffprobe: {' '.join(cmd)!r}")
+        try:
+            process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)  # 5-minute timeout to prevent hangs
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()  # Wait for kill to complete
+                raise RuntimeError(f"ffprobe timed out for {file_path}")
+
+            stderr_text = stderr.decode("utf-8", errors="ignore").strip()
+            if process.returncode != 0:
+                raise RuntimeError(f"ffprobe failed with code {process.returncode}: {stderr_text}")
+
+            if not stdout:
+                raise RuntimeError("ffprobe returned empty output")
+
+            return json.loads(stdout.decode("utf-8"))
+
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"ffprobe returned invalid JSON: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"ffprobe error: {str(e)}") from e
+
+    async def _optimize_image(self, image_path: str):
+        """Run oxipng to losslessly optimize the PNG."""
+        try:
+            oxipng.optimize(image_path, level=self.pyoxipng_level)
+            log.debug(f"Optimized {image_path} with pyoxipng level {self.pyoxipng_level}")
+        except Exception as e:
+            log.warning(f"Failed to optimize {image_path} with pyoxipng: {e}")
 
     @staticmethod
     def kill_orphaned_ffmpeg() -> None:
