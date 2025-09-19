@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import aiofiles
@@ -13,19 +14,35 @@ class CheveretoTemplate(BaseImageHost):
         self.api_key_name = api_key_name
         self.api_url = api_url
         self.host_name = host_name
-        self.api_key = self.config["SCREENS"].get(api_key_name)
-        if not self.api_key:
-            raise KeyError(f"API key '{api_key_name}' not found in config['SCREENS']")
 
-    async def upload(self, client, image_path, title):
+    async def upload(self, client, image_path, title=None, adult=False):
+        """Upload an image to Chevereto and return a dict with img_url, raw_url, and web_url."""
+        config_section = (
+            self.config["ADULT"]
+            if adult
+            and (self.config.get("ADULT", {}).get(self.api_key_name) or self.config.get("ADULT", {}).get("imgbox_only", False))
+            else self.config["SCREENS"]
+        )
+        api_key = config_section.get(self.api_key_name)
+
+        if not api_key:
+            if not adult or self.host_name == "imgbox":
+                log.warning(
+                    f"API key '{self.api_key_name}' not found in config['{'ADULT' if adult else 'SCREENS'}'] for {self.host_name}"
+                )
+            else:
+                raise KeyError(f"API key '{self.api_key_name}' not found in config['ADULT'] for {self.host_name}")
+
+        log.debug(f"Using API key for {self.host_name} (adult={adult}): {api_key}")
         try:
             async with aiofiles.open(image_path, "rb") as f:
                 img = await f.read()
 
-            headers = {"X-API-Key": self.api_key}
-            data = {"image": base64.b64encode(img).decode("utf8"), "tags": title}
+            headers = {"X-API-Key": api_key}
+            data = {"image": base64.b64encode(img).decode("utf8"), "nsfw": "1" if adult else "0"}
+            if title:
+                data["title"] = title
 
-            log.debug(f"[{self.host_name}] Uploading {image_path} with title '{title}'")
             resp = await client.post(self.api_url, headers=headers, data=data)
 
             content_type = resp.headers.get("content-type")
@@ -53,3 +70,16 @@ class CheveretoTemplate(BaseImageHost):
         except Exception as e:
             log.error(f"[{self.host_name}] Failed to upload {image_path}: {repr(e)}")
             raise
+
+    async def upload_batch(self, client, image_paths, title=None, adult=False):
+        """Upload multiple images and return a list of results."""
+        tasks = [self.upload(client, path, title, adult) for path in image_paths]
+        results = []
+        for f in asyncio.as_completed(tasks):
+            try:
+                result = await f
+                results.append(result)
+            except Exception as e:
+                log.debug(f"Upload failed for {self.host_name}: {e}")
+                results.append(None)
+        return results
