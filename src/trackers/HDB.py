@@ -376,7 +376,7 @@ class HDB:
             base = await f.read()
 
         async with aiofiles.open(tmp_dir / f"[{self.tracker}]DESCRIPTION.txt", "w", encoding="utf-8") as descfile:
-            from src.bbcode import BBCODE
+            from src.utils.bbcode import BBCODE
 
             if meta["type"] == "WEBDL" and meta.get("service_longname", "") and not meta.get("description"):
                 await descfile.write(f"[center][quote]This release is sourced from {meta['service_longname']}[/quote][/center]")

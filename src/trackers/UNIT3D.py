@@ -8,8 +8,8 @@ import bs4
 import httpx
 from rich.pretty import Pretty
 
-from src.trackers.COMMON import COMMON
 from src.utils.console import console, log
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -93,14 +93,26 @@ class Unit3d:
         return {}
 
     async def upload(self, meta: Dict[str, Any]) -> bool:
-        common = COMMON(config=self.config)
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
         cat_id = await self.get_cat_id(meta)
         type_id = await self.get_type_id(meta)
         resolution_id = await self.get_res_id(meta)
 
-        await common.unit3d_edit_desc(meta, self.tracker)
-        # region_id = await common.unit3d_region_ids(meta.get("region"))
-        anon = 1 if (meta.get("anon", 0) or self.config["TRACKERS"][self.tracker].get("anon", False)) else 0
+        await descgen.edit_desc(meta, self.tracker)
+        # region_id = await common.unit3d_region_ids(meta.get("region")) # TODO TEST THIS
+        xanon = (
+            1
+            if (self.config["TRACKERS"][self.tracker].get("xanon", False) or self.config.get("ADULT").get("anon", False))
+            and meta.get("xxx")
+            else 0
+        )
+        anon = (
+            1
+            if (meta.get("anon", 0) or self.config["TRACKERS"][self.tracker].get("anon", False))
+            or self.config["DEFAULT"].get("always_anon", False)
+            or xanon
+            else 0
+        )
         modq = 1 if meta.get("modq", False) or self.config["TRACKERS"][self.tracker].get("modq", False) else 0
 
         # Prepare file contents with context managers
@@ -123,6 +135,12 @@ class Unit3d:
             name = await self.edit_name(meta)
         name = name or meta["name"]
 
+        performers = meta.get("porndb", {}).get("performers", [])
+        tags = meta.get("porndb", {}).get("tags", [])
+
+        adult_keywords = performers + tags
+        keywords = meta["keywords"]
+
         # Build payload
         data = {
             "name": name,
@@ -131,14 +149,14 @@ class Unit3d:
             "category_id": cat_id,
             "type_id": type_id,
             "tmdb": meta.get("tmdb", 0),
-            "imdb": meta.get("imdb_id", 0).replace("tt", ""),
+            "imdb": meta.get("imdb_id", 0),
             "tvdb": meta.get("tvdb_id", 0),
             "mal": meta.get("mal_id", 0),
             "igdb": 0,
             "anonymous": anon,
             "stream": meta["stream"],
             "sd": meta["sd"],
-            "keywords": meta["keywords"],
+            "keywords": keywords or adult_keywords,
             "personal_release": int(meta.get("personalrelease", False)),
             "internal": 0,
             "featured": 0,
@@ -252,7 +270,7 @@ class Unit3d:
 
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
             "resolutions[]": await self.get_res_id(meta),

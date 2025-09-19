@@ -12,10 +12,10 @@ import rich.prompt as Prompt
 from bs4 import BeautifulSoup
 from torf import Torrent
 
-from src.bbcode import BBCODE
 from src.mediainfo import MediaInfoHandler
-from src.trackers.COMMON import COMMON
+from src.utils.bbcode import BBCODE
 from src.utils.console import log
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -139,8 +139,8 @@ class AR:
         desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
 
         if meta.get("is_music", False):
-            common = COMMON(config=self.config)
-            desc = await common.create_music_description(meta, self.tracker)
+            descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
+            desc = await descgen.create_music_description(meta, self.tracker)
             async with aiofiles.open(desc_path, "r", encoding="utf-8") as file:
                 desc = await file.read()
             desc = bbcode.clean_for_ar(desc)

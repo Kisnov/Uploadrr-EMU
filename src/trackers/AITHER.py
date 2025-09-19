@@ -147,7 +147,7 @@ class AITHER(Unit3d):
 
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
             "resolutions[]": await self.get_res_id(meta),

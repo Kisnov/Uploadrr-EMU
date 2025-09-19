@@ -137,7 +137,7 @@ class FL:
         if meta.get("anime", True) and meta.get("tag", "") == "-SubsPlease":
             torrentFileName = fl_name
         else:
-            if meta.get("isdir", False) is False:
+            if meta.get("is_dir", False) is False:
                 torrentFileName = meta.get("uuid")
                 torrentFileName = os.path.splitext(torrentFileName)[0]
             else:

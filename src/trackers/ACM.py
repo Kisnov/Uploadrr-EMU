@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 import httpx
 
-from src.bbcode import BBCODE
 from src.mediainfo import MediaInfoHandler
 from src.trackers.UNIT3D import Unit3d
+from src.utils.bbcode import BBCODE
 from src.utils.console import console
 
 
@@ -234,7 +234,7 @@ class ACM(Unit3d):
 
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
             # ACM doesn’t always have resolution info

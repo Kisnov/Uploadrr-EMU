@@ -8,8 +8,7 @@ from typing import Any, Dict, Optional
 import httpx
 from rich.pretty import Pretty
 
-from src.bbcode import BBCODE
-from src.trackers.COMMON import COMMON
+from src.utils.bbcode import BBCODE
 from src.utils.console import console
 from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
@@ -151,8 +150,8 @@ class TMG:
             return self.TYPE["GOLD"]
 
     async def edit_desc(self, meta: Dict[str, Any]) -> None:
-        common = COMMON(config=self.config)
-        await common.unit3d_edit_desc(meta, self.tracker, comparison=False)
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
+        await descgen.edit_desc(meta, self.tracker, comparison=False)
 
         tmp_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
         desc_path = tmp_path / "[TMG]DESCRIPTION.txt"

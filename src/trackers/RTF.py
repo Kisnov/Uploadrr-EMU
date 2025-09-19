@@ -7,8 +7,8 @@ from typing import Any, Dict
 import httpx
 from rich.pretty import Pretty
 
-from src.trackers.COMMON import COMMON
 from src.utils.console import console, log
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 from .UNIT3D import Unit3d
@@ -45,9 +45,9 @@ class RTF(Unit3d):
         return False, False
 
     async def upload(self, meta: Dict[str, Any]) -> bool:
-        common = COMMON(config=self.config)
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
-        await common.unit3d_edit_desc(meta, self.tracker, self.forum_link)
+        await descgen.edit_desc(meta, self.tracker, self.forum_link)
         if meta["bdinfo"] is not None:
             mi_dump = None
             bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", "r", encoding="utf-8").read()

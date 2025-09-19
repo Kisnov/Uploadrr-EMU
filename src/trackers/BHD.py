@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# import discord
 import asyncio
 import os
 import platform
@@ -7,7 +5,6 @@ from difflib import SequenceMatcher
 
 import requests
 
-from src.trackers.COMMON import COMMON
 from src.utils.console import console
 from src.utils.torrentman import edit_torrent
 

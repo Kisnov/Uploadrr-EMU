@@ -1,31 +1,38 @@
 import asyncio
-import os
 import pickle
 import re
 import traceback
 import xml.etree.ElementTree
+from pathlib import Path
+from typing import Any, Dict
 
-import requests
+import aiofiles
+import httpx
+from rich.pretty import Pretty
 from rich.prompt import Confirm
 from torf import Torrent
 
 from src.mediainfo import MediaInfoHandler
-from src.utils.console import console
+from src.utils.console import console, log
 from src.utils.torrentman import TorrentMaker, edit_torrent
 
 
 class MTV:
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.type = "http"
+        self.type = "http"  # TODO Luminance/Gazelle
         self.tracker = "MTV"
         self.source_flag = "MTV"
-        pid = config["TRACKERS"][self.tracker].get("PID", "PASSKEY_HERE")
-        self.announce_url = f"http://tracker.morethantv.me:2710/{pid}/announce"
+        self.timeout = 45
+        announce = config["TRACKERS"][self.tracker].get("PID", "PASSKEY_HERE")
+        if announce.startswith("https://"):
+            self.announce_url = announce
+        else:
+            self.announce_url = f"http://tracker.morethantv.me:2710/{announce}/announce"
         self.upload_url = "https://www.morethantv.me/upload.php"
         self.forum_link = "https://www.morethantv.me/wiki.php?action=article&id=73"
         self.search_url = "https://www.morethantv.me/api/torznab"
-        self.signature = None
+        self.allowed_imghosts = ["ptpimg", "imgbox", "empornium", "ibb"]
         self.banned_groups = {
             "ALL_TYPES": [
                 "aXXo",
@@ -59,60 +66,38 @@ class MTV:
             "EVO": ["DISC", "REMUX", "WEBRIP", "HDTV", "DVDRIP", "ENCODE"],
         }
 
-        pass
+    async def upload(self, meta: Dict[str, Any]):
+        cookiefile = Path(meta["base_dir"]) / "data" / "cookies" / "MTV.pkl"
 
-    async def upload(self, meta):
-        cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/MTV.pkl")
-
-        if not Torrent.read(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent").piece_size <= 8388608:
+        if Torrent.read(Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "BASE.torrent").piece_size > 8388608:
             console.print("[red]Piece size is OVER 8M and does not work on MTV. Generating a new .torrent")
             torrentmaker = TorrentMaker(self.config)
             await torrentmaker.create(meta, meta["filepath"], "BASE", piece_size_max=8)
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
 
-        # getting category HD Episode, HD Movies, SD Season, HD Season, SD Episode, SD Movies
         cat_id = await self.get_cat_id(meta)
-        # res 480 720 1080 1440 2160 4k 6k Other
         resolution_id = await self.get_res_id(meta["resolution"])
-        # getting source HDTV SDTV TV Rip DVD DVD Rip VHS BluRay BDRip WebDL WebRip Mixed Unknown
         source_id = await self.get_source_id(meta)
-        # get Origin Internal Scene P2P User Mixed Other. P2P will be selected if not scene
         origin_id = await self.get_origin_id(meta)
-        # getting tags
         des_tags = await self.get_tags(meta)
-        # check for approved imghosts
-        approved_imghosts = ["ptpimg", "imgbox", "empornium", "ibb"]
-        if not all(any(x in image["raw_url"] for x in approved_imghosts) for image in meta["image_list"]):
-            console.print("[red]Unsupported image host detected, please use one of the approved imagehosts")
-            return
-        # getting description
-        await self.edit_desc(meta)
-        # getting groups des so things like imdb link, tmdb link etc..
-        group_desc = await self.edit_group_desc(meta)
-        # poster is optional so no longer getting it as its a pain with having to use supported image provider
-        # poster = await self.get_poster(meta)
 
-        # edit name to match MTV standards
+        await self.edit_desc(meta)
+        group_desc = await self.edit_group_desc(meta)
+
         mtv_name = await self.edit_name(meta)
         manual_name = meta.get("manual_name")
 
-        # anon
-        if meta["anon"] != 0 or self.config["TRACKERS"][self.tracker].get("anon", False):
-            anon = 1
-        else:
-            anon = 0
+        anon = 1 if meta["anon"] != 0 or self.config["TRACKERS"][self.tracker].get("anon", False) else 0
 
-        desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "r", encoding="utf-8").read()
+        desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
+        desc = desc_path.read_text(encoding="utf-8")
 
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]{meta['clean_name']}.torrent", "rb") as f:
-            tfile = f.read()
-            f.close()
+        torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
+        tfile = torrent_path.read_bytes()
 
-        # need to pass the name of the file along with the torrent
         files = {"file_input": (f"{meta['name']}.torrent", tfile)}
 
         data = {
-            # 'image': poster,
             "image": "",
             "title": manual_name or mtv_name,
             "category": cat_id,
@@ -132,10 +117,7 @@ class MTV:
             "submit": "true",
         }
 
-        # cookie = {'sid': self.config['TRACKERS'][self.tracker].get('sid'), 'cid': self.config['TRACKERS'][self.tracker].get('cid')}
-
         param = {}
-
         if meta["imdb_id"] not in ("0", "", None):
             param["imdbID"] = "tt" + meta["imdb_id"]
         if meta["tmdb"] != 0:
@@ -144,63 +126,88 @@ class MTV:
             param["thetvdbID"] = meta["tvdb_id"]
         if meta["tvmaze_id"] != 0:
             param["tvmazeID"] = meta["tvmaze_id"]
-        # if meta['mal_id'] != 0:
-        #     param['malid'] = meta['mal_id']
 
-        if not meta["debug"]:
-            with requests.Session() as session:
-                with open(cookiefile, "rb") as cf:
-                    session.cookies.update(pickle.load(cf))
-                response = session.post(url=self.upload_url, data=data, files=files)
-                try:
-                    if "torrents.php" in response.url:
-                        console.print(response.url)
+        if meta.get("debug", False):
+            log.debug("[magenta]DATA 2 SEND[/magenta]:")
+            console.print(Pretty(data))
+            return "DEBUG"
+
+        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+            if cookiefile.exists():
+                async with aiofiles.open(cookiefile, "rb") as cf:
+                    cookies = pickle.load(cf)
+                    client.cookies.update(cookies)
+            response = await client.post(url=self.upload_url, data=data, files=files)
+            try:
+                if "torrents.php" in response.url:
+                    comment = f"Made by Uploadrr for {response.url}"
+                    await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url, comment)
+                    return True
+                elif "https://www.morethantv.me/upload.php" in response.url:
+                    log.warning("Stayed on Upload Page, Upload may have failed - Please Check.")
+                    return "Unexpected Response"
+                    if "error" in response.text.lower() or "failed" in response.text.lower():
+                        log.error("Upload Failed - Review Server Response")
+                        console.print(Pretty(data))
+                        return False
+                elif response.url in ["https://www.morethantv.me/", "https://www.morethantv.me/index.php"]:
+                    if "Project Luminance" in response.text:
+                        return "Not Logged In"
+                    elif "'GroupID' cannot be null" in response.text:
+                        log.warning("[red]Likely SITE BUG[/red]: https://www.morethantv.me/forum/thread/3338?")
+                        return False
+                    elif "Integrity constraint violation" in response.text:
+                        log.warning("[red]Likely SITE BUG[/red]: https://www.morethantv.me/forum/thread/3338?")
+                        return "Site Bug"
+
+                else:
+                    if "authkey.php" in response.url:
+                        log.warning("Upload may have failed - Please Check.")
+                        return "Unexpected Response"
                     else:
-                        if "authkey.php" in response.url:
-                            console.print(
-                                "[red]No DL link in response, So unable to download torrent but It may have uploaded, go check"
-                            )
-                            print(response.content)
-                            console.print(f"[red]Got response code = {response.status_code}")
-                            print(data)
-                        else:
-                            console.print("[red]Upload Failed, Doesnt look like you are logged in")
-                            print(response.content)
-                            print(data)
-                except Exception:
-                    console.print("[red]It may have uploaded, go check")
-                    console.print(data)
-                    print(traceback.print_exc())
-        else:
-            console.print("[cyan]Request Data:")
-            console.print(data)
-        return
+                        console.print(f"response URL: {response.url}")
+                        console.print(f"response status: {response.status_code}")
+                        console.print(Pretty(data))
+                        return False
+            except Exception:
+                console.warning("[red]It may have uploaded, please go check")
+                console.print(Pretty(data))
+                traceback.print_exc()
+                return "Unknown Error"
+        return True
 
-    async def edit_desc(self, meta):
-        base = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt", "r").read()
-        with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "w") as desc:
-            # adding bd_dump to description if it exits and adding empty string to mediainfo
+    async def edit_desc(self, meta: dict):
+        from src.utils.descgen import DescGenerator
+
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
+        base_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "DESCRIPTION.txt"
+        desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
+
+        base = await base_path.read_text(encoding="utf-8")
+
+        images = meta["image_list"]
+
+        async with aiofiles.open(desc_path, mode="w", encoding="utf-8") as desc:
             if meta["bdinfo"] is not None:
                 mi_dump = None
-                bd_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/BD_SUMMARY_00.txt", "r", encoding="utf-8").read()
+                bd_dump_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "BD_SUMMARY_00.txt"
+                bd_dump = await bd_dump_path.read_text(encoding="utf-8")
             else:
-                mi_dump = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/MEDIAINFO.txt", "r", encoding="utf-8").read()[:-65].strip()
+                mi_dump_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "MEDIAINFO.txt"
+                mi_dump = (await mi_dump_path.read_text(encoding="utf-8"))[:-65].strip()
                 bd_dump = None
+
             if bd_dump:
-                desc.write("[mediainfo]" + bd_dump + "[/mediainfo]\n\n")
+                await desc.write("[mediainfo]" + bd_dump + "[/mediainfo]\n\n")
             elif mi_dump:
-                desc.write("[mediainfo]" + mi_dump + "[/mediainfo]\n\n")
-            images = meta["image_list"]
-            if len(images) > 0:
-                desc.write("[spoiler=Screenshots]")
-                for each in range(len(images)):
-                    raw_url = images[each]["raw_url"]
-                    img_url = images[each]["img_url"]
-                    desc.write(f"[url={raw_url}][img=250]{img_url}[/img][/url]")
-                desc.write("[/spoiler]")
-            desc.write(f"\n\n{base}")
-            desc.close()
-        return
+                await desc.write("[mediainfo]" + mi_dump + "[/mediainfo]\n\n")
+
+            if images:
+                await desc.write("[spoiler=Screenshots]\n")
+                await descgen._write_images(desc, meta, self.tracker, whitelist=self.allowed_imghosts, img_size=250)
+                await desc.write("\n[/spoiler]")
+
+            await desc.write(f"\n\n[spoiler=Notes]{base}[/spoiler]")
 
     async def edit_group_desc(self, meta):
         description = ""
@@ -217,12 +224,11 @@ class MTV:
 
         return description
 
-    async def edit_name(self, meta):
+    async def edit_name(self, meta: Dict[str, Any]):
         mtv_name = meta["uuid"]
-        # Try to use original filename if possible
         if meta["source"].lower().replace("-", "") in mtv_name.replace("-", "").lower():
-            if not meta["isdir"]:
-                mtv_name = os.path.splitext(mtv_name)[0]
+            if not meta["is_dir"]:
+                mtv_name = Path(mtv_name).stem
         else:
             mtv_name = meta["name"]
             if meta.get("type") in ("WEBDL", "WEBRIP", "ENCODE") and "DD" in meta["audio"]:
@@ -238,53 +244,12 @@ class MTV:
             if "DD+" in meta.get("audio", "") and "DDP" in meta["uuid"]:
                 mtv_name = mtv_name.replace("DD+", "DDP")
             mtv_name = mtv_name.replace("Dubbed", "").replace("Dual-Audio", "DUAL")
-        # Add -NoGrp if missing tag
         if meta["tag"] == "":
             mtv_name = f"{mtv_name}-NoGrp"
         mtv_name = " ".join(mtv_name.split())
         mtv_name = re.sub(r"[^0-9a-zA-ZÀ-ÿ. &+'\-\[\]]+", "", mtv_name)
         mtv_name = mtv_name.replace(" ", ".").replace("..", ".")
         return mtv_name
-
-    # Not needed as its optional
-    # async def get_poster(self, meta):
-    #     if 'poster_image' in meta:
-    #         return meta['poster_image']
-    #     else:
-    #         if meta['poster'] is not None:
-    #             poster = meta['poster']
-    #         else:
-    #             if 'cover' in meta['imdb_info'] and meta['imdb_info']['cover'] is not None:
-    #                 poster = meta['imdb_info']['cover']
-    #             else:
-    #                 console.print(f'[red]No poster can be found for this EXITING!!')
-    #                 return
-    #         with requests.get(url=poster, stream=True) as r:
-    #             with open(f"{meta['base_dir']}/tmp/{meta['uuid']}/{meta['clean_name']}-poster.jpg",
-    #                       'wb') as f:
-    #                 shutil.copyfileobj(r.raw, f)
-    #
-    #         url = "https://api.imgbb.com/1/upload"
-    #         data = {
-    #             'key': self.config['DEFAULT']['imgbb_api'],
-    #             'image': base64.b64encode(open(f"{meta['base_dir']}/tmp/{meta['uuid']}/{meta['clean_name']}-poster.jpg", "rb").read()).decode('utf8')
-    #         }
-    #         try:
-    #             console.print("[yellow]uploading poster to imgbb")
-    #             response = requests.post(url, data=data)
-    #             response = response.json()
-    #             if response.get('success') != True:
-    #                 console.print(response, 'red')
-    #             img_url = response['data'].get('medium', response['data']['image'])['url']
-    #             th_url = response['data']['thumb']['url']
-    #             web_url = response['data']['url_viewer']
-    #             raw_url = response['data']['image']['url']
-    #             meta['poster_image'] = raw_url
-    #             console.print(f'[green]{raw_url} ')
-    #         except Exception:
-    #             console.print("[yellow]imgbb failed to upload cover")
-    #
-    #         return raw_url
 
     async def get_res_id(self, resolution):
         resolution_id = {
@@ -302,25 +267,16 @@ class MTV:
         }.get(resolution, "10")
         return resolution_id
 
-    async def get_cat_id(self, meta):
+    async def get_cat_id(self, meta: Dict[str, Any]) -> str:
         if meta["category"] == "MOVIE":
-            if meta["sd"] == 1:
-                return 2
-            else:
-                return 1
+            return 2 if meta["sd"] == 1 else 1
         if meta["category"] == "TV":
             if meta["tv_pack"] == 1:
-                if meta["sd"] == 1:
-                    return 6
-                else:
-                    return 5
+                return 6 if meta["sd"] == 1 else 5
             else:
-                if meta["sd"] == 1:
-                    return 4
-                else:
-                    return 3
+                return 4 if meta["sd"] == 1 else 3
 
-    async def get_source_id(self, meta):
+    async def get_source_id(self, meta: Dict[str, Any]) -> str:
         if meta["is_disc"] == "DVD":
             return "1"
         elif meta["is_disc"] == "BDMV" or meta["type"] == "REMUX":
@@ -343,20 +299,17 @@ class MTV:
             }.get(meta["type"], "0")
         return type_id
 
-    async def get_origin_id(self, meta):
+    async def get_origin_id(self, meta: Dict[str, Any]) -> str:
         if meta["personalrelease"]:
             return "4"
         elif meta["scene"]:
             return "2"
-        # returning P2P
         else:
             return "3"
 
     async def get_tags(self, meta):
         tags = []
-        # Genres
         tags.extend([x.strip(", ").lower().replace(" ", ".") for x in meta["genres"].split(",")])
-        # Resolution
         tags.append(meta["resolution"].lower())
         if meta["sd"] == 1:
             tags.append("sd")
@@ -364,37 +317,21 @@ class MTV:
             tags.append("uhd")
         else:
             tags.append("hd")
-        # Streaming Service
         if str(meta["service_longname"]) != "":
             tags.append(f"{meta['service_longname'].lower().replace(' ', '.')}.source")
-        # Release Type/Source
         for each in ["remux", "WEB.DL", "WEBRip", "HDTV", "BluRay", "DVD", "HDDVD"]:
             if (each.lower().replace(".", "") in meta["type"].lower()) or (each.lower().replace("-", "") in meta["source"]):
                 tags.append(each)
 
-        # series tags
         if meta["category"] == "TV":
             if meta.get("tv_pack", 0) == 0:
-                # Episodes
-                if meta["sd"] == 1:
-                    tags.extend(["episode.release", "sd.episode"])
-                else:
-                    tags.extend(["episode.release", "hd.episode"])
+                tags.extend(["episode.release", "sd.episode" if meta["sd"] == 1 else "hd.episode"])
             else:
-                # Seasons
-                if meta["sd"] == 1:
-                    tags.append("sd.season")
-                else:
-                    tags.append("hd.season")
+                tags.append("sd.season" if meta["sd"] == 1 else "hd.season")
 
-        # movie tags
         if meta["category"] == "MOVIE":
-            if meta["sd"] == 1:
-                tags.append("sd.movie")
-            else:
-                tags.append("hd.movie")
+            tags.append("sd.movie" if meta["sd"] == 1 else "hd.movie")
 
-        # Audio tags
         audio_tag = ""
         for each in ["dd", "ddp", "aac", "truehd", "mp3", "mp2", "dts", "dts.hd", "dts.x"]:
             if each in meta["audio"].replace("+", "p").replace("-", ".").replace(":", ".").replace(" ", ".").lower():
@@ -403,22 +340,18 @@ class MTV:
         if "atmos" in meta["audio"].lower():
             tags.append("atmos.audio")
 
-        # Video tags
         tags.append(meta.get("video_codec").replace("AVC", "h264").replace("HEVC", "h265").replace("-", ""))
 
-        # Group Tags
         if meta["tag"] != "":
             tags.append(f"{meta['tag'][1:].replace(' ', '.')}.release")
         else:
             tags.append("NOGRP.release")
 
-        # Scene/P2P
         if meta["scene"]:
             tags.append("scene.group.release")
         else:
             tags.append("p2p.group.release")
 
-        # Has subtitles
         mihandle = MediaInfoHandler()
         mi = mihandle._cache.get(meta["uuid"])
         if meta.get("is_disc", "") != "BDMV":
@@ -432,8 +365,8 @@ class MTV:
         return tags
 
     async def validate_credentials(self, meta):
-        cookiefile = os.path.abspath(f"{meta['base_dir']}/data/cookies/MTV.pkl")
-        if not os.path.exists(cookiefile):
+        cookiefile = Path(meta["base_dir"]) / "data" / "cookies" / "MTV.pkl"
+        if not cookiefile.exists():
             await self.login(cookiefile)
         vcookie = await self.validate_cookies(meta, cookiefile)
         if not vcookie:
@@ -442,8 +375,7 @@ class MTV:
             )
             recreate = Confirm.ask("Log in again and create new session?")
             if recreate:
-                if os.path.exists(cookiefile):
-                    os.remove(cookiefile)
+                cookiefile.unlink(missing_ok=True)
                 await self.login(cookiefile)
                 vcookie = await self.validate_cookies(meta, cookiefile)
                 return vcookie
@@ -458,45 +390,44 @@ class MTV:
         url = self.search_url
         params = {"apikey": self.config["TRACKERS"][self.tracker]["api_key"].strip()}
         try:
-            r = requests.get(url, params=params)
-            if not r.ok:
-                if "unauthorized api key" in r.text.lower():
-                    console.print("[red]Invalid API Key")
-                return False
-            return True
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                r = await client.get(url, params=params)
+                if not r.is_success:
+                    if "unauthorized api key" in r.text.lower():
+                        console.print("[red]Invalid API Key")
+                    return False
+                return True
         except Exception:
             return False
 
     async def validate_cookies(self, meta, cookiefile):
         url = "https://www.morethantv.me/index.php"
-        if os.path.exists(cookiefile):
-            with requests.Session() as session:
-                with open(cookiefile, "rb") as cf:
-                    session.cookies.update(pickle.load(cf))
-                resp = session.get(url=url)
+        if cookiefile.exists():
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with aiofiles.open(cookiefile, "rb") as cf:
+                    cookies = pickle.load(cf)
+                    client.cookies.update(cookies)
+                resp = await client.get(url=url)
                 if meta["debug"]:
                     console.log("[cyan]Validate Cookies:")
-                    console.log(session.cookies.get_dict())
+                    console.log(client.cookies)
                     console.log(resp.url)
-                if resp.text.find("Logout") != -1:
-                    return True
-                else:
-                    return False
-        else:
-            return False
+                return "Logout" in resp.text
+        return False
 
     async def get_auth(self, cookiefile):
         url = "https://www.morethantv.me/index.php"
-        if os.path.exists(cookiefile):
-            with requests.Session() as session:
-                with open(cookiefile, "rb") as cf:
-                    session.cookies.update(pickle.load(cf))
-                resp = session.get(url=url)
+        if cookiefile.exists():
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with aiofiles.open(cookiefile, "rb") as cf:
+                    cookies = pickle.load(cf)
+                    client.cookies.update(cookies)
+                resp = await client.get(url=url)
                 auth = resp.text.rsplit("authkey=", 1)[1][:32]
                 return auth
 
     async def login(self, cookiefile):
-        with requests.Session() as session:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             url = "https://www.morethantv.me/login"
             payload = {
                 "username": self.config["TRACKERS"][self.tracker].get("username"),
@@ -505,15 +436,12 @@ class MTV:
                 "cinfo": "1920|1080|24|0",
                 "submit": "login",
                 "iplocked": 1,
-                # 'ssl' : 'yes'
             }
-            res = session.get(url="https://www.morethantv.me/login")
+            res = await client.get("https://www.morethantv.me/login")
             token = res.text.rsplit('name="token" value="', 1)[1][:48]
-            # token and CID from cookie needed for post to login
             payload["token"] = token
-            resp = session.post(url=url, data=payload)
+            resp = await client.post(url=url, data=payload)
 
-            # handle 2fa
             if resp.url.endswith("twofactor/login"):
                 otp_uri = self.config["TRACKERS"][self.tracker].get("otp_uri")
                 if otp_uri:
@@ -528,19 +456,20 @@ class MTV:
                     "code": mfa_code,
                     "submit": "login",
                 }
-                resp = session.post(url="https://www.morethantv.me/twofactor/login", data=two_factor_payload)
-            # checking if logged in
+                resp = await client.post(url="https://www.morethantv.me/twofactor/login", data=two_factor_payload)
+
             if "authkey=" in resp.text:
                 console.print("[green]Successfully logged in to MTV")
-                with open(cookiefile, "wb") as cf:
-                    pickle.dump(session.cookies, cf)
+                cookiefile.parent.mkdir(parents=True, exist_ok=True)
+                async with aiofiles.open(cookiefile, "wb") as cf:
+                    await cf.write(pickle.dumps(client.cookies))
             else:
                 console.print("[bold red]Something went wrong while trying to log into MTV")
                 await asyncio.sleep(1)
                 console.print(resp.url)
         return
 
-    async def search_existing(self, meta):
+    async def search_existing(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         dupes = {}
         console.print("[yellow]Searching for existing torrents on site...")
         params = {"t": "search", "apikey": self.config["TRACKERS"][self.tracker]["api_key"].strip(), "q": ""}
@@ -554,25 +483,21 @@ class MTV:
             params["q"] = meta["title"].replace(": ", " ").replace("’", "").replace("'", "")
 
         try:
-            rr = requests.get(url=self.search_url, params=params)
-            if rr is not None:
-                # process search results
-                response_xml = xml.etree.ElementTree.fromstring(rr.text)
-                for each in response_xml.find("channel").findall("item"):
-                    result = each.find("title").text
-                    try:
-                        size = each.find("size").text
-                    except Exception:
-                        size = 0
-                    dupes[result] = size
-                # CvT: Flying blind, guessing size is can be found under 'size' , needed for size comparison
-            else:
-                if "status_message" in rr:
-                    console.print(f"[yellow]{rr.get('status_message')}")
-                    await asyncio.sleep(5)
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                rr = await client.get(url=self.search_url, params=params)
+                if rr.is_success:
+                    response_xml = xml.etree.ElementTree.fromstring(rr.text)
+                    for each in response_xml.find("channel").findall("item"):
+                        result = each.find("title").text
+                        try:
+                            size = int(each.find("size").text)
+                        except Exception:
+                            size = 0
+                        dupes[result] = size
+                        # CvT: Flying blind, guessing size is can be found under 'size' , needed for size comparison
                 else:
                     console.print("[red]Site Seems to be down or not responding to API")
-                    console.print("[bold red] Posibility Uploadrr breaks support. Please report if issue repeats.")
+                    console.print("[bold red] Possibility Uploadrr breaks support. Please report if issue repeats.")
         except Exception:
             console.print("[red]Unable to search for existing torrents on site. Most likely the site is down.")
             dupes.append("FAILED SEARCH")

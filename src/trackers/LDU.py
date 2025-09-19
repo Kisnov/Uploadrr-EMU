@@ -3,7 +3,6 @@ import re
 from typing import Any, Dict
 
 import httpx
-import langcodes
 
 from src.mediainfo import MediaInfoHandler
 from src.trackers.UNIT3D import Unit3d
@@ -20,8 +19,11 @@ class LDU(Unit3d):
     async def get_cat_id(self, meta):
         category_name = meta["category"]
         anime = meta.get("anime", False)
-        genres = list(map(str.strip, meta.get("genres", "").lower().split(",")))
-        keywords = list(map(str.strip, meta.get("keywords", "").lower().split(",")))
+
+        if not meta.get("xxx"):
+            genres = list(map(str.strip, meta.get("genres", "").lower().split(",")))
+            keywords = list(map(str.strip, meta.get("keywords", "").lower().split(",")))
+
         edition = meta.get("edition", "")
         adult = meta.get("adult", False)
         is_silent = meta.get("is_silent", False)
@@ -89,9 +91,9 @@ class LDU(Unit3d):
         elif category_name == "XXX":
             if ("pack" or "megapack") in meta["uuid"]:
                 return "15"
-            if not meta["tmdb"]:
-                return "11"
-            if meta["tmdb"] and "ENG" not in "".join(tags):
+            if not meta.get("tmdb"):
+                return "30"
+            if meta.get("tmdb") and "ENG" not in "".join(tags):
                 return "45"
         return category_id
 
@@ -217,7 +219,7 @@ class LDU(Unit3d):
 
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
             "resolutions[]": await self.get_res_id(meta),

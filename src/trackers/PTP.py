@@ -10,11 +10,11 @@ import requests
 import rich.prompt as Prompt
 from pymediainfo import MediaInfo
 
-from src.bbcode import BBCODE
 from src.exceptions import LoginException, UploadException
 from src.mediainfo import MediaInfoHandler
-from src.trackers.COMMON import COMMON
+from src.utils.bbcode import BBCODE
 from src.utils.console import console
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -571,7 +571,10 @@ class PTP:
             output = ""
         return output
 
-    async def edit_desc(self, meta, common):
+    async def edit_desc(self, meta):
+        bbcode = BBCODE()
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
+
         base_path = f"{meta['base_dir']}/tmp/{meta['uuid']}"
         base_text = open(f"{base_path}/DESCRIPTION.txt", "r", encoding="utf-8").read()
 
@@ -589,9 +592,9 @@ class PTP:
                         desc.write(f"[mediainfo]{each['ifo_mi_full']}[/mediainfo]\n")
                         desc.write(f"[mediainfo]{each['vob_mi_full']}[/mediainfo]\n\n")
 
-                await common._write_images(desc, meta, self.tracker)
+                await descgen._write_images(desc, meta, self.tracker)
 
-                base2ptp = common.gazelle_bbcode(base_text)
+                base2ptp = bbcode.gazelle_bbcode(base_text)
                 if base2ptp.strip():
                     desc.write("\n" + base2ptp + "\n")
 
@@ -623,10 +626,10 @@ class PTP:
                     desc.write(f"[mediainfo]{mi_dump}[/mediainfo]\n")
 
                 # Write screenshots
-                await common._write_images(desc, meta, self.tracker)
+                await descgen._write_images(desc, meta, self.tracker)
 
                 # Convert and write BBCode text
-                base2ptp = common.gazelle_bbcode(base_text)
+                base2ptp = bbcode.gazelle_bbcode(base_text)
                 if base2ptp.strip():
                     desc.write("\n" + base2ptp + "\n")
 
@@ -685,10 +688,9 @@ class PTP:
         return loggedIn
 
     async def fill_upload_form(self, groupID, meta):
-        common = COMMON(config=self.config)
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         resolution, other_resolution = self.get_resolution(meta)
-        await self.edit_desc(meta, common)
+        await self.edit_desc(meta)
         desc = open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt", "r").read()
         ptp_subtitles = self.get_subtitles(meta)
         ptp_trumpable = None

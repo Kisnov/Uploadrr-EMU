@@ -5,8 +5,8 @@ import platform
 import requests
 from rich.pretty import Pretty
 
-from src.trackers.COMMON import COMMON
 from src.utils.console import console, log
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -61,11 +61,11 @@ class R4E:
     ###############################################################
 
     async def upload(self, meta):
-        common = COMMON(config=self.config)
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
         cat_id = await self.get_cat_id(meta["category"])
         type_id = await self.get_type_id(meta["type"])
-        await common.unit3d_edit_desc(meta, self.tracker)
+        await descgen.edit_desc(meta, self.tracker)
         name = await self.edit_name(meta)
         manual_name = meta.get("manual_name")
         if meta["anon"] != 0 or self.config["TRACKERS"][self.tracker].get("anon", False):
@@ -189,7 +189,7 @@ class R4E:
         console.print("[yellow]Searching for existing torrents on site...")
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta["category"]),
             "types[]": await self.get_type_id(meta["type"]),
             "name": "",

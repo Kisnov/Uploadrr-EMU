@@ -7,8 +7,8 @@ import aiofiles
 import httpx
 from rich.pretty import Pretty
 
-from src.trackers.COMMON import COMMON
 from src.utils.console import console, log
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -48,7 +48,7 @@ class TL:
             self.announce_key = announce
         self.timeout = httpx.Timeout(60.0)
 
-    async def get_cat_id(self, common, meta):
+    async def get_cat_id(self, meta):
         res = meta.get("resolution")
         if meta.get("anime", 0):
             return self.CATEGORIES["Anime"]
@@ -85,10 +85,10 @@ class TL:
         raise NotImplementedError("Failed to determine TL category!")
 
     async def upload(self, meta):
-        common = COMMON(config=self.config)
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
-        cat_id = await self.get_cat_id(common, meta)
-        await common.unit3d_edit_desc(meta, self.tracker)
+        cat_id = await self.get_cat_id(meta)
+        await descgen.edit_desc(meta, self.tracker)
 
         desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
         info_filename = "BD_SUMMARY_00" if meta["bdinfo"] is not None else "MEDIAINFO"

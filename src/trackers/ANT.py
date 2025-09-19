@@ -158,7 +158,7 @@ class ANT:
         data = {
             "api_key": self.api_key,
             "action": "upload",
-            "tmdbid": meta["tmdb"],
+            "tmdbId": meta.get("tmdb", 0),
             "mediainfo": mi_dump,
             "flags[]": flags,
             "anonymous": anon,
