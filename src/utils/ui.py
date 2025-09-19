@@ -96,6 +96,17 @@ def build_db_info(meta: Dict) -> List[str]:
         return db_info
     elif meta.get("is_sports"):
         return [f"[bold]Title[/bold]: {meta['title']}", f"[bold]Category[/bold]: {meta['category']}"]
+
+    elif meta.get("xxx"):
+        porndb = meta.get("porndb", {})
+        db_info = [
+            f"[bold]Title[/bold]: {meta['title']} ({meta['porndb']['date']})",
+            f"[bold]Overview[/bold]: {porndb.get('description', 'N/A')}",
+            f"[bold]Category[/bold]: {meta['category']}",
+        ]
+        if porndb.get("url"):
+            db_info.append(f"\n[bold]URL[/bold]: {porndb['url']}")
+        return db_info
     else:
         db_info = [
             f"[bold]Title[/bold]: {meta['title']} ({meta['year']})",

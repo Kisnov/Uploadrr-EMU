@@ -10,6 +10,7 @@ from src.prep import Prep
 from src.progress import ProgressManager
 from src.trackers.COMMON import COMMON
 from src.utils.console import console, log
+from src.utils.descgen import DescGenerator
 
 from .meta import get_missing
 from .ui import build_db_info
@@ -67,12 +68,12 @@ async def handle_manual_upload(meta: Dict, trackers: List[str], tracker_registry
     if not (meta.get("unattended", False) or Confirm.ask("Get files for manual upload?", default=True)):
         return False
     packager = ManualPackager(config, Prep(config=config, base_dir=Path(meta["base_dir"])).img_host, Path(meta["base_dir"]))
-    common = COMMON(config=config)
+    descgen = DescGenerator(config=config, base_dir=meta["base_dir"])
     for tracker in trackers:
         if tracker != "MANUAL" and tracker in tracker_registry:
             instance = tracker_registry[tracker]["class"](config=config)
             if tracker_registry[tracker]["type"] in ["api", "unit3d"]:
-                await common.unit3d_edit_desc(meta, instance.tracker, instance.signature)
+                await descgen.edit_desc(meta, instance.tracker, instance.signature)
             elif hasattr(instance, "edit_desc"):
                 await instance.edit_desc(meta)
     url = await packager.package(meta)
@@ -133,15 +134,11 @@ async def upload_to_tracker(
         if client:
             await client.add_to_client(meta, tracker_name)
         return True, skipped_files
-    elif result == "DEBUG":
-        if client:
+    else:
+        if client and result == "DEBUG":
             await client.add_to_client(meta, tracker_name)
         skipped_files += 1
-        skipped_details.append((path, f"{tracker_name} (DEBUG)"))
-        return False, skipped_files
-    else:
-        skipped_files += 1
-        skipped_details.append((path, f"{tracker_name} Rejected Upload"))
+        skipped_details.append((path, f"{tracker_name} {result if isinstance(result, str) else 'Rejected Upload'}"))
         return False, skipped_files
 
 
@@ -173,7 +170,7 @@ async def upload_to_ar(ar, meta: Dict, path: str, skipped_details: List[Tuple], 
 
 async def get_confirmation(meta: Dict, trackers: Optional[List[str]], tracker_registry: Optional[Dict], config: Dict) -> bool:
     """Confirm upload details with the user."""
-    console.print(f"Prep material saved to {meta['base_dir']}/tmp/{meta['uuid']}")
+    console.print(f"Prep material saved to Uploadrr/tmp/{meta['uuid']}")
 
     db_info = build_db_info(meta)
     from rich.panel import Panel
@@ -218,7 +215,8 @@ async def get_confirmation(meta: Dict, trackers: Optional[List[str]], tracker_re
         if not meta.get("is_sports"):
             get_missing(meta)
         bell = "\a" if config.get("DEFAULT", {}).get("sfx_on_prompt", True) else ""
-        console.print(f"[bold yellow]Is this correct?{bell}", force=True)
+        debug = "([bright_red]DEBUG[/bright_red])" if meta["debug"] else ""
+        console.print(f"[bold yellow]Is this correct? {debug}{bell}", force=True)
         from rich.prompt import Confirm
 
         return Confirm.ask(" Correct?", console=console)
