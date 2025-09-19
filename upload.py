@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Dict, List
 
@@ -14,7 +15,7 @@ from src.progress import ProgressManager
 from src.screenshots.manager import ScreenshotManager
 from src.utils.checks import pre_upload_checks
 from src.utils.config import check_python_version, load_yaml_config
-from src.utils.console import console, log, set_log_level
+from src.utils.console import console, log, redactor, set_log_level
 from src.utils.loads import load_trackers
 from src.utils.meta import edit_meta, load_existing_meta, save_meta
 from src.utils.queue import apply_delay, normalize_trackers, prepare_queue
@@ -182,13 +183,21 @@ async def main() -> None:
             log.error("No Config detected, please setup config before starting, thank you!")
             sys.exit(1)
     config = load_yaml_config(config_path)
+    redactor.load_from_config(config)
+    redactor.add_rule(str(base_dir), "Uploadrr")
+    redactor.add_rule(str(Path.home()), "HOME")
+    if sys.platform == "win32":
+        winbase = str(base_dir.as_posix())
+        winhome = str(Path.home().as_posix())
+        redactor.add_rule(winbase, "Uploadrr")
+        redactor.add_rule(winhome, "HOME")
     uploadrr = Uploadrr(config)
     try:
         await uploadrr.do_the_thing(base_dir)
     except KeyboardInterrupt:
         console.print("[bold red]Interrupted by user. Cleaning up...[/bold red]")
-        await uploadrr.shutdown()
-        sys.exit(1)
+        raise
+
     finally:
         end_time = time.perf_counter()
         console.print("[magenta]see you soon ^.<", justify="center")
@@ -196,6 +205,13 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(main())
+    cleanrr = CleanupHandler(name="Uploadrr")
+    try:
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+            warnings.filterwarnings("ignore", message=".*Event loop is closed.*")
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        console.print("[bold red]Interrupted by user. Cleaning up...[/bold red]")
+        asyncio.run(cleanrr.shutdown())
+        sys.exit(1)

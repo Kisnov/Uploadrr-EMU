@@ -5,7 +5,10 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 from rich.traceback import install
 
+from .redact import RedactingRichHandler, Redactrr
+
 install()
+redactor = Redactrr(unredact=False)
 
 log_colors = Theme({
     "logging.level.ddebug": "bold magenta",
@@ -53,7 +56,7 @@ logging.Logger.ddebug = ddebug
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 log.handlers.clear()
-log.addHandler(RichHandler(rich_tracebacks=True, show_time=False, markup=True, console=console))
+log.addHandler(RedactingRichHandler(rich_tracebacks=True, show_time=False, markup=True, console=console, redactor=redactor))
 log.propagate = False
 
 # Override logging methods to respect quiet mode
@@ -93,7 +96,9 @@ def set_log_level(debug=False, ddebug=False, quiet=False):
     logging.getLogger().setLevel(root_level)
     root_logger = logging.getLogger()
     if not any(isinstance(h, RichHandler) for h in root_logger.handlers):
-        root_logger.addHandler(RichHandler(rich_tracebacks=True, show_time=False, markup=True, console=console))
+        root_logger.addHandler(
+            RedactingRichHandler(rich_tracebacks=True, show_time=False, markup=True, console=console, redactor=redactor)
+        )
 
 
 def force_print(*args, **kwargs):
