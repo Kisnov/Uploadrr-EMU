@@ -13,7 +13,6 @@ from src.utils.console import console, log
 from .args import Args
 
 
-# TODO if legacy MEDIAINFO_CLEANPATH.txt exists delete then redo MEDIAINFO.txt
 class MediaInfoHandler:
     _instance = None
 
@@ -42,6 +41,14 @@ class MediaInfoHandler:
         tmp_dir.mkdir(parents=True, exist_ok=True)
         basename = os.path.basename(media_path)
         json_path = tmp_dir / "MediaInfo.json"
+        legacy_mi = tmp_dir / "MEDIAINFO_CLEANPATH.txt"
+        media_txt = tmp_dir / "MEDIAINFO.txt"
+
+        if legacy_mi.exists():
+            console.print("[bold yellow]Legacy MEDIAINFO detected — cleaning up...")
+            legacy_mi.unlink(missing_ok=True)
+            media_txt.unlink(missing_ok=True)
+            json_path.unlink(missing_ok=True)
 
         try:
             # Generate MediaInfo if JSON doesn't exist or DVD patch is required
@@ -343,7 +350,7 @@ class MediaInfoHandler:
 
         # === Silent Film detection ===
         soundmix = meta.get("imdb_info", {}).get("soundmix") or []
-        keywords = meta.get("keywords", "").lower().split(",")
+        keywords = [k.strip().lower() for k in (meta.get("keywords") or "").split(",") if k.strip()]
         release_date = meta.get("full_date", "")
         year = meta.get("year", "")
 
