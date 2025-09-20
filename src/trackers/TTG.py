@@ -12,8 +12,8 @@ from rich.prompt import Confirm
 from unidecode import unidecode
 
 from src.exceptions import UploadException
-from src.trackers.COMMON import COMMON
 from src.utils.console import console
+from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
 
@@ -267,12 +267,12 @@ class TTG:
             base = await f.read()
 
         async with aiofiles.open(tmp_dir / f"[{self.tracker}]DESCRIPTION.txt", "w", encoding="utf-8") as descfile:
-            from src.bbcode import BBCODE
+            from src.utils.bbcode import BBCODE
 
-            common = COMMON(config=self.config)
+            descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
 
             if int(meta.get("imdb_id", "0").replace("tt", "")) != 0:
-                ptgen = await common.ptgen(meta)
+                ptgen = await descgen.ptgen(meta)
                 if ptgen.strip():
                     await descfile.write(ptgen)
 

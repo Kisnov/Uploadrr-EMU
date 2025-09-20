@@ -65,9 +65,6 @@ class Clients:
         torrenthash = torrenthash.lower().strip() if torrent_client in ("qbit", "deluge") else torrenthash.upper().strip()
         torrent_path = torrent_path.with_name(f"{torrenthash}.torrent")
 
-        if meta.get("debug"):
-            console.log(str(torrent_path))
-
         if not torrent_path.exists():
             console.print(f"[bold yellow]{torrent_path} not found")
             return False, torrent_path

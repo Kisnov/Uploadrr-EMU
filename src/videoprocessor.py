@@ -127,7 +127,7 @@ class VideoProcessor:
                 meta["bdinfo"]["video"][0]["res"], self._cached_guessit(video), "OTHER", "p", "OTHER", 0
             )
             meta["filename"] = filename.split(" AKA ")[0] if " AKA " in filename.replace(".", " ") else filename
-            meta["type"] = self.get_type(video, meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
             meta["category"] = (
                 meta.get("category")
                 or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
@@ -147,7 +147,7 @@ class VideoProcessor:
                 vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
                 await self.mihandle.exportInfo(media_path=vob_path, is_dir=False, uuid=meta["uuid"], export_text=True)
             meta["dvd_size"] = get_dvd_size(meta["discs"])
-            meta["type"] = self.get_type(video, meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
             meta["category"] = (
                 meta.get("category")
                 or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
@@ -164,7 +164,7 @@ class VideoProcessor:
             meta["video"] = video
             if not meta.get("edit", False):
                 await self.mihandle.exportInfo(media_path=video, is_dir=False, uuid=meta["uuid"], export_text=False)
-            meta["type"] = self.get_type(video, meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
             meta["category"] = (
                 meta.get("category")
                 or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
@@ -177,11 +177,12 @@ class VideoProcessor:
             meta["video"] = str(videopath)
             guess = guess or self._cached_guessit(meta["video"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
-            )
-            if meta["category"] == "TV":
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+
+            meta["category"] == "TV":
                 guess_name = meta["uuid"].replace("-", " ")
             else:
                 guess_name = Path(video).name.replace("-", " ")
@@ -194,7 +195,7 @@ class VideoProcessor:
                 await self.mihandle.exportInfo(
                     media_path=videopath, is_dir=meta.get("is_dir", False), uuid=meta["uuid"], export_text=True
                 )
-            meta["type"] = self.get_type(video, meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
         if self.is_sports(meta["uuid"]):
             meta["is_sports"] = True
             meta["category"] = "SPORTS"
@@ -304,6 +305,7 @@ class VideoProcessor:
                 meta["category"], meta["tmdb"], meta["imdb"] = self.mihandle.get_tmdb_imdb_from_mediainfo(
                     meta["uuid"], meta["category"], meta["is_disc"], meta["tmdb"], meta["imdb"]
                 )
+
             if not meta.get("tmdb") and not meta.get("imdb"):
                 meta = await self.TMDb.get_tmdb_id(meta["filename"], meta["search_year"], meta, meta["category"], meta["filename"])
             elif meta.get("imdb") and not meta.get("tmdb_manual"):
@@ -381,15 +383,15 @@ class VideoProcessor:
     Get type, category, edition
     """
 
-    def get_type(self, video, scene, is_disc):
-        filename = os.path.basename(video).lower()
-        if "remux" in filename:
+    def get_type(self, uuid, scene, is_disc):
+        uuid = uuid.lower()
+        if "remux" in uuid:
             return "REMUX"
-        elif any(word in filename for word in [" web ", ".web.", "web-dl", "webdl"]):
+        elif any(word in uuid for word in [" web ", ".web.", "web-dl", "webdl"]):
             return "WEBDL"
-        elif "webrip" in filename:
+        elif "webrip" in uuid:
             return "WEBRIP"
-        elif "hdtv" in filename:
+        elif "hdtv" in uuid:
             return "HDTV"
         elif is_disc is not None:
             return "DISC"
@@ -490,6 +492,7 @@ class VideoProcessor:
                 re.compile(r"\bopen\s*matte\b", re.IGNORECASE): "Open Matte",
                 re.compile(r"\bopen\s*om\b", re.IGNORECASE): "Open Matte",
                 re.compile(r"\bmar\b", re.IGNORECASE): "MAR",
+                re.compile(r"\boar\b", re.IGNORECASE): "OAR",
             }
             ratio = next((value for pattern, value in RATIOS.items() if pattern.search(video_normalized)), "")
 
@@ -607,7 +610,7 @@ class VideoProcessor:
                 source = "HD DVD" if is_disc == "HDDVD" else "HDDVD"
 
             if type in ("WEBDL", "WEBRIP"):
-                source = "Web"
+                source = "WEB"
             if source == "Ultra HDTV":
                 source = "UHDTV"
         except Exception as e:
@@ -730,7 +733,7 @@ class VideoProcessor:
                         meta["tv_pack"] = 1
 
                 if guess_date:
-                    season_int, episode_int = self.daily_to_tmdb_season_episode(meta.get("tmdb"), guess_date)
+                    season_int, episode_int = await self.TMDb.daily_to_tmdb_season_episode(meta.get("tmdb"), guess_date)
                     season, episode = str(guess_date), ""
 
             except Exception:

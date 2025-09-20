@@ -24,7 +24,7 @@ class TMDbHandler:
         self.config = config or {}
         self.semaphore = asyncio.Semaphore(40)  # TMDb limit: ~40 requests per 10 seconds
         self.client = httpx.AsyncClient(base_url="https://api.themoviedb.org/3", timeout=10.0)
-        self.api_key = self.config["DEFAULT"].get("tmdb_api")
+        self.api_key = self.config["DEFAULT"].get("tmdb")
 
     async def rate_limit(self) -> None:
         """Enforce rate limiting for API requests."""
