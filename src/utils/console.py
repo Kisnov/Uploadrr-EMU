@@ -3,9 +3,9 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-from rich.traceback import install
+from rich.traceback import Traceback, install
 
-from .redact import RedactingRichHandler, Redactrr
+from .redact import RedactingRichHandler, Redactrr, _redacting_render_stack
 
 install()
 redactor = Redactrr(unredact=False)
@@ -26,10 +26,24 @@ _original_print = console.print
 
 def _quiet_aware_print(*args, force=False, **kwargs):
     if not quiet_mode or force:
-        _original_print(*args, **kwargs)
+        redacted_args = tuple(redactor.redact(str(arg)) if isinstance(arg, str) else arg for arg in args)
+        _original_print(*redacted_args, **kwargs)
 
 
 console.print = _quiet_aware_print
+
+_original_render_stack = Traceback._render_stack
+_original_traceback_init = Traceback.__init__
+
+
+def _traceback_init_with_redactor(self, *args, **kwargs):
+    _original_traceback_init(self, *args, **kwargs)
+    self.redactor = redactor
+
+
+Traceback.__init__ = _traceback_init_with_redactor
+Traceback._render_stack = _redacting_render_stack
+
 
 # Custom log levels
 logging.UPLOADRR_DEBUG = 10
