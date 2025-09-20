@@ -9,31 +9,31 @@ from .base import BaseImageHost
 
 
 class CheveretoTemplate(BaseImageHost):
-    def __init__(self, config, api_key_name, api_url, host_name):
+    def __init__(self, config, api_url, imghost):
         super().__init__(config)
-        self.api_key_name = api_key_name
         self.api_url = api_url
-        self.host_name = host_name
+        self.host = imghost
 
     async def upload(self, client, image_path, title=None, adult=False):
         """Upload an image to Chevereto and return a dict with img_url, raw_url, and web_url."""
         config_section = (
             self.config["ADULT"]
             if adult
-            and (self.config.get("ADULT", {}).get(self.api_key_name) or self.config.get("ADULT", {}).get("imgbox_only", False))
-            else self.config["SCREENS"]
+            and (
+                self.config.get("ADULT", {}).get("API_KEYS", {}).get(self.host)
+                or self.config.get("ADULT", {}).get("imgbox_only", False)
+            )
+            else self.config["SCREENS"]["API_KEYS"]
         )
-        api_key = config_section.get(self.api_key_name)
+        api_key = config_section.get(self.host)
 
         if not api_key:
-            if not adult or self.host_name == "imgbox":
-                log.warning(
-                    f"API key '{self.api_key_name}' not found in config['{'ADULT' if adult else 'SCREENS'}'] for {self.host_name}"
-                )
+            if not adult or self.host == "imgbox":
+                log.warning(f"API key '{self.host}' not found in config['{'ADULT' if adult else 'SCREENS'}'] for {self.host}")
             else:
-                raise KeyError(f"API key '{self.api_key_name}' not found in config['ADULT'] for {self.host_name}")
+                raise KeyError(f"API key '{self.host}' not found in config['ADULT'] for {self.host}")
 
-        log.debug(f"Using API key for {self.host_name} (adult={adult}): {api_key}")
+        log.debug(f"Using API key for {self.host} (adult={adult}): {api_key}")
         try:
             async with aiofiles.open(image_path, "rb") as f:
                 img = await f.read()
@@ -48,12 +48,12 @@ class CheveretoTemplate(BaseImageHost):
             content_type = resp.headers.get("content-type")
             text = await resp.aread()
 
-            log.debug(f"[{self.host_name}] HTTP {resp.status_code} {resp.reason_phrase}")
-            log.debug(f"[{self.host_name}] Content-Type: {content_type}")
-            log.debug(f"[{self.host_name}] Raw Body: {text[:500]}...")
+            log.debug(f"[{self.host}] HTTP {resp.status_code} {resp.reason_phrase}")
+            log.debug(f"[{self.host}] Content-Type: {content_type}")
+            log.debug(f"[{self.host}] Raw Body: {text[:500]}...")
 
             if "application/json" not in content_type:
-                raise ValueError(f"{self.host_name} response was not JSON")
+                raise ValueError(f"{self.host} response was not JSON")
 
             result = resp.json()
 
@@ -65,10 +65,10 @@ class CheveretoTemplate(BaseImageHost):
                     "web_url": result["data"].get("url_viewer", image_data["url"]),
                 }
 
-            raise ValueError(f"{self.host_name} error: {result.get('error', result)}")
+            raise ValueError(f"{self.host} error: {result.get('error', result)}")
 
         except Exception as e:
-            log.error(f"[{self.host_name}] Failed to upload {image_path}: {repr(e)}")
+            log.error(f"[{self.host}] Failed to upload {image_path}: {repr(e)}")
             raise
 
     async def upload_batch(self, client, image_paths, title=None, adult=False):
@@ -80,6 +80,6 @@ class CheveretoTemplate(BaseImageHost):
                 result = await f
                 results.append(result)
             except Exception as e:
-                log.debug(f"Upload failed for {self.host_name}: {e}")
+                log.debug(f"Upload failed for {self.host}: {e}")
                 results.append(None)
         return results

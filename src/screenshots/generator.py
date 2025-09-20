@@ -93,7 +93,7 @@ class ScreenshotGenerator:
             meta_with_cache = meta.copy()
             meta_with_cache["cached_screenshots"] = self.cache.get(uuid, [])
             video_files = meta.get("video_files", [meta.get("video")])
-            max_sheets = self.screens["contact_sheets"].get("max", 1)
+            max_sheets = self.screens["contact_sheets"].get("max", 1) if not meta.get("xmovie") else len(video_files)
             num_sheets = min(len(video_files), max_sheets)
 
             result["contact_sheets"] = []
@@ -320,12 +320,16 @@ class ScreenshotGenerator:
                 log.error(f"Failed to probe file {file_path}: {e2}")
                 raise RuntimeError(f"Failed to probe file {file_path}") from e2
 
-        ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
+        ss_times = [
+            img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if img.get("ss_time") and img.get("ss_time") != 0
+        ]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
 
         keyframes = []
-        if self.screens.get("keyframes_only", False):
+        if self.screens.get("keyframes_only", False) and self.screens.get(
+            "frame_stats", False
+        ):  # only needs adjust if requesting stats
             try:
                 # ±30 seconds to ensure keyframes are captured
                 intervals = ",".join(f"{max(0, t - 30)}%{t + 30}" for t in ss_times)
@@ -414,14 +418,13 @@ class ScreenshotGenerator:
         vf_filter = ",".join(vf_filters) or "scale=iw:ih"
 
         optimize = self.screens.get("optimize", False)
-        if self.use_oxipng or not optimize:
-            o_lvl = 0
+        if not self.use_oxipng and optimize:
+            o_lvl = 6 if optimize is True else min(optimize, 9)
         else:
-            o_lvl = 6 if optimize is True else min(optimize, 10)
+            o_lvl = 0
 
         for attempt in range(retries):
             try:
-                # Build base args
                 args = [
                     "ffmpeg",
                     "-y",

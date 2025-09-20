@@ -154,10 +154,7 @@ class RehostManager:
         preferred = []
         if meta.get("imghost"):
             preferred.append(meta["imghost"])
-        for i in range(1, 10):
-            val = config["SCREENS"].get(f"img_host_{i}")
-            if val:
-                preferred.append(val)
+        preferred.extend(config["SCREENS"].get("img_hosts", []))
         preferred.append("imgbox")
 
         if merged_whitelist is not None:

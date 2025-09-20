@@ -1,39 +1,40 @@
 version: '2.0.0'
 
 DEFAULT:
-  tmdb_api: "TMDB_API_KEY"
+  tmdb: TMDB_API_KEY
   add_trailer: false
   add_logo: true
   default_torrent_client: "Client1"
   sfx_on_prompt: true
+  always_anon: false
+  # torrent_creation: mktorrent #default torf
 
 SCREENS:
-  imgbb_api: "imgbb_API_KEY"
-  ptpimg_api: "ptpimg_API_KEY"
-  lensdump_api: "lensdump_API_KEY"
-  ptscreens_api: "ptscreens_API_KEY"
-  onlyimage_api: "onlyimage_API_KEY"
-  img_host_1: "imgbb"
-  img_host_2: "ptpimg"
-  img_host_3: "imgbox"
-  img_host_4: "pixhost"
-  img_host_5: "lensdump"
-  img_host_6: "ptscreens"
-  img_host_7: "onlyimage"
+  API_KEYS:
+    imgbb: "imgbb_API_KEY"
+    ptpimg: "ptpimg_API_KEY"
+    lensdump: "lensdump_API_KEY"
+    ptscreens: "ptscreens_API_KEY"
+    onlyimage: "onlyimage_API_KEY"
+  img_hosts: [ptpimg, ptscreens, onlyimage, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
-  optimize_images: true
-  tonemap_hdr: true
   deinterlace_method: "yadif"
+  tonemap_hdr: true
   hdr_method: "reinhard:desat=0" # Other presets: "hable:desat=0" (color accurate but dark) or "mobius:desat=10" (more pop sometimes) , or try your own!
+  optimize_images: true
+  use_oxipng: false
+  keyframes_only: true
+  frame_stats: false
 
 SIGNATURES:
-  use_global_sigs: default # Use custom per tracker, fallback to global (False, only use tracker sigs if avail / True, only use global)
-  global_sig: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
-  global_anon_sig: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
-  global_pr_sig: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
-  global_anon_pr_sig: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
+  use_global_sigs: default # Use custom per tracker, fallback to global (False, only use tracker sigs if avail / True, only use global, None, no sigs)
+  ### These signatures below are for GLOBAL or used as fallback if using default  >>> to adjust per tracker, simply add the same keys below tracker of choice ###
+  signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  anon_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
+  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  anon_pr_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
 
 AUTO:
   description_folder: null # "Path/To/description/folder" see wiki for details
@@ -48,7 +49,8 @@ TRACKERS:
   ### NOTE: Any tracker can add any of the following options
   ###    signature: ""#    anon_signature: ""#    pr_signature: ""#    anon_pr_signature: ""#
   ###    qbit_tag: ""# <-- for qbit tagging
-  ###    modq: true# this can be added, but beware not all trackers support
+  ###    modq: true# !! this can be added, but beware not all trackers support
+  ###    xanon: true# <== if you want anon only for xxx
 
   ACM:
     api_key: "ACM_API_KEY"
@@ -281,7 +283,7 @@ TRACKERS:
     username: "username"
     password: "password"
     login_question: "login_question"
-    login_answer: "login_answer
+    login_answer: "login_answer"
     user_id: "user_id"
     annouce_key: "TTG_PassKey" # https://totheglory.im/announce/{announce_key}
     anon : false
