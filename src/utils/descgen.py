@@ -540,16 +540,20 @@ class DescGenerator:
         if use_global_sigs is None:
             return  # easy mode for NO SIGS!
         elif use_global_sigs is True:
-            config_section = "DEFAULT"
-            sig_config = self.config[config_section]
+            sig_config = self.config["SIGNATURES"]
         elif use_global_sigs is False:
-            config_section = "TRACKERS"
-            sig_config = self.config[config_section].get(tracker, {})
-        else:  # Tracker Specific, falling back to Global
-            config_section = "TRACKERS"
-            sig_config = (
-                self.config[config_section].get(tracker, {}) if self.config[config_section].get(tracker) else self.config["DEFAULT"]
-            )
+            sig_config = self.config["TRACKERS"].get(tracker, {})
+        else:
+            tracker_config = self.config["TRACKERS"].get(tracker, {})
+            sig_config = tracker_config
+
+        xanon = meta.get("xxx") and self.config["TRACKERS"].get(tracker, {}).get("xanon", False)
+        is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"].get(tracker, {}).get("anon", False) or xanon
+        is_pr = meta.get("personal_release", False)
+        sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
+
+        if not tracker_config.get(sig_key):
+            sig_config = self.config["SIGNATURES"]
 
         sig_types = {
             "signature": sig_config.get("signature"),
@@ -557,11 +561,6 @@ class DescGenerator:
             "pr_signature": sig_config.get("pr_signature"),
             "anon_pr_sig": sig_config.get("anon_pr_signature"),
         }
-
-        xanon = meta.get("xxx") and self.config["TRACKERS"].get(tracker, {}).get("xanon", False)
-        is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"].get(tracker, {}).get("anon", False) or xanon
-        is_pr = meta.get("personal_release", False)
-        sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
 
         # Write signature if it exists
         if sig := sig_types.get(sig_key):
