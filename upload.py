@@ -208,8 +208,23 @@ if __name__ == "__main__":
     cleanrr = CleanupHandler(name="Uploadrr")
     try:
         if sys.platform == "win32":
+            import functools
+            from asyncio.proactor_events import _ProactorBasePipeTransport
+
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-            warnings.filterwarnings("ignore", message=".*Event loop is closed.*")
+
+            def silence_event_loop_closed(func):
+                @functools.wraps(func)
+                def wrapper(self, *args, **kwargs):
+                    try:
+                        return func(self, *args, **kwargs)
+                    except RuntimeError as e:
+                        if str(e) != "Event loop is closed":
+                            raise
+
+                return wrapper
+
+            _ProactorBasePipeTransport.__del__ = silence_event_loop_closed(_ProactorBasePipeTransport.__del__)
         asyncio.run(main())
     except KeyboardInterrupt:
         console.print("[bold red]Interrupted by user. Cleaning up...[/bold red]")
