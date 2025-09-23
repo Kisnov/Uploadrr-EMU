@@ -479,9 +479,11 @@ class DescGenerator:
             return
 
         if img_size is None:
-            img_size = 350 if tracker == "CBR" else self.config["DEFAULT"].get("img_size", 500)
-        if not control.modify_img_size:
+            img_size = 350 if tracker in ("CBR", "TVC", "PTP") else self.config["DEFAULT"].get("img_size", 500)
+        if control and not control.modify_img_size:
             img_size = ""  # No size modification
+        if int(img_size) == 0:
+            img_size = ""
 
         inline_imgs = int(self.config["DEFAULT"].get("inline_imgs", 0)) or 0
 
