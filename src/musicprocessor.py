@@ -376,60 +376,53 @@ class MusicProcessor:
 
     def _extract_catalog_number(self, album_fname: str, extra: Dict) -> Optional[str]:
         """Extract CATALOG_NUMBER from album_fname or MediaInfo."""
-        LABEL_WORDS = ["records", "label", "music", "productions", "studio", "group", "band", "sound", "entertainment"]
+        LABEL_WORDS = {"records", "label", "music", "productions", "studio", "group", "band", "sound", "entertainment"}
         log.debug(f"Extracting catalog number from: {album_fname}")
 
-        catalog_number = None
+        # Try structured metadata first (fast path)
+        for key in ("CATALOG_NUMBER", "CATALOGNUMBER", "CATNO", "LABELNO"):
+            if catalog := extra.get(key):
+                cleaned = re.sub(r"[ -]", "", catalog.strip())
+                log.debug(f"Found catalog number in extra[{key}]: {cleaned}")
+                return cleaned
 
-        catalog_number = extra.get("CATALOG_NUMBER") or extra.get("CATALOGNUMBER") or extra.get("CATNO") or extra.get("LABELNO")
-        if catalog_number:
-            log.debug(f"Found catalog number in extra dictionary: {catalog_number}")
-            return re.sub(r"[ -]", "", catalog_number.strip())
+        # Try filename patterns: {catalog} or [catalog, label, year, ...]
+        patterns = [(r"\{([^}]+)\}", "curly braces"), (r"\[([A-Za-z0-9\s,]+)\]", "square brackets")]
 
-        catalog_match = re.search(r"\{([^}]+)\}", album_fname)
-        if catalog_match:
-            catalog_number = catalog_match.group(1).strip()
-            log.debug(f"Found catalog number in curly braces: {catalog_number}")
-
-            if any(word in catalog_number.lower() for word in LABEL_WORDS):
-                log.debug(f"Excluded as label or descriptor: {catalog_number}")
-                return None
-
-        if not catalog_number:
-            catalog_match = re.search(r"\{([^}]+)\}", album_fname)
-            if catalog_match:
-                catalog_candidate = catalog_match.group(1).strip()
-                parts = [part.strip() for part in catalog_candidate.split(",") if part.strip()]
-
+        for pattern, source in patterns:
+            if match := re.search(pattern, album_fname):
+                candidate_str = match.group(1).strip()
+                parts = (part.strip() for part in candidate_str.split(",") if part.strip())
                 for part in parts:
-                    if not any(word in part.lower() for word in LABEL_WORDS):
-                        catalog_number = part
-                        log.debug(f"Found valid catalog number: {catalog_number}")
-                        break
+                    lower_part = part.lower()
+
+                    # Skip if it looks like a year
+                    if re.fullmatch(r"\d{4}", part):
+                        continue
+
+                    # Skip if it contains a label-related word
+                    if any(word in lower_part for word in LABEL_WORDS):
+                        log.debug(f"Skipped part (label word): {part}")
+                        continue
+
+                    # Must contain at least one alphanumeric char (avoid empty/symbols)
+                    if not re.search(r"[A-Za-z0-9]", part):
+                        continue
+
+                    # Found a plausible candidate
+                    log.debug(f"Selected catalog number: {part}")
+                    catalog_number = part
+                    break
                 else:
-                    log.debug(f"No valid catalog number found from parts: {parts}")
+                    continue  # no valid part in this candidate
+                break  # valid catalog_number found
+        else:
+            catalog_number = None
 
-            if not catalog_number:
-                catalog_match_title = re.search(r"\[([A-Za-z0-9\s,]+)\]", album_fname)
-                if catalog_match_title:
-                    catalog_candidate = catalog_match_title.group(1).strip()
-                    parts = [part.strip() for part in catalog_candidate.split(",") if part.strip()]
-
-                    for part in parts:
-                        if re.search(r"\w", part) and not any(word in part.lower() for word in LABEL_WORDS):
-                            catalog_number = part
-                            log.debug(f"Selected valid catalog number: {catalog_number}")
-                            break
-                    else:
-                        log.debug(f"No valid catalog number found from parts: {parts}")
-
-        # Check for exclusion keywords in the selected catalog number
-        if catalog_number and any(excl in catalog_number.lower() for excl in self.IGNORE_TERM):
-            log.debug(f"Excluded due to keyword in catalog number: {catalog_number}")
-            return None
-
-        # Return the cleaned catalog number
         if catalog_number:
+            if any(excl in catalog_number.lower() for excl in self.IGNORE_TERM):
+                log.debug(f"Excluded due to IGNORE_TERM: {catalog_number}")
+                return None
             return re.sub(r"[ -]", "", catalog_number.strip())
 
         log.debug("No catalog number found.")
