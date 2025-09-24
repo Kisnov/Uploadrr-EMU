@@ -5,6 +5,7 @@
 ########################################################################################################
 
 import asyncio
+import gc
 import signal
 
 import psutil
@@ -72,6 +73,10 @@ async def cleanrr(thread_executor=None):
     for child in still_alive:
         log.warning(f"Force killing stubborn process [pid={child.pid}]...")
         child.kill()
+
+    log.debug("Forcing garbage collection to clean up transports...")
+    gc.collect()
+    await asyncio.sleep(0)
 
     log.debug("[green]Cleanup process completed.")
 
