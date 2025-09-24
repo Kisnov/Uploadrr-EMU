@@ -81,20 +81,18 @@ class DescGenerator:
 
     async def read_log_file(self, log_file):
         """Reads a log file, attempting different encodings."""
-        try:
-            async with aiofiles.open(log_file, "rb") as log:
-                raw_data = await log.read()
-                try:
-                    log_contents = raw_data.decode("utf-16")
-                except UnicodeDecodeError:
-                    try:
-                        log_contents = raw_data.decode("utf-8")
-                    except UnicodeDecodeError:
-                        log_contents = raw_data.decode("latin-1", errors="ignore")
+        encodings = ["utf-16", "utf-8", "latin-1"]
 
-                return log_contents
-        except Exception as e:
-            return f"Error reading log file: {str(e)}"
+        for encoding in encodings:
+            try:
+                async with aiofiles.open(log_file, "r", encoding=encoding, errors="ignore" if encoding == "latin-1" else None) as log:
+                    return await log.read()
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+            except Exception as e:
+                return f"Error reading log file: {str(e)}"
+
+        return "Error: Could not decode file with any supported encoding"
 
     async def gen_desc(self, meta: Dict) -> Dict:
         desclink = meta.get("desclink", None)
