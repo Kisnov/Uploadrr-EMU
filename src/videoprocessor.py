@@ -177,12 +177,12 @@ class VideoProcessor:
             meta["video"] = str(videopath)
             guess = guess or self._cached_guessit(meta["video"])
             meta["category"] = (
-                    meta.get("category")
-                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                    or guess.get("type", "MOVIE").upper()
-                )
+                meta.get("category")
+                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                or guess.get("type", "MOVIE").upper()
+            )
 
-            meta["category"] == "TV":
+            if meta["category"] == "TV":
                 guess_name = meta["uuid"].replace("-", " ")
             else:
                 guess_name = Path(video).name.replace("-", " ")

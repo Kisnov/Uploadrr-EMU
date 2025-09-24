@@ -71,10 +71,10 @@ class NameGenerator:
             "HDTV": "{title} {year} {aka} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {resolution} {source} {lang} {audio} {video_encode}",
         },
         "MUSIC": {
-            "ALAC": "{artist} - {album} ({year}) {edition} [{source}{type} {bit_depth}bit]",
-            "FLAC": "{artist} - {album} ({year}) {edition} [{source}{type} {bit_depth}bit]",
-            "WAV": "{artist} - {album} ({year}) {edition} [{source}{type} {bit_depth}bit]",
-            "default": "{artist} - {album} ({year}) {edition} [{source}{type} {bitrate}]",
+            "ALAC": "{artist} - {album} ({year}) {edition} [{source} {type} {bit_depth}bit]",
+            "FLAC": "{artist} - {album} ({year}) {edition} [{source} {type} {bit_depth}bit]",
+            "WAV": "{artist} - {album} ({year}) {edition} [{source} {type} {bit_depth}bit]",
+            "default": "{artist} - {album} ({year}) {edition} [{source} {type} {bitrate}]",
         },
     }
     # fmt: on
