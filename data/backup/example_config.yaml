@@ -308,9 +308,9 @@ TRACKERS:
 
 
 TORRENT_CLIENTS:
-  Client1: {'torrent_client': 'qbit', 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'username', 'qbit_pass': 'password'}
-  qbit: {'torrent_client': 'qbit', 'enable_search': True, 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'username', 'qbit_pass': 'password', 'torrent_storage_dir': '/Users/example/Library/Application Support/qBittorrent/BT_backup', 'content_layout': 'Original', 'VERIFY_WEBUI_CERTIFICATE': False}
+  Client1: {'torrent_client': 'qbit', 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'qbit_username', 'qbit_pass': 'qbit_password'}
+  qbit: {'torrent_client': 'qbit', 'enable_search': True, 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'qbit_username', 'qbit_pass': 'qbit_username', 'torrent_storage_dir': '/Users/example/Library/Application Support/qBittorrent/BT_backup', 'content_layout': 'Original', 'VERIFY_WEBUI_CERTIFICATE': False}
   rtorrent: {'torrent_client': 'rtorrent', 'rtorrent_url': 'https://user:password@server.host.tld:443/username/rutorrent/plugins/httprpc/action.php'}
-  deluge: {'torrent_client': 'deluge', 'deluge_url': 'localhost', 'deluge_port': '8080', 'deluge_user': 'username', 'deluge_pass': 'password'}
-  transmission: {'torrent_client': 'transmission', 'transmission_url': 'http://localhost:9091', 'transmission_user': None, 'transmission_pass': None, 'torrent_storage_dir': '/.config/transmission-daemon/Torrents/', 'enable_search': True}
+  deluge: {'torrent_client': 'deluge', 'deluge_url': 'localhost', 'deluge_port': '8080', 'deluge_user': 'deluge_username', 'deluge_pass': 'deluge_password'}
+  transmission: {'torrent_client': 'transmission', 'transmission_url': 'http://localhost:9091', 'transmission_user': 'trans_username', 'transmission_pass': 'trans_password', 'torrent_storage_dir': '/.config/transmission-daemon/Torrents/', 'enable_search': True}
   watch: {'torrent_client': 'watch', 'watch_folder': '/Path/To/Watch/Folder'}
