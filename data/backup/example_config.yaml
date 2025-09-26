@@ -249,6 +249,10 @@ TRACKERS:
     api_key: "SeedPool_API_KEY"
     anon: false
 
+  STC:
+    api_key: "SkipTheCommercials_API_KEY"
+    anon: false
+
   TDC:
     PID: "Custom_Announce_URL"
     api_key: "TDC_API_KEY"
