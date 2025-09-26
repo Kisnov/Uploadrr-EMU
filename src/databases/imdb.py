@@ -1,51 +1,56 @@
 from difflib import SequenceMatcher
 from typing import Dict, Optional, Tuple
 
-from imdb import Cinemagoer
+from imdbinfo import get_akas, get_movie, search_title
 
 from src.utils.console import log
 
 
 class IMDbHandler:
-    """Handler for IMDb API operations."""
-
-    def __init__(self):
-        self.ia = Cinemagoer()
+    """Handler for IMDb API operations using imdbinfo library."""
 
     async def get_imdb_info(self, imdb_id: str, meta: Dict) -> Dict:
-        """Fetch IMDb information for a given ID."""
-        imdb_id = str(imdb_id).replace("tt", "")
+        imdb_id = str(imdb_id)
         if int(imdb_id) == 0:
             return self._fallback_from_meta(meta)
 
         try:
-            info = self.ia.get_movie(imdb_id)
-            log.ddebug(f"IMDb response for ID {imdb_id}: {info.data}")
-            self.ia.update(info, ["technical"])
+            info = get_movie(imdb_id)
+            if not info or not info.title:
+                raise ValueError("Movie not found")
+
+            aka = ""
+            try:
+                akas_data = get_akas(f"tt{imdb_id}")
+                if akas_data and akas_data.akas:
+                    original = next((a.title for a in akas_data.akas if a.attributes and "original" in a.attributes), None)
+                    aka = original or akas_data.akas[0].title
+            except Exception:
+                aka = info.title_localized or ""
+
+            aka = aka.replace(" - IMDb", "").replace("\u00ae", "") if aka else ""
+
             default_title = meta.get("title", "")
             return {
-                "title": info.get("title", default_title) or default_title,
-                "year": info.get("year", meta["year"]),
-                "aka": info.get("original title", info.get("localized title", meta["title"]))
-                .replace(" - IMDb", "")
-                .replace("\u00ae", ""),
-                "type": info.get("kind"),
-                "imdbID": info.get("imdbID", f"tt{imdb_id.zfill(7)}"),
-                "runtime": info.get("runtimes", ["0"])[0],
-                "cover": info.get("full-size cover url", "").replace(".jpg", "._V1_FMjpg_UX750_.jpg") or meta.get("poster", ""),
-                "plot": info.get("plot", [""])[0],
-                "genres": ", ".join(info.get("genres", [])),
-                "soundmix": info.get("sound mix"),
-                "countries_of_origin": info.get("countries", []),
-                "original_language": self._normalize_language(info.get("language codes", [])),
-                "directors": [f"nm{d.getID()}" for d in info.get("directors", [])] or meta.get("tmdb_directors", []),
+                "title": info.title or default_title,
+                "year": info.year or meta["year"],
+                "aka": aka,
+                "type": info.kind,
+                "imdbID": info.imdbId or f"tt{imdb_id.zfill(7)}",
+                "runtime": str(info.duration) if info.duration else meta.get("runtime", "60"),
+                "cover": info.cover_url or meta.get("poster", ""),
+                "plot": info.plot or meta.get("overview", ""),
+                "genres": ", ".join(info.genres) if info.genres else meta.get("genres", ""),
+                "soundmix": info.sound_mixes[0] if info.sound_mixes else None,
+                "countries_of_origin": info.countries or [],
+                "original_language": self._normalize_language(info.languages),
+                "directors": [f"nm{d.imdb_id}" for d in info.directors] if info.directors else meta.get("tmdb_directors", []),
             }
         except Exception as e:
             log.error(f"Failed to fetch IMDb info for ID {imdb_id}: {str(e)}")
             return self._fallback_from_meta(meta)
 
     def _normalize_language(self, languages: list) -> Optional[str]:
-        """Normalize language list to single value."""
         return languages[0] if len(languages) == 1 else None
 
     def _fallback_from_meta(self, meta: Dict) -> Dict:
@@ -68,13 +73,35 @@ class IMDbHandler:
     async def search_imdb(self, filename: str, search_year: int) -> str:
         """Search IMDb for a movie by filename and year."""
         try:
-            search = self.ia.search_movie(filename)
-            for movie in search:
-                if filename.lower() in movie.get("title", "").lower() and movie.get("year") == search_year:
-                    return str(movie.movieID).replace("tt", "")
+            results = search_title(filename)
+            for movie in results.titles:
+                if movie.title and filename.lower() in movie.title.lower() and movie.year == search_year:
+                    return movie.id
+            return "0"
         except Exception as e:
             log.error(f"IMDb search failed for {filename} ({search_year}): {str(e)}")
-        return "0"
+            return "0"
+
+    async def get_imdb_aka(self, imdb_id: str) -> Tuple[str, Optional[str]]:
+        """Fetch IMDb AKA and original language."""
+        if imdb_id == "0":
+            return "", None
+        try:
+            imdb_id = imdb_id.replace("tt", "")
+            movie = get_movie(imdb_id)
+            lang = self._normalize_language(movie.languages) if movie else None
+
+            aka = ""
+            akas_data = get_akas(f"tt{imdb_id}")
+            if akas_data and akas_data.akas:
+                original = next((a.title for a in akas_data.akas if a.attributes and "original" in a.attributes), None)
+                aka = original or akas_data.akas[0].title
+
+            aka = aka.replace(" - IMDb", "").replace("\u00ae", "") if aka else ""
+            return f" AKA {aka}" if aka else "", lang
+        except Exception as e:
+            log.error(f"Failed to get IMDb AKA for ID {imdb_id}: {str(e)}")
+            return "", None
 
     async def imdb_other_meta(self, meta: Dict) -> Dict:
         """Update meta with additional IMDb metadata."""
@@ -94,16 +121,3 @@ class IMDbHandler:
             if f"({meta['year']})" in meta["aka"]:
                 meta["aka"] = meta["aka"].replace(f"({meta['year']})", "").strip()
         return meta
-
-    async def get_imdb_aka(self, imdb_id: str) -> Tuple[str, Optional[str]]:
-        """Fetch IMDb AKA and original language."""
-        if imdb_id == "0":
-            return "", None
-        try:
-            result = self.ia.get_movie(imdb_id.replace("tt", ""))
-            original_language = self._normalize_language(result.get("language codes", []))
-            aka = result.get("original title", result.get("localized title", "")).replace(" - IMDb", "").replace("\u00ae", "")
-            return f" AKA {aka}" if aka else "", original_language
-        except Exception as e:
-            log.error(f"Failed to get IMDb AKA for ID {imdb_id}: {str(e)}")
-            return "", None

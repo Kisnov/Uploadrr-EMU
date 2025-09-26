@@ -3,11 +3,11 @@ aiofiles
 anitopy
 beautifulsoup4
 bencode.py
-cinemagoer
 deluge-client
 ffmpeg-python
 guessit
 httpx
+imdbinfo
 Jinja2
 langcodes
 nest_asyncio
@@ -21,7 +21,7 @@ pymediainfo
 pyyaml
 qbittorrent-api
 requests
-rich
+rich>=14.0.0
 tinytag
 torf
 unidecode
