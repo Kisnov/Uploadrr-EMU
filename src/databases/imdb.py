@@ -37,14 +37,15 @@ class IMDbHandler:
                 "aka": aka,
                 "type": info.kind,
                 "imdbID": info.imdbId or f"tt{imdb_id.zfill(7)}",
-                "runtime": str(info.duration) if info.duration else meta.get("runtime", "60"),
+                "runtime": str(info.duration) if info.duration else "",
                 "cover": info.cover_url or meta.get("poster", ""),
                 "plot": info.plot or meta.get("overview", ""),
-                "genres": ", ".join(info.genres) if info.genres else meta.get("genres", ""),
+                "genres": ", ".join(info.genres) if info.genres else "",
+                "keywords": ", ".join(info.storyline_keywords) if info.storyline_keywords else "",
                 "soundmix": info.sound_mixes[0] if info.sound_mixes else None,
                 "countries_of_origin": info.countries or [],
                 "original_language": self._normalize_language(info.languages),
-                "directors": [f"nm{d.imdb_id}" for d in info.directors] if info.directors else meta.get("tmdb_directors", []),
+                "directors": [f"nm{d.imdb_id}" for d in info.directors] if info.directors else "",
             }
         except Exception as e:
             log.error(f"Failed to fetch IMDb info for ID {imdb_id}: {str(e)}")

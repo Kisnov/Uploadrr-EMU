@@ -140,6 +140,11 @@ class Unit3d:
 
         adult_keywords = performers + tags
         keywords = meta["keywords"]
+        if meta["category"] in ["TV", "MOVIE"]:  # safety for now due to music/sports issue
+            imdb_keywords = meta.get("imdb_info", {}).get("keywords", "").split(", ")
+            keywords += imdb_keywords
+            unique_keywords = list({kw.strip() for kw in keywords if kw.strip()})
+            keywords = ", ".join(unique_keywords)
 
         # Build payload
         data = {
