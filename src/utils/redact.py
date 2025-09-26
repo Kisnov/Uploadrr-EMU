@@ -70,7 +70,13 @@ class RedactingRichHandler(RichHandler):
             if record.exc_text:
                 record.exc_text = self.redactor.redact(record.exc_text)
             if record.args:
-                record.args = tuple(self.redactor.redact(str(a)) for a in record.args)
+                new_args = []
+                for a in record.args:
+                    if isinstance(a, str):
+                        new_args.append(self.redactor.redact(a))
+                    else:
+                        new_args.append(a)
+                record.args = tuple(new_args)
         return super().emit(record)
 
     def render_traceback(self, traceback: Traceback) -> RenderResult:
