@@ -16,14 +16,13 @@ SCREENS:
     lensdump: "lensdump_API_KEY"
     ptscreens: "ptscreens_API_KEY"
     onlyimage: "onlyimage_API_KEY"
-  img_hosts: [ptpimg, ptscreens, onlyimage, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
   deinterlace_method: "yadif"
   tonemap_hdr: true
   hdr_method: "reinhard:desat=0" # Other presets: "hable:desat=0" (color accurate but dark) or "mobius:desat=10" (more pop sometimes) , or try your own!
-  optimize_images: true
+  optimize: true # you can set 0-9 for compression lvl if desired.
   use_oxipng: false
   keyframes_only: true
   frame_stats: false

@@ -70,7 +70,6 @@ class ScreenshotUploader:
                     uploaded = await self._upload_batch(
                         meta, images, viable_hosts, f"main screenshots for {meta['name']}", meta.get("screens", 3)
                     )
-                    log.debug(f"Uploaded {len(uploaded)} main images: {[img.get('img_url', '') for img in uploaded]}")
                     for i, up in enumerate(uploaded):
                         up["local_file"] = images[i]["local_file"]
                     result["main"] = uploaded
@@ -81,16 +80,12 @@ class ScreenshotUploader:
                         uploaded = await self._upload_batch(
                             meta, ep_screens, viable_hosts, f"{ep_name} screenshots for {meta['name']}", per_episode
                         )
-                        log.debug(
-                            f"Uploaded {len(uploaded)} images for episode {ep_name}: {[img.get('img_url', '') for img in uploaded]}"
-                        )
                         for i, up in enumerate(uploaded):
                             up["local_file"] = ep_screens[i]["local_file"]
                         result["episodes"][ep_name] = uploaded
 
                 elif section == "contact_sheets":
                     uploaded = await self._upload_batch(meta, images, viable_hosts, f"contact sheet for {meta['name']}", len(images))
-                    log.debug(f"Uploaded {len(uploaded)} contact images: {[img.get('img_url', '') for img in uploaded]}")
                     for i, up in enumerate(uploaded):
                         up["local_file"] = images[i]["local_file"]
                     result["contact_sheets"] = uploaded
@@ -124,20 +119,18 @@ class ScreenshotUploader:
                         hosts_to_use.append("imgbox")  # Fallback to imgbox
                 else:
                     hosts_to_use = ["imgbox"]  # No valid adult hosts, use imgbox
-        log.debug(f"adult = {adult}, meta['xxx'] = {meta['xxx']}, config = {self.config['ADULT']}")
         last_exc = None
         for host in hosts_to_use:
             try:
                 uploaded = await self._upload_with_retries(host, images, meta, meta["name"], max_images, adult=adult)
                 if uploaded:
-                    log.debug(f"Successfully uploaded {len(uploaded)} images to {host} for {label}")
                     return uploaded
                 else:
-                    log.debug(f"No images uploaded to {host} for {label}, retrying next host")
+                    log.warning(f"No images uploaded to {host} for {label}, retrying next host")
             except Exception as e:
                 console.print_exception()
                 last_exc = e
-                log.debug(f"[Uploader] {host} failed batch for {label}: {e!r}", exc_info=True)
+                log.error(f"[Uploader] {host} failed batch for {label}: {e!r}", exc_info=True)
         err_msg = f"Failed to upload {label} to any host"
         if last_exc:
             err_msg += f": last error: {last_exc!r}"
@@ -163,14 +156,12 @@ class ScreenshotUploader:
             try:
                 results = []
                 if hasattr(host, "upload_batch"):
-                    log.debug(f"Trying {host} in upload_batch")
                     batch_results = await host.upload_batch(self.client, image_paths, title=title, adult=adult)
                     successful = sum(1 for r in batch_results if r and all(k in r for k in ("img_url", "raw_url", "web_url")))
                     if pm:
                         pm.screen_up(successful)
                     results = batch_results
                 else:
-                    log.debug(f"Trying {host} in upload")
                     tasks = [host.upload(self.client, path, title=title, adult=adult) for path in image_paths]
                     for f in asyncio.as_completed(tasks):
                         try:
@@ -196,13 +187,12 @@ class ScreenshotUploader:
                 ]
 
                 if valid_results:
-                    log.debug(f"Successfully uploaded {len(valid_results)} images to {host_name} on attempt {attempt + 1}")
                     return valid_results
                 else:
-                    log.debug(f"No valid uploads to {host_name} on attempt {attempt + 1}, retrying")
+                    log.warning(f"No valid uploads to {host_name} on attempt {attempt + 1}, retrying")
 
             except Exception as e:
-                log.debug(f"{host_name} retry {attempt + 1}/{max_retries} failed: {e!r}")
+                log.error(f"{host_name} retry {attempt + 1}/{max_retries} failed: {e!r}")
                 console.print_exception()
                 await asyncio.sleep(0.3)
 

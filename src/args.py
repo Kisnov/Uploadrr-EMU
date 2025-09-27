@@ -60,9 +60,7 @@ class Args:
             help="Number of screenshots",
             default=int(self.config.get("SCREENS", {}).get("screen_count", 3)),
         )
-        parser.add_argument(
-            "-ih", "--imghost", type=str, default=self.config["SCREENS"].get("img_host_1", "imgbox"), help="Image host"
-        )
+        parser.add_argument("-ih", "--imghost", type=str, default=None, help="Image host")
 
         # Define Choices
         arg_choices = {
