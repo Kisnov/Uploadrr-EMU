@@ -145,10 +145,13 @@ class MediaInfoHandler:
             else:
                 return "Unknown"
         try:
+            fr = mi["media"]["track"][1].get("FrameRate", 0)
             width = int(mi["media"]["track"][1].get("Width", 0))
             height = int(mi["media"]["track"][1].get("Height", 0))
             scan = mi["media"]["track"][1].get("ScanType", "Progressive")
             scan = "p" if scan == "Progressive" else "i"
+            if fr == "25.000" and ("WEB" in uuid.upper() or "HDTV" in uuid.upper()):
+                scan = "p"  # Well documented mediainfo bug, we fix.
         except (KeyError, IndexError, ValueError):
             width, height = 0, 0
             scan = "p"
