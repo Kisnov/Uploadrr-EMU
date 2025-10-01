@@ -199,7 +199,7 @@ class TMDbHandler:
 
         from .imdb import IMDbHandler
 
-        imdb_task = asyncio.create_task(IMDbHandler().get_imdb_aka(meta.get("imdb_id", "0")))
+        imdb_task = asyncio.create_task(IMDbHandler().find_aka(meta.get("imdb_id", "0")))
         aka, original_language = await imdb_task
 
         meta.update(await self._parse_tmdb_data(data, meta, aka, original_language))
