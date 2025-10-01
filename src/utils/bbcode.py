@@ -236,6 +236,7 @@ class BBCODE:
         desc = self.convert_to_align(desc)
         desc = self.convert_code_to_pre(desc)
         desc = self.convert_note_to_quote(desc)
+        desc = self.convert_to_align(desc)
         # Specific image replacements for music
         desc = desc.replace(
             "[img=120]https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg[/img]", "MusicBrainz"
