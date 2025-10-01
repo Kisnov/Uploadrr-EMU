@@ -1,20 +1,18 @@
-import json
-import pickle
 import platform
 import re
 import urllib.parse
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import aiofiles
 import httpx
 import rich.prompt as Prompt
 from bs4 import BeautifulSoup
-from torf import Torrent
 
 from src.mediainfo import MediaInfoHandler
 from src.utils.bbcode import BBCODE
-from src.utils.console import log
+from src.utils.console import console, log
+from src.utils.cookieme import CookieMonster
 from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
@@ -22,20 +20,25 @@ from src.utils.torrentman import edit_torrent
 class AR:
     def __init__(self, config):
         self.config = config
-        self.type = "other"
+        self.type = "other"  # TODO gazelle
         self.session = None
         self.tracker = "AR"
         self.source_flag = "AlphaRatio"
         self.username = config["TRACKERS"]["AR"].get("username", "").strip()
         self.password = config["TRACKERS"]["AR"].get("password", "").strip()
         pid = config["TRACKERS"][self.tracker].get("PID", "PASSKEY_HERE")
-        self.announce_url = f"http://tracker.alpharatio.cc:2710/{pid}/announce"
+        if pid.startswith(("http://", "https://")):
+            self.announce_url = pid
+        else:
+            self.announce_url = f"http://tracker.alpharatio.cc:2710/{pid}/announce"
         self.login_url = "https://alpharatio.cc/login.php"
         self.upload_url = "https://alpharatio.cc/upload.php"
         self.search_url = "https://alpharatio.cc/torrents.php"
         self.user_agent = f"Uploadrr ({platform.system()} {platform.release()})"
-        self.signature = None
+        self.cookie_file = None
+        self.cookie_monster = None
         self.banned_groups = []
+        self.auth_key = None
 
     async def start_session(self):
         if self.session is not None:
@@ -49,97 +52,78 @@ class AR:
             self.session = None
 
     async def validate_credentials(self, meta: Dict) -> bool:
-        if self.session:
-            log.warning("Previous session was not closed properly. Using existing session.")
-        else:
-            await self.start_session()
+        cookie_path = Path(meta["base_dir"]) / "data" / "cookies" / f"{self.tracker}.pkl"
+        self.cookie_monster = CookieMonster(cookie_path)
 
-        if await self.load_session(meta):
-            response = await self.get_initial_response()
-            if await self.validate_login(response):
-                return True
-        else:
-            log.info("No session file found. Attempting to log in...")
-            if await self.login(meta):
-                log.info("Login successful, session file created.")
-                await self.save_session(meta)
+        if self.session is not None:
+            log.warning("Previous session was not closed properly. Closing it now.")
+            await self.close_session()
+
+        await self.start_session()
+
+        if await self.cookie_monster.load(self.session):
+
+            def check_login(response: httpx.Response) -> bool:
+                return "login.php?act=recover" not in response.text
+
+            if await self.cookie_monster.validate(client=self.session, validate_url=self.search_url, check_func=check_login):
+                log.info("Cookies loaded and validated successfully.")
                 return True
             else:
-                log.error("Failed to validate credentials. Please confirm site status and credentials.")
-        return False
+                log.warning("Cookies loaded but validation failed. Attempting fresh login.")
+        else:
+            console.print("No valid cookie file found. Attempting login...")
 
-    async def get_initial_response(self) -> str:
-        try:
-            response = await self.session.get(self.login_url)
-            response.raise_for_status()
-            return response.text
-        except httpx.RequestError as e:
-            log.error(f"Failed to get initial response: {e}")
-            raise
-
-    async def validate_login(self, response_text: str) -> bool:
-        if "login.php?act=recover" in response_text:
-            log.error("Login failed. Check your credentials.")
+        # No Valid Cookie -- Login
+        if await self.login(meta):
+            await self.cookie_monster.save(self.session)
+            return True
+        else:
+            log.error("Login failed. Please check credentials and site status.")
             return False
-        return True
 
     async def login(self, meta: Dict) -> bool:
         data = {"username": self.username, "password": self.password, "keeplogged": "1", "login": "Login"}
         try:
-            response = await self.session.post(self.login_url, data=data)
+            response = await self.session.post(self.login_url, data=data, follow_redirects=True)
             response.raise_for_status()
-            if await self.validate_login(response.text):
-                await self.save_session(meta)
-                return True
-            return False
+            if "login.php?act=recover" in response.text:
+                log.error("Login failed. Check your credentials.")
+                return False
+            return True
         except httpx.RequestError as e:
             log.error(f"Login failed: {e}")
             return False
 
-    async def save_session(self, meta: Dict):
-        session_file = Path(meta["base_dir"]) / "data" / "cookies" / f"{self.tracker}.pkl"
-        session_file.parent.mkdir(parents=True, exist_ok=True)
-        cookies = self.session.cookies
-        cookie_dict = dict(cookies)
+    async def get_auth_key(self) -> str:
+        if self.auth_key is not None:
+            return self.auth_key
 
-        with session_file.open("wb") as f:
-            pickle.dump(cookie_dict, f)
+        try:
+            response = await self.session.get(self.search_url)
+            response.raise_for_status()
+        except httpx.RequestError as e:
+            log.error(f"Failed to fetch page for auth key: {e}")
+            raise
 
-    async def load_session(self, meta: Dict) -> bool:
-        session_file = Path(meta["base_dir"]) / "data" / "cookies" / f"{self.tracker}.pkl"
-        retry_count = 0
-        max_retries = 2
+        soup = BeautifulSoup(response.text, "html.parser")
+        logout_link = soup.find("a", href=True, text="Logout")
+        if logout_link is None:
+            raise ValueError("Not logged in: No 'Logout' link found.")
 
-        while retry_count < max_retries:
-            try:
-                with session_file.open("rb") as f:
-                    cookie_dict = pickle.load(f)
-                    self.session.cookies.update(cookie_dict)
+        match = re.search(r"auth=([^&]+)", logout_link["href"])
+        if match is None:
+            raise ValueError("Auth key not found in logout link.")
 
-                    if meta.get("debug", False):
-                        log.debug(f"Loaded cookies: {cookie_dict}")
-
-                    response = await self.session.get("https://alpharatio.cc/torrents.php")
-                    response.raise_for_status()
-                    return True
-
-            except (FileNotFoundError, EOFError, pickle.UnpicklingError, httpx.RequestError) as e:
-                log.warning(f"Session loading error: {e}. Retrying...")
-                await self.close_session()
-                await self.start_session()
-                retry_count += 1
-
-        log.info("Failed to reuse session after retries. Attempting fresh login...")
-        await self.close_session()
-        await self.start_session()
-        return await self.login(meta)
+        self.auth_key = match.group(1)
+        return self.auth_key
 
     async def edit_desc(self, meta: Dict):
         bbcode = BBCODE()
         desc_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]DESCRIPTION.txt"
+        descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
 
         if meta.get("is_music", False):
-            descgen = DescGenerator(config=self.config, base_dir=meta["base_dir"])
             desc = await descgen.create_music_description(meta, self.tracker)
             async with aiofiles.open(desc_path, "r", encoding="utf-8") as file:
                 desc = await file.read()
@@ -223,12 +207,9 @@ class AR:
                         mi_dump = (await mi_file.read())[:-65].strip()
                     await desc.write(f"[hide=Mediainfo]{mi_dump}[/hide]\n\n")
 
-                images = meta.get("image_list", [])
+                images = meta.get("image_list", {})
                 if images:
-                    await desc.write("[hide=Screenshots][align=center]\n")
-                    for each in images:
-                        await desc.write(f"[img]{each['raw_url']}[/img] ")
-                    await desc.write("[/align][/hide]\n")
+                    await descgen._write_images(desc, meta, self.tracker, img_size=0)
 
                 await desc.write(f"\n\n{base}")
 
@@ -268,155 +249,13 @@ class AR:
 
         return category_id
 
-    def get_language_tag(self, meta: Dict) -> str:
-        lang_tag = ""
-        has_eng_audio = False
-        audio_lang = ""
-
-        if meta["is_disc"] != "BDMV":
-            try:
-                mi_path = Path(meta.get("base_dir")) / "tmp" / meta.get("uuid") / "MediaInfo.json"
-                with mi_path.open("r", encoding="utf-8") as f:
-                    mi = json.load(f)
-                for track in mi["media"]["track"]:
-                    if track["@type"] == "Audio":
-                        if track.get("Language", "None").startswith("en"):
-                            has_eng_audio = True
-                        elif not has_eng_audio:
-                            audio_lang = mi["media"]["track"][2].get("Language_String", "").upper()
-            except Exception as e:
-                log.error(f"Error getting language tag: {e}")
-        else:
-            for audio in meta["bdinfo"]["audio"]:
-                if audio["language"] == "English":
-                    has_eng_audio = True
-                elif not has_eng_audio:
-                    audio_lang = meta["bdinfo"]["audio"][0]["language"].upper()
-
-        return audio_lang if audio_lang else lang_tag
-
-    def get_basename(self, meta: Dict) -> str:
-        path = next(iter(meta["filelist"]), meta["path"])
-        return Path(path).name
-
-    async def get_name(self, meta: Dict) -> str:  # TODO change to edit_name
+    async def edit_name(self, meta: Dict) -> str:
         manual_name = meta.get("manual_name")
         if manual_name:
             return manual_name
-
-        media_type = meta.get("type", "")
-        title = meta.get("title", "")
-        artist = meta.get("artist", "")
-        album = meta.get("album", "")
-        year = meta.get("year", "")
-        resolution = meta.get("resolution", "") if meta.get("resolution", "") != "OTHER" else ""
-        audio = meta.get("audio", "")
-        bit_depth = meta.get("bit_depth", "")
-        bitrate = meta.get("bitrate", "")
-        lang_tag = self.get_language_tag(meta)
-        service = meta.get("service", "")
-        season = "" if meta.get("no_season", False) else meta.get("season", "")
-        episode = meta.get("episode", "")
-        part = meta.get("part", "")
-        repack = meta.get("repack", "")
-        three_d = meta.get("3D", "")
-        tag = meta.get("tag", "-NOGRP")
-        source = meta.get("source", "")
-        uhd = meta.get("uhd", "")
-        hdr = meta.get("hdr", "")
-        episode_title = meta.get("episode_title", "")
-
-        if meta.get("is_disc", "") == "BDMV":
-            video_codec = meta.get("video_codec", "")
-            region = meta.get("region", "")
-        elif meta.get("is_disc", "") == "DVD":
-            region = meta.get("region", "")
-            dvd_size = meta.get("dvd_size", "")
-        else:
-            video_codec = meta.get("video_codec", "")
-            video_encode = meta.get("video_encode", video_codec)
-
-        edition = meta.get("edition", "")
-        cut = meta.get("cut", "")
-        ratio = meta.get("ratio", "")
-
-        if meta["category"] == "TV":
-            year = meta.get("year", meta.get("imdb_info", {}).get("year", "")) if not meta.get("no_year", False) else ""
-
-        if meta.get("debug"):
-            log.debug(f"Category: {meta['category']}, Type: {media_type}")
-            log.debug(f"Metadata: {meta}")
-
-        naming_dict = {
-            "MOVIE": {
-                "DISC": {
-                    "BDMV": f"{title} {year} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}{tag}",
-                    "DVD": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}{tag}",
-                    "HDDVD": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}{tag}",
-                },
-                "REMUX": {
-                    (
-                        "BluRay",
-                        "HDDVD",
-                    ): f"{title} {year} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}{tag}",
-                    (
-                        "PAL DVD",
-                        "NTSC DVD",
-                        "DVD",
-                    ): f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {source} REMUX {audio}{tag}",
-                },
-                "ENCODE": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}{tag}",
-                "WEBDL": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}{tag}",
-                "WEBRIP": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}{tag}",
-                "HDTV": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}",
-            },
-            "TV": {
-                "DISC": {
-                    "BDMV": f"{title} {year} {season}{episode} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}{tag}",
-                    "DVD": f"{title} {season}{episode} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {source} {dvd_size} {audio}{tag}",
-                    "HDDVD": f"{title} {year} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {video_codec} {audio}{tag}",
-                },
-                "REMUX": {
-                    (
-                        "BluRay",
-                        "HDDVD",
-                    ): f"{title} {year} {season}{episode} {episode_title} {part} {three_d} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} REMUX {hdr} {video_codec} {audio}{tag}",
-                    (
-                        "PAL DVD",
-                        "NTSC DVD",
-                    ): f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {source} REMUX {audio}{tag}",
-                },
-                "ENCODE": f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {source} {audio} {hdr} {video_encode}{tag}",
-                "WEBDL": f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEB-DL {audio} {hdr} {video_encode}{tag}",
-                "WEBRIP": f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {uhd} {service} WEBRip {audio} {hdr} {video_encode}{tag}",
-                "HDTV": f"{title} {year} {season}{episode} {episode_title} {part} {lang_tag} {cut} {ratio} {edition} {repack} {resolution} {source} {audio} {video_encode}{tag}",
-            },
-            "MUSIC": {
-                (
-                    "ALAC",
-                    "FLAC",
-                    "WAV",
-                ): f"{artist} {album} {year} [{'edition'}] {source}{media_type} {bit_depth}bit {'' if tag == '-NOGRP' else tag}",
-                "default": f"{artist} {album} {year} [{'edition'}] {source}{media_type} {bitrate} {'' if tag == '-NOGRP' else tag}",
-            },
-        }
-
-        if meta["category"] == "MUSIC":
-            edition = meta.get("manual_edition", edition)
-            source = f"{source} " if source else ""
-            name = naming_dict["MUSIC"][media_type if media_type in ("ALAC", "FLAC", "WAV") else "default"].format(edition=edition)
-        else:
-            if media_type == "DISC":
-                name = naming_dict[meta["category"]][media_type][meta.get("is_disc", "BDMV")]
-            elif media_type == "REMUX":
-                name = naming_dict[meta["category"]][media_type][
-                    tuple(k for k in naming_dict[meta["category"]][media_type] if source in k)[0]
-                ]
-            else:
-                name = naming_dict[meta["category"]][media_type]
-
-        name = name.replace(":", "").replace("'", "").replace("DD+", "DDP")
-        return ".".join(part for part in name.split() if part)
+        ar_name = meta["name"]
+        ar_name = ar_name.replace(":", "").replace("'", "").replace(" ", ".")
+        return ar_name
 
     async def search_existing(self, meta: Dict) -> Dict[str, str]:
         await self.validate_credentials(meta)
@@ -465,12 +304,29 @@ class AR:
     def _has_existing_torrents(self, response_text: str) -> bool:
         return "Your search did not match anything." not in response_text
 
-    def extract_auth_key(self, response_text: str) -> Optional[str]:
-        soup = BeautifulSoup(response_text, "html.parser")
-        logout_link = soup.find("a", href=True, text="Logout")
-        if logout_link and (match := re.search(r"auth=([^&]+)", logout_link["href"])):
-            return match.group(1)
-        return None
+    def get_tags(self, meta: dict) -> str:
+        def clean_tag(tag: str) -> str:
+            return tag.strip().replace(" ", ".").strip(".")
+
+        imdb_id = meta.get("imdb_id")
+        tmdbg = meta.get("genres", "")
+        imdbg = meta.get("imdb_info", {}).get("genres", "")
+
+        seen = set()
+        tags = []
+
+        if imdb_id:
+            imdb_tag = f"tt{imdb_id}"
+            tags.append(imdb_tag)
+            seen.add(imdb_tag)
+
+        for tag in (tmdbg + "," + imdbg).split(","):
+            cleaned = clean_tag(tag)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                tags.append(cleaned)
+
+        return ", ".join(tags)
 
     async def upload(self, meta: Dict):
         await edit_torrent(meta, self.tracker, self.source_flag, self.announce_url)
@@ -488,29 +344,14 @@ class AR:
                 log.warning("Invalid image link provided.")
                 cover = None
 
-        genres = meta.get("genres")
-        tags = (
-            f"tt{meta.get('imdb_id', '')}, {', '.join(tag.strip('.') for tag in (item.replace(' ', '.') for item in genres.split(',')))}"
-            if genres and meta.get("imdb_id")
-            else genres or ""
-        ).replace("..", ".")
-
-        initial_response = await self.get_initial_response()
-        auth_key = self.extract_auth_key(initial_response)
-        if not auth_key:
-            raise Exception("Failed to extract auth key.")
-
-        session_cookie = self.session.cookies.get("session")
-        if not session_cookie:
-            raise Exception("Session cookie not found.")
-
-        ar_name = meta.get("manual_name") or await self.get_name(meta)
+        auth_key = await self.get_auth_key()
+        ar_name = meta.get("manual_name") or await self.edit_name(meta)
         data = {
             "submit": "true",
             "auth": auth_key,
             "type": await self.get_cat_id(meta),
             "title": ar_name,
-            "tags": tags,
+            "tags": self.get_tags(meta),
             "image": cover,
             "desc": desc,
         }
@@ -520,7 +361,6 @@ class AR:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Origin": "https://alpharatio.cc",
             "Referer": "https://alpharatio.cc/upload.php",
-            "Cookie": f"session={session_cookie}",
         }
 
         torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
@@ -531,21 +371,12 @@ class AR:
             async with aiofiles.open(torrent_path, "rb") as torrent_file:
                 files = {"file_input": (f"{meta['clean_name']}.torrent", await torrent_file.read(), "application/x-bittorrent")}
                 if not meta.get("debug"):
-                    response = await self.session.post(self.upload_url, data=data, files=files, headers=headers)
+                    response = await self.session.post(self.upload_url, data=data, files=files, headers=headers, follow_redirects=True)
                     response.raise_for_status()
-                    await self.update_torrent_file(torrent_path, str(response.url))
+                    comment = f"Created by Uploadrr for AlphaRatio: {str(response.url)}"
+                    await edit_torrent(torrent_path=torrent_path, comment=comment)
                 else:
                     log.debug("Debug mode: Skipping actual upload.")
         except (FileNotFoundError, httpx.RequestError) as e:
             log.error(f"Upload failed: {e}")
-            raise
-
-    async def update_torrent_file(self, torrent_path: Path, comment: str):
-        try:
-            base_torrent = Torrent.read(str(torrent_path))
-            base_torrent.comment = f"Created by Uploadrr for AlphaRatio: {comment}"
-            base_torrent.write(str(torrent_path), overwrite=True)
-            log.debug(f"Updated torrent file with comment: {comment}")
-        except Exception as e:
-            log.error(f"Error updating torrent file: {e}")
             raise

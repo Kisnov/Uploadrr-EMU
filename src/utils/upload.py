@@ -24,7 +24,7 @@ async def upload_to_trackers(
     skipped_files: int,
     skipped_details: List[Tuple],
     path: str,
-    progress: ProgressManager,
+    pm: ProgressManager,
     client: Clients,
     config: Dict,
 ) -> Tuple[bool, int]:
@@ -86,12 +86,16 @@ async def handle_special_tracker(
     tracker: str, tracker_instance, meta: Dict, path: str, skipped_details: List[Tuple], skipped_files: int, config: Dict
 ) -> bool:
     """Handle special tracker uploads."""
+    pm = ProgressManager.get_instance()
     debug = "(DEBUG)" if meta.get("debug") else ""
     upload_prompt = f"Upload to {tracker}? {debug}"
-    if not (meta.get("unattended", False) or Confirm.ask(upload_prompt)):
-        skipped_details.append((path, f"User skipped {tracker}"))
-        return False
 
+    if not meta.get("unattended", False):
+        with pm.pause_for_interaction():
+            if not Confirm.ask(upload_prompt):
+                skipped_details.append((path, f"User skipped {tracker}"))
+                return False
+    pm.update(f"Uploading to {tracker}")
     if tracker == "AR":
         return await upload_to_ar(tracker_instance, meta, path, skipped_details, config)
     elif tracker in ["BHD", "DC", "TL"]:
@@ -144,7 +148,6 @@ async def upload_to_tracker(
 
 async def upload_to_ar(ar, meta: Dict, path: str, skipped_details: List[Tuple], config: Dict) -> bool:
     """Specific upload logic for AlphaRatio."""
-    from src.progress import ProgressManager
 
     from .checks import check_banned_group, dupe_check
 

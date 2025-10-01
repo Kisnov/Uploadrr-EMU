@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import glob
 import os
@@ -9,7 +11,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import bencodepy as bencode
 from torf import Torrent
@@ -417,32 +419,61 @@ class TorrentMaker:
 
 
 # Avoid loading in TorrentMaker Intsance
-async def edit_torrent(meta: dict, tracker: str, source_flag: str, announce_url: str, comment: Optional[str] = None) -> None:
+async def edit_torrent(
+    meta: Optional[dict] = None,
+    torrent_path: Optional[Union[str, Path]] = None,
+    tracker: Optional[str] = None,
+    source_flag: Optional[str] = None,
+    announce_url: Optional[str] = None,
+    comment: Optional[str] = None,
+) -> Path:
     """Edit an existing torrent by updating tracker, source flag, and/or comment."""
     try:
-        torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
-        base_torrent_path = torrent_path / "BASE.torrent"
+        if torrent_path is not None:
+            existing = Path(torrent_path)
+            if not existing.exists():
+                raise FileNotFoundError(f"Torrent not found at {existing}")
+        elif meta is not None:
+            torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
+            existing = torrent_path / "BASE.torrent"
+            if not existing.exists():
+                log.error(f"Base torrent not found at {existing}")
+                raise FileNotFoundError(f"Base torrent not found at {existing}")
+        else:
+            raise ValueError("Either 'meta' or 'torrent_path' must be provided")
 
-        if not base_torrent_path.exists():
-            log.error(f"Base torrent not found at {base_torrent_path}")
-            return
+        if meta is not None and tracker is not None:
+            output_dir = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
+            output_path = output_dir / f"[{tracker}]{meta['clean_name']}.torrent"
+        elif torrent_path is not None:
+            input_path = Path(torrent_path)
+            output_path = input_path
+        else:
+            raise ValueError("Cannot determine output path: need meta+tracker or torrent_path")
 
-        new_torrent = Torrent.read(base_torrent_path)
+        new_torrent = Torrent.read(existing)
 
-        # Clean up unnecessary metadata keys
-        valid_meta_keys = {"creation date", "encoding", "info"}
-        for key in list(new_torrent.metainfo.keys()):
-            if key not in valid_meta_keys:
-                new_torrent.metainfo.pop(key, None)
+        if meta is not None:
+            valid_meta_keys = {"creation date", "encoding", "info"}
+            for key in list(new_torrent.metainfo.keys()):
+                if key not in valid_meta_keys:
+                    new_torrent.metainfo.pop(key, None)
+            new_torrent.metainfo["created by"] = "Uploadrr"
 
-        new_torrent.metainfo["created by"] = "Uploadrr"
-        new_torrent.metainfo["announce"] = announce_url.strip()
-        new_torrent.metainfo["info"]["source"] = source_flag
-        if comment:
-            new_torrent.metainfo["comment"] = comment
+        if announce_url is not None:
+            new_torrent.metainfo["announce"] = announce_url.strip()
 
-        output_path = torrent_path / f"[{tracker}]{meta['clean_name']}.torrent"
+        if source_flag is not None:
+            new_torrent.metainfo["info"]["source"] = source_flag
+
+        if comment is not None:
+            if comment == "":
+                new_torrent.metainfo.pop("comment", None)
+            else:
+                new_torrent.metainfo["comment"] = comment
+
         Torrent.copy(new_torrent).write(output_path, overwrite=True)
+        return output_path
 
     except Exception as e:
         log.error(f"Failed to edit torrent: {e}")
