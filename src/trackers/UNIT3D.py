@@ -102,7 +102,7 @@ class Unit3d:
         # region_id = await common.unit3d_region_ids(meta.get("region")) # TODO TEST THIS
         xanon = (
             1
-            if (self.config["TRACKERS"][self.tracker].get("xanon", False) or self.config.get("ADULT").get("anon", False))
+            if (self.config["TRACKERS"][self.tracker].get("xanon", False) or self.config.get("ADULT", {}).get("anon", False))
             and meta.get("xxx")
             else 0
         )
