@@ -122,8 +122,8 @@ class Args:
             default="",
             help="Edition/Repack string (e.g., Director's Cut, REPACK)",
         )
-        parser.add_argument("-season", "--season", nargs="*", type=str, help="Season (number)")
-        parser.add_argument("-episode", "--episode", nargs="*", type=str, help="Episode (number)")
+        parser.add_argument("-season", "--season", type=self.season_or_episode, help="Season number (or SxxExx shorthand)")
+        parser.add_argument("-episode", "--episode", type=self.season_or_episode, help="Episode number (or SxxExx shorthand)")
         parser.add_argument(
             "-daily", "--daily", nargs=1, type=datetime.date.fromisoformat, dest="manual_date", help="Air date of episode (YYYY-MM-DD)"
         )
@@ -259,8 +259,8 @@ class Args:
             "torrent_creation": lambda v: v.lower() if v else None,
             "tag": lambda v: f"-{v}" if isinstance(v, str) else "",
             "screens": int,
-            "season": lambda v: ("manual_season", v),
-            "episode": lambda v: ("manual_episode", v),
+            "season": lambda v: v,
+            "episode": lambda v: v,
             "manual_date": lambda v: v,
             "tmdb_manual": lambda v: self.parse_tmdb_id(v[0], meta.get("category")) if isinstance(v, list) and v else ("", ""),
             "ptp": lambda v: self._parse_tracker_id(v, "ptp", "torrentid"),
@@ -275,7 +275,9 @@ class Args:
             elif value not in (None, []):
                 if key in value_processors:
                     result = value_processors[key](value)
-                    if isinstance(result, tuple) and len(result) == 2:
+                    if isinstance(result, dict):
+                        meta.update(result)
+                    elif isinstance(result, tuple) and len(result) == 2:
                         if key == "tmdb_manual":
                             meta["category"], meta[key] = result
                         else:
@@ -302,6 +304,21 @@ class Args:
         if not items:
             return "None"
         return " ".join(str(item) for item in items)
+
+    @staticmethod
+    def season_or_episode(value: str) -> Dict[str, str]:
+        value = value.strip().lower()
+        result = {}
+        match = re.match(r"(s?\d+)?(e\d+)?", value)
+        if match:
+            season, episode = match.groups()
+            if season:
+                season_num = re.sub(r"\D", "", season)
+                result["manual_season"] = f"S{int(season_num):02d}"
+            if episode:
+                episode_num = re.sub(r"\D", "", episode)
+                result["manual_episode"] = f"E{int(episode_num):02d}"
+        return result or {"manual_season": value}
 
     def parse_tmdb_id(self, id: str, category: Optional[str]) -> Tuple[str, str]:
         try:
