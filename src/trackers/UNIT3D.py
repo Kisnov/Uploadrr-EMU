@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import platform
+import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -140,9 +141,11 @@ class Unit3d:
 
         adult_keywords = performers + tags
         keywords = meta["keywords"]
+
         if meta["category"] in ["TV", "MOVIE"]:  # safety for now due to music/sports issue
+            keywords = meta["keywords"].split(", ") if meta["keywords"] else []
             imdb_keywords = meta.get("imdb_info", {}).get("keywords", "").split(", ")
-            keywords += imdb_keywords
+            keywords.extend(imdb_keywords)
             unique_keywords = list({kw.strip() for kw in keywords if kw.strip()})
             keywords = ", ".join(unique_keywords)
 
@@ -230,6 +233,10 @@ class Unit3d:
                                         torrent_data = torrent_response.content
                                         new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
                                         new_torrent.write_bytes(torrent_data)
+                                        url = raw_url.replace("/download", "")
+                                        url = re.sub(r"/(\d+)\..*$", r"/\1", url)
+                                        comment = f"Made by Uploadrr for: {url}"
+                                        await edit_torrent(torrent_path=new_torrent, comment=comment)
                                         console.print("[bold green]Torrent uploaded successfully!")
                             except httpx.HTTPStatusError as http_err:
                                 console.print(

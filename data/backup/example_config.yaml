@@ -16,6 +16,7 @@ SCREENS:
     lensdump: "lensdump_API_KEY"
     ptscreens: "ptscreens_API_KEY"
     onlyimage: "onlyimage_API_KEY"
+  img_hosts: [ptpimg, ptscreens, onlyimage, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
