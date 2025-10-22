@@ -48,9 +48,9 @@ class CheveretoTemplate(BaseImageHost):
             content_type = resp.headers.get("content-type")
             text = await resp.aread()
 
-            log.debug(f"[{self.host}] HTTP {resp.status_code} {resp.reason_phrase}")
-            log.debug(f"[{self.host}] Content-Type: {content_type}")
-            log.debug(f"[{self.host}] Raw Body: {text[:500]}...")
+            log.ddebug(f"[{self.host}] HTTP {resp.status_code} {resp.reason_phrase}")
+            log.ddebug(f"[{self.host}] Content-Type: {content_type}")
+            log.ddebug(f"[{self.host}] Raw Body: {text}")
 
             if "application/json" not in content_type:
                 raise ValueError(f"{self.host} response was not JSON")
@@ -60,12 +60,12 @@ class CheveretoTemplate(BaseImageHost):
             if result.get("status_code", 200) == 200 or result.get("success"):
                 image_data = result["data"].get("image", result["data"])
                 return {
-                    "img_url": result["data"].get("medium", image_data)["url"],
+                    "img_url": result["data"].get("medium", {}).get("url", image_data["url"]),
                     "raw_url": image_data["url"],
                     "web_url": result["data"].get("url_viewer", image_data["url"]),
                 }
-
-            raise ValueError(f"{self.host} error: {result.get('error', result)}")
+            else:
+                raise ValueError(f"{self.host} error: {result.get('error', result)}")
 
         except Exception as e:
             log.error(f"[{self.host}] Failed to upload {image_path}: {repr(e)}")
@@ -73,13 +73,20 @@ class CheveretoTemplate(BaseImageHost):
 
     async def upload_batch(self, client, image_paths, title=None, adult=False):
         """Upload multiple images and return a list of results."""
-        tasks = [self.upload(client, path, title, adult) for path in image_paths]
+        max_concurrent = 6  # Higher numbers lead to server side connection drops before we can read url
         results = []
-        for f in asyncio.as_completed(tasks):
-            try:
-                result = await f
-                results.append(result)
-            except Exception as e:
-                log.debug(f"Upload failed for {self.host}: {e}")
-                results.append(None)
+        for i in range(0, len(image_paths), max_concurrent):
+            batch = image_paths[i : i + max_concurrent]
+            tasks = [self.upload(client, path, title, adult) for path in batch]
+            for f in asyncio.as_completed(tasks):
+                try:
+                    result = await f
+                    if result and all(k in result for k in ("img_url", "raw_url", "web_url")):
+                        results.append(result)
+                    else:
+                        log.warning(f"[{self.host}] Invalid upload result: {result}")
+                        results.append(None)
+                except Exception as e:
+                    log.error(f"[{self.host}] Upload failed: {e}")
+                    results.append(None)
         return results

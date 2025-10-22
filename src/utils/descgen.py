@@ -588,8 +588,15 @@ class DescGenerator:
                 elif album_back:
                     await descfile.write(center_img(album_back, size=0))
 
-            if proof := meta.get("album_proof"):
-                await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
+            if meta.get("user_proof"):
+                proof = None
+                for img in meta.get("image_list", {}).get("main", []):
+                    if img.get("local_file", "").strip() == meta["user_proof"].strip():
+                        proof = img.get("raw_url", "").strip()
+                        break
+
+                if proof:
+                    await descfile.write(f"[center][spoiler=Proof][center][img=500]{proof}[/img][/center][/spoiler][/center]\n\n")
 
             # Logos with URLs
             logos = {

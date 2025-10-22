@@ -67,9 +67,8 @@ class ScreenshotUploader:
                     ]
 
                 if section == "main":
-                    uploaded = await self._upload_batch(
-                        meta, images, viable_hosts, f"main screenshots for {meta['name']}", meta.get("screens", 3)
-                    )
+                    max_images = len(screens) if meta.get("is_music", False) else meta.get("screens", 3)
+                    uploaded = await self._upload_batch(meta, images, viable_hosts, f"main screenshots for {meta['name']}", max_images)
                     for i, up in enumerate(uploaded):
                         up["local_file"] = images[i]["local_file"]
                     result["main"] = uploaded
@@ -94,35 +93,39 @@ class ScreenshotUploader:
                 pm.screen_done()
             return result
 
-    async def _upload_batch(self, meta, images, viable_hosts, label, max_images):
+    async def _upload_batch(self, meta, images, viable_hosts, label, max_images, adult=False):
         # Ensure images is a list of dicts
         images = [{"local_file": img} if isinstance(img, str) else img for img in (images if isinstance(images, list) else [images])]
-        log.debug(f"_upload_batch: {len(images)} images for {label}: {[img['local_file'] for img in images if 'local_file' in img]}")
         if not images:
             log.debug(f"No images to upload for {label}")
             return []
 
-        # Adult host override logic
-        hosts_to_use = viable_hosts[:]
-        adult = True if meta.get("xxx", False) and (self.config.get("ADULT") is not None) else False
-        if adult:
-            adult_config = self.config["ADULT"]
-            if adult_config.get("image_hosts") == "imgbox":
-                hosts_to_use = ["imgbox"]
-            else:
-                adult_hosts = [
-                    key[:-4] for key in adult_config if key.endswith("_api") and key != "tpdb_api" and adult_config.get(key)
-                ]
-                if adult_hosts:
-                    hosts_to_use = adult_hosts
-                    if "imgbox" not in adult_hosts:
-                        hosts_to_use.append("imgbox")  # Fallback to imgbox
-                else:
-                    hosts_to_use = ["imgbox"]  # No valid adult hosts, use imgbox
+        if meta.get("is_music", False):
+            image_paths = []
+            for img in images:
+                if "local_file" in img:
+                    img_path = Path(img["local_file"])
+                    resolved_path = img_path.resolve()
+                    image_paths.append(str(resolved_path))
+                    if not resolved_path.exists():
+                        log.warning(f"Music image file does not exist: {img['local_file']}")
+        else:
+            tmp_dir = self.base_dir / "tmp" / meta["uuid"]
+            image_paths = [
+                (tmp_dir / img["local_file"]).as_posix()
+                for img in images[:max_images]
+                if "local_file" in img and Path(tmp_dir / img["local_file"]).exists()
+            ]
+
+        if not image_paths:
+            log.warning(f"No valid image paths found for {label}")
+            return []
+
         last_exc = None
-        for host in hosts_to_use:
+        viable_hosts = list(dict.fromkeys(viable_hosts))
+        for host in viable_hosts:
             try:
-                uploaded = await self._upload_with_retries(host, images, meta, meta["name"], max_images, adult=adult)
+                uploaded = await self._upload_with_retries(host, images, image_paths, meta, label, max_images, adult=adult)
                 if uploaded:
                     return uploaded
                 else:
@@ -137,27 +140,27 @@ class ScreenshotUploader:
         log.error(err_msg)
         return []
 
-    async def _upload_with_retries(self, host_name, images, meta, title, max_images, adult=False, max_retries=3):
+    async def _upload_with_retries(self, host_name, images, image_paths, meta, title, max_images, adult=False, max_retries=3):
         pm = ProgressManager.get_instance()
         host = self._load_host(host_name)
         if not host:
             log.error(f"[Uploader] Skipping upload: could not load host '{host_name}' (adult={adult})")
             return []
 
-        tmp_dir = self.base_dir / "tmp" / meta["uuid"]
-        image_paths = [
-            (tmp_dir / img["local_file"]).as_posix()
-            for img in images[:max_images]
-            if "local_file" in img and Path(tmp_dir / img["local_file"]).exists()
-        ]
-        log.debug(f"Preparing to upload {len(image_paths)} images: {image_paths}")
+        if not image_paths:
+            log.warning(f"No valid image paths for upload to {host_name}")
+            return []
 
         for attempt in range(max_retries):
             try:
                 results = []
                 if hasattr(host, "upload_batch"):
                     batch_results = await host.upload_batch(self.client, image_paths, title=title, adult=adult)
-                    successful = sum(1 for r in batch_results if r and all(k in r for k in ("img_url", "raw_url", "web_url")))
+                    successful = sum(
+                        1
+                        for r in batch_results
+                        if r and isinstance(r, dict) and any(r.get(k) for k in ("img_url", "raw_url", "web_url"))
+                    )
                     if pm:
                         pm.screen_up(successful)
                     results = batch_results
@@ -166,7 +169,8 @@ class ScreenshotUploader:
                     for f in asyncio.as_completed(tasks):
                         try:
                             r = await f
-                            if r and all(k in r for k in ("img_url", "raw_url", "web_url")) and pm:
+                            log.debug(f"Raw single result from {host_name}: {r}")
+                            if r and isinstance(r, dict) and any(r.get(k) for k in ("img_url", "raw_url", "web_url")) and pm:
                                 pm.screen_up(1)
                             results.append(r)
                         except Exception as e:
@@ -174,18 +178,22 @@ class ScreenshotUploader:
                             results.append(None)
 
                 # Filter valid results
-                valid_results = [
-                    {
-                        "img_url": r["img_url"],
-                        "raw_url": r["raw_url"],
-                        "web_url": r["web_url"],
+                valid_results = []
+                for r, img in zip(results, images[:max_images]):
+                    if not r:
+                        continue
+                    if not isinstance(r, dict):
+                        continue
+                    if not any(r.get(k) for k in ("img_url", "raw_url", "web_url")):
+                        continue
+                    result = {
+                        "img_url": r.get("img_url", ""),
+                        "raw_url": r.get("raw_url", ""),
+                        "web_url": r.get("web_url", ""),
                         "local_file": img["local_file"],
                         "ss_time": img.get("ss_time", 0),
                     }
-                    for r, img in zip(results, images[:max_images])
-                    if r and all(k in r for k in ("img_url", "raw_url", "web_url"))
-                ]
-
+                    valid_results.append(result)
                 if valid_results:
                     return valid_results
                 else:
