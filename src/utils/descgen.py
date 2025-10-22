@@ -109,18 +109,17 @@ class DescGenerator:
 
         async with aiofiles.open(description_path, "w", newline="", encoding="utf-8") as description:
             if (desclink, meta.get("descfile", None), meta["desc"]) == (None, None, None):
-                desc_source = []
-                if meta.get("ptp_manual") is not None:
-                    desc_source.append("PTP")
-                if meta.get("blu_manual") is not None:
-                    desc_source.append("BLU")
-                desc_source = desc_source[0] if len(desc_source) == 1 else None
+                # desc_source = None
+                # if meta.get("ptp_manual") is not None:
+                #     desc_source.append("PTP")
+                # if meta.get("blu_manual") is not None:
+                #     desc_source.append("BLU")
+                # desc_source = desc_source[0] if len(desc_source) == 1 else None
 
                 # Try PTP description via API
                 if (
-                    meta.get("ptp")
-                    and str(self.config["TRACKERS"].get("PTP", {}).get("useAPI")).lower() == "true"
-                    and desc_source in ["PTP", None]
+                    meta.get("ptp") and str(self.config["TRACKERS"].get("PTP", {}).get("useAPI")).lower() == "true"
+                    # and desc_source in ["PTP", None]
                 ):
                     from src.trackers.PTP import PTP
 
@@ -133,7 +132,7 @@ class DescGenerator:
                         custom_desc_written = True
 
                 # Try BLU description
-                if not custom_desc_written and meta.get("blu_desc", "").strip() and desc_source in ["BLU", None]:
+                if not custom_desc_written and meta.get("blu_desc", "").strip():
                     blu_desc = meta["blu_desc"].strip()
                     if blu_desc:
                         await description.write(blu_desc)
@@ -275,7 +274,11 @@ class DescGenerator:
             bbcode = BBCODE()
 
             # Write media elements (trailer/logo)
-            if not control.as_is and (control.include_trailer or control.include_logo):
+            if (
+                not control.as_is
+                and (control.include_trailer or control.include_logo)
+                and (meta.get("description") not in ("BLU", "PTP"))
+            ):
                 await self._write_media_elements(descfile, meta, tracker, control)
 
             # Write disc info if enabled

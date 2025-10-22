@@ -28,7 +28,7 @@ class MetaScraper:
         tasks = []
         if meta.get("ptp") and self.config["TRACKERS"].get("PTP", {}).get("useAPI", False):
             tasks.append(self._fetch_ptp(meta))
-        if meta.get("blu"):
+        if meta.get("blu") or self.config["TRACKERS"].get("BLU", {}).get("useAPI", False):
             tasks.append(self._fetch_blu(meta))
         if meta.get("hdb"):
             tasks.append(self._fetch_hdb(meta))
@@ -60,7 +60,7 @@ class MetaScraper:
         """Fetch and process PTP data asynchronously."""
         try:
             ptp = PTP(config=self.config)
-            ptp_data = await ptp.get_ptp_description(meta["ptp"], meta.get("is_disc", False))  # Adjust to actual API method
+            ptp_data = await ptp.get_ptp_description(meta["ptp"], meta.get("is_disc", False))  # TODO stub
             # Process/enrich: e.g., extract title, year, etc.
             return {"ptp_data": ptp_data} if ptp_data else None
         except Exception as e:
@@ -71,7 +71,10 @@ class MetaScraper:
         """Fetch and process BLU data asynchronously."""
         try:
             blu = BLU(config=self.config)
-            blu_data = await blu.some_api_call(meta["blu"])  # Adjust to actual (e.g., get description or metadata)
+            blu_data = await blu.api_match(meta)
+            if not blu_data or not blu_data.get("data"):
+                return None
+            blu_data = blu_data["data"][0]["attributes"]
             return {"blu_data": blu_data, "blu_desc": blu_data.get("description")} if blu_data else None
         except Exception as e:
             log.error(f"BLU fetch failed: {e}")
@@ -81,7 +84,7 @@ class MetaScraper:
         """Fetch and process HDB data asynchronously."""
         try:
             hdb = HDB(config=self.config)
-            hdb_data = await hdb.some_api_call(meta["hdb"])  # Adjust to actual
+            hdb_data = await hdb.some_api_call(meta["hdb"])  # TODO stub
             return {"hdb_data": hdb_data} if hdb_data else None
         except Exception as e:
             log.error(f"HDB fetch failed: {e}")

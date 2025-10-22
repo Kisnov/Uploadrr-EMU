@@ -178,3 +178,22 @@ class BLU(Unit3d):
                 await asyncio.sleep(5)
 
         return dupes
+
+    async def api_match(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        params = {"api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(), "file_name": meta["uuid"]}
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            try:
+                response = await client.get(self.search_url, params=params)
+                if response.status_code == 200:
+                    response_json = response.json()
+                    return response_json
+                else:
+                    console.print(f"[red]Failed to search: HTTP {response.status_code}[/red]")
+            except Exception as e:
+                console.print(
+                    f"[bold red]Failed to find match.Either the site is down or your API key is incorrect. Error: {e}[/bold red]"
+                )
+                await asyncio.sleep(5)
+
+        return None
