@@ -133,11 +133,23 @@ class DescGenerator:
 
                 # Try BLU description
                 if not custom_desc_written and meta.get("blu_desc", "").strip():
-                    blu_desc = meta["blu_desc"].strip()
-                    if blu_desc:
-                        await description.write(blu_desc)
-                        meta["description"] = "BLU"
-                        custom_desc_written = True
+                    trusted_uploaders = self.config["AUTO"].get("trusted_uploader", [])
+
+                    if trusted_uploaders:
+                        uploader = meta.get("blu_data").get("uploader")
+                        if uploader in trusted_uploaders or uploader == "USE_ALL":
+                            use_blu_desc = True
+                        else:
+                            use_blu_desc = False
+                            log.debug(f"BLU uploader '{uploader}' not in trusted list: {trusted_uploaders}")
+
+                    if use_blu_desc:
+                        blu_desc = meta["blu_desc"].strip()
+                        if blu_desc:
+                            await description.write("# USE: as-is")
+                            await description.write(blu_desc)
+                            meta["description"] = "BLU"
+                            custom_desc_written = True
 
                 # Try Jinja2 template
                 if meta.get("desc_template"):

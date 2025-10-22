@@ -42,6 +42,7 @@ AUTO:
   size_tolerance: 1
   dupe_similarity: 80
   always_aid: true
+  trusted_uploaders: [GME, Roronoa_Zoro, x64] # Add-in trusted uploaders here or change to "USE_ALL" (if everyones trusted, this is for api description snatching)
 
 TRACKERS:
   default_trackers: "LDU, AITHER, BLU, HHD, LST, PSS, RF, FNP, SP"
