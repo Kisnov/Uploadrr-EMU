@@ -70,12 +70,12 @@ class HHD(Unit3d):
         category_id = {
             "MOVIE": "1",
             "TV": "2",
-            "Anime": "8",
-            "MUSIC": "7",
-            "XXX": "11"
+            "Anime": "3",
+            "MUSIC": "4",
+            "XXX": "10"
         }.get(category_name, "0")
         if anime:
-            return "8"
+            return "3"
         return category_id
 
     async def get_type_id(self, meta: Dict[str, Any]) -> str:
@@ -87,14 +87,16 @@ class HHD(Unit3d):
             "WEBRIP": "5",
             "ENCODE": "3",
             "HDTV": "6",
-            "FLAC": "9",
-            "ALAC": "10",
-            "AC3": "11",
-            "AAC": "12",
+            "FLAC": "7",
+            "AAC": "8",
+            "ALAC": "9",
+            "M4A": "10",
+            "M4B": "11",
+            "MP4": "12",
             "MP3": "13",
             "Other": "7",
         }.get(type, "0")
-        if type in ("OPUS", "WAVE", "MPEG4", "OGG"):
+        if type in ("OPUS", "WAVE", "MPEG4", "OGG", "AC3"):
             type_id = "7"
         return type_id
     # fmt: on
