@@ -410,8 +410,11 @@ class Clients:
     ) -> None:
         """Add torrent to qBittorrent with corrected tag application."""
         path_str = self._adjust_path(save_path, local_path, remote_path)
-        if len(meta["filelist"]) == 1 and not save_path.is_dir():
-            path_str = str(save_path.parent)
+        if save_path.is_dir() and (
+            (meta.get("category") in {"Anime", "MOVIE", "TV", "XXX"} and len(meta.get("video_files", [])) > 1)
+            or meta.get("category") == "MUSIC"
+        ):
+            path_str = str(Path(path_str).parent)
         if not path_str.endswith("/"):
             path_str += "/"
 
@@ -486,8 +489,11 @@ class Clients:
     ) -> None:
         """Add torrent to Transmission."""
         path_str = self._adjust_path(save_path, local_path, remote_path)
-        if len(meta["filelist"]) == 1 and not save_path.is_dir():
-            path_str = str(save_path.parent)
+        if save_path.is_dir() and (
+            (meta.get("category") in {"Anime", "MOVIE", "TV", "XXX"} and len(meta.get("video_files", [])) > 1)
+            or meta.get("category") == "MUSIC"
+        ):
+            path_str = str(Path(path_str).parent)
 
         async with httpx.AsyncClient(auth=(client.get("transmission_user"), client.get("transmission_pass"))) as http_client:
             with torrent_path.open("rb") as f:
