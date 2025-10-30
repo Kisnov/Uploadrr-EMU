@@ -149,17 +149,6 @@ class NameGenerator:
         if processed.get("use_original_title", False):
             processed["title"] = processed.get("original_title", "")
 
-        # Handle numeric fields
-        for field in ["season", "episode"]:
-            try:
-                val = processed.get(field, "")
-                if val and str(val).isdigit():
-                    processed[field] = f"{int(val):02d}"
-                else:
-                    processed[field] = ""
-            except (ValueError, TypeError):
-                processed[field] = ""
-
         # Handle resolution
         if processed.get("resolution") == "OTHER":
             processed["resolution"] = ""
