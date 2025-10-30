@@ -198,7 +198,7 @@ class Unit3d:
         if meta.get("debug", False):
             log.debug("[magenta]DATA 2 SEND[/magenta]:")
             console.print(Pretty(data))
-            await edit_torrent(meta, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
+            await edit_torrent(meta, None, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
             return "DEBUG"
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
