@@ -355,7 +355,7 @@ class MediaInfoHandler:
         soundmix = meta.get("imdb_info", {}).get("soundmix") or []
         keywords = [k.strip().lower() for k in (meta.get("keywords") or "").split(",") if k.strip()]
         release_date = meta.get("full_date", "")
-        year = meta.get("year", "")
+        year = str(meta.get("year", ""))
 
         try:
             parsed_date = datetime.strptime(release_date, "%Y-%m-%d")

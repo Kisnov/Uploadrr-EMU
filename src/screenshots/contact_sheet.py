@@ -8,6 +8,8 @@ from src.utils.console import log
 class ContactSheetGenerator:
     def __init__(self, config, base_dir, media_info_handler):
         self.config = config
+        self.contact = self.config.get("ADULT", {}).get("contact_sheet", {})
+        self.logo = self.contact.get("logo", {})
         self.base_dir = Path(base_dir)
         self.mihandle = media_info_handler
 
@@ -96,7 +98,7 @@ class ContactSheetGenerator:
         # --- FONTS --- #
         font_size_header = 22
         font_size_meta = 18
-        font_size_logo_text = 32
+        font_size_logo_text = self.logo.get("size", 32)
         myfont = self.config["SCREENS"].get("font")
         font_path = myfont if myfont else str(self.base_dir / "src" / "screenshots" / "fonts" / "dosis.ttf")
         logo_font_path = str(self.base_dir / "src" / "screenshots" / "fonts" / "sexandbreakfast.ttf")
@@ -125,7 +127,7 @@ class ContactSheetGenerator:
         draw.text((meta1_x, meta1_y), fileinfo, fill=(200, 200, 200), font=font_meta)
 
         # --- LOGO (Image or Text) --- #
-        logo_path = self.config["SCREENS"]["contact_sheet"].get("logo")
+        logo_path = self.logo.get("image", None)
         logo = None
         logo_x = 0
         logo_y = 0
@@ -144,8 +146,8 @@ class ContactSheetGenerator:
 
         # If no valid image logo, use text-based logo
         if not logo:
-            logo_text = self.config["SCREENS"]["contact_sheet"].get("logo_text", "uploadrr")
-            logo_text_color = self.config["SCREENS"]["contact_sheet"].get("logo_text", {}).get("color", (255, 255, 255))
+            logo_text = self.logo.get("text", "uploadrr")
+            logo_text_color = self.logo.get("color", (255, 255, 255))
             if isinstance(logo_text_color, str):
                 try:
                     logo_text_color = tuple(int(logo_text_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))

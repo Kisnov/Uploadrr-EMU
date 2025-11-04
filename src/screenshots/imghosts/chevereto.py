@@ -16,22 +16,27 @@ class CheveretoTemplate(BaseImageHost):
 
     async def upload(self, client, image_path, title=None, adult=False):
         """Upload an image to Chevereto and return a dict with img_url, raw_url, and web_url."""
-        config_section = (
-            self.config["ADULT"]
-            if adult
-            and (
-                self.config.get("ADULT", {}).get("API_KEYS", {}).get(self.host)
-                or self.config.get("ADULT", {}).get("imgbox_only", False)
-            )
-            else self.config["SCREENS"]["API_KEYS"]
-        )
-        api_key = config_section.get(self.host)
+        if adult:
+            adult_cfg = self.config.get("ADULT", {})
+            adult_keys = adult_cfg.get("API_KEYS", {})
+            adult_host_only = adult_cfg.get("adult_host_only", True)
+
+            if self.host in adult_keys:
+                api_key = adult_keys[self.host]
+            elif not adult_host_only and self.host in self.config["SCREENS"]["API_KEYS"]:
+                api_key = self.config["SCREENS"]["API_KEYS"][self.host]
+
+            elif adult_cfg.get("imgbox_only", False) and self.host == "imgbox":
+                api_key = self.config["SCREENS"]["API_KEYS"].get("imgbox")
+            else:
+                raise KeyError(f"Host '{self.host}' not allowed for adult upload")
+        else:
+            api_key = self.config["SCREENS"]["API_KEYS"].get(self.host)
+            if not api_key:
+                raise KeyError(f"API key for '{self.host}' not found in SCREENS")
 
         if not api_key:
-            if not adult or self.host == "imgbox":
-                log.warning(f"API key '{self.host}' not found in config['{'ADULT' if adult else 'SCREENS'}'] for {self.host}")
-            else:
-                raise KeyError(f"API key '{self.host}' not found in config['ADULT'] for {self.host}")
+            raise KeyError(f"API key for '{self.host}' missing")
 
         log.debug(f"Using API key for {self.host} (adult={adult}): {api_key}")
         try:

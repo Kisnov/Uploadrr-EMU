@@ -217,13 +217,15 @@ class LDU(Unit3d):
         dupes: Dict[str, Any] = {}
         console.print(f"[yellow]Searching for existing torrents on {self.tracker}...")
 
+        name = meta.get("edition", "") if not meta["category"] == "XXX" else meta["title"]
+
         params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
             "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
             "resolutions[]": await self.get_res_id(meta),
-            "name": meta.get("edition", ""),
+            "name": name,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:

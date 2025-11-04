@@ -88,8 +88,14 @@ class Unit3d:
         return False, False
 
     async def get_extra_data(self, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Hook for extra data payload fields. Override in Trackers."""
+        return {}
+
+    async def get_extra_files(self, meta: Dict[str, Any]) -> Dict[str, Tuple[str, str, str]]:
         """
-        Hook for extra data payload fields. Override in Trackers.
+        Hook for extra file uploads. Override in subclasses for specific trackers.
+        Return a dict where keys are form field names (e.g., 'cover', 'banner'),
+        and values are tuples: (filename, path_to_file, mime_type).
         """
         return {}
 
@@ -103,7 +109,7 @@ class Unit3d:
         # region_id = await common.unit3d_region_ids(meta.get("region")) # TODO TEST THIS
         xanon = (
             1
-            if (self.config["TRACKERS"][self.tracker].get("xanon", False) or self.config.get("ADULT", {}).get("anon", False))
+            if (self.config["TRACKERS"][self.tracker].get("xanon", False) or self.config.get("ADULT", {}).get("always_anon", False))
             and meta.get("xxx")
             else 0
         )
@@ -136,10 +142,13 @@ class Unit3d:
             name = await self.edit_name(meta)
         name = name or meta["name"]
 
-        performers = meta.get("porndb", {}).get("performers", [])
-        tags = meta.get("porndb", {}).get("tags", [])
+        performers = meta.get("porndb", {}).get("performers", "") or ""
+        tags = meta.get("porndb", {}).get("tags", "") or ""
 
-        adult_keywords = performers + tags
+        if performers and tags:
+            adult_keywords = f"{performers}, {tags}"
+        else:
+            adult_keywords = performers or tags
         keywords = meta["keywords"]
 
         if meta["category"] in ["TV", "MOVIE"]:  # safety for now due to music/sports issue
@@ -201,6 +210,8 @@ class Unit3d:
             await edit_torrent(meta, None, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
             return "DEBUG"
 
+        extra_files_meta = await self.get_extra_files(meta)
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             files = {}
             with contextlib.ExitStack() as stack:
@@ -210,6 +221,11 @@ class Unit3d:
                 if nfo_file:
                     nfo_content = stack.enter_context(open(nfo_file, "rb"))
                     files["nfo"] = ("nfo.nfo", nfo_content, "application/octet-stream")
+
+                # extra_files_meta
+                for field, (fname, path, mime) in extra_files_meta.items():
+                    f = stack.enter_context(open(path, "rb"))
+                    files[field] = (fname, f, mime)
 
                 try:
                     response = await client.post(

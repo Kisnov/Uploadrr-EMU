@@ -36,7 +36,7 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "no_season", "no_year", "nohash", "path", "personal_release", "ptp", "qbit_cat",
         "qbit_tag", "randomized", "rehash", "region", "screens", "season",
         "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation", "trackers",
-        "tmdb_manual", "type", "unattended", "webdv",
+        "tmdb_manual", "type", "unattended", "webdv", "xxx"
     ]
     # fmt: on
     my_meta = {

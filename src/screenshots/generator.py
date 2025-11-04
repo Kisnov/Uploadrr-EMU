@@ -16,7 +16,7 @@ from src.mediainfo import MediaInfoHandler
 from src.progress import ProgressManager
 from src.utils.console import log
 
-# from .contact_sheet import ContactSheetGenerator
+from .contact_sheet import ContactSheetGenerator
 
 try:
     import oxipng
@@ -32,7 +32,7 @@ class ScreenshotGenerator:
         self.config = config
         self.base_dir = base_dir
         self.mihandle = MediaInfoHandler(config, base_dir)
-        # self.contact = ContactSheetGenerator(config, base_dir, self.mihandle)
+        self.contact = ContactSheetGenerator(config, base_dir, self.mihandle)
         self.tmp_dir = None
         self.min_image_size = 75000
         self.cache = {}  # Simple in-memory cache: {uuid: List[Dict]}
@@ -51,7 +51,7 @@ class ScreenshotGenerator:
         contact_screens = 0
         rows = columns = None
         if meta.get("xxx", False):
-            contact_cfg = self.screens.get("contact_sheets", {})
+            contact_cfg = self.config.get("ADULT", {}).get("contact_sheet", {})
             rows = contact_cfg.get("row")
             columns = contact_cfg.get("column")
             if rows is None or columns is None:
@@ -59,7 +59,7 @@ class ScreenshotGenerator:
                 rows, columns = self._get_rows_columns(length)
             contact_screens = rows * columns
 
-        self.tmpdir = tmp_dir = self.base_dir / "tmp" / uuid
+        self.tmp_dir = tmp_dir = self.base_dir / "tmp" / uuid
         os.chdir(tmp_dir)
 
         cached = self.cache.get(uuid, [])
@@ -93,7 +93,7 @@ class ScreenshotGenerator:
             meta_with_cache = meta.copy()
             meta_with_cache["cached_screenshots"] = self.cache.get(uuid, [])
             video_files = meta.get("video_files", [meta.get("video")])
-            max_sheets = self.screens["contact_sheets"].get("max", 1) if not meta.get("xmovie") else len(video_files)
+            max_sheets = contact_cfg.get("max", 1) if not meta.get("xmovie") else len(video_files)
             num_sheets = min(len(video_files), max_sheets)
 
             result["contact_sheets"] = []
@@ -120,13 +120,12 @@ class ScreenshotGenerator:
     async def _generate_file_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for a single file, reusing valid existing ones."""
         num_needed = max(screens, contact_screens)
-        tmp_dir = self.base_dir / "tmp" / uuid
 
+        pattern = f"{filename}-*.png"
         existing_screenshots = [
-            img
-            for img in glob.glob(f"{tmp_dir}/{filename}-*.png")
-            if Path(img).stat().st_size > 1000 and not self.is_monochromatic(img)
+            str(p) for p in self.tmp_dir.glob(pattern) if p.stat().st_size > 1000 and not self.is_monochromatic(str(p))
         ]
+
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
         ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
@@ -147,8 +146,6 @@ class ScreenshotGenerator:
     async def _generate_tv_pack_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for TV pack, reusing valid existing ones per episode."""
         per_episode = self.screens.get("per_episode", 3)
-
-        tmp_dir = self.base_dir / "tmp" / uuid
         filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
         result = {"main": [], "episodes": {}}
 
@@ -163,10 +160,9 @@ class ScreenshotGenerator:
             num_needed = max(screens, contact_screens) if ep_name == "E01" else per_episode
 
             # -- VALIDATION -- #
+            pattern = f"{ep_filename}-*.png"
             existing_screenshots = [
-                img
-                for img in glob.glob(f"{tmp_dir}/{ep_filename}-*.png")
-                if Path(img).stat().st_size > 1000 and not self.is_monochromatic(img)
+                str(p) for p in self.tmp_dir.glob(pattern) if p.stat().st_size > 1000 and not self.is_monochromatic(str(p))
             ]
             num_existing = len(existing_screenshots)
             num_to_generate = num_needed - num_existing
@@ -196,14 +192,13 @@ class ScreenshotGenerator:
     async def _generate_bdmv_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for BDMV, reusing valid existing ones."""
         num_needed = max(screens, contact_screens)
-        tmp_dir = self.base_dir / "tmp" / uuid
 
         # -- VALIDATION -- #
+        pattern = f"{filename}-*.png"
         existing_screenshots = [
-            img
-            for img in glob.glob(f"{tmp_dir}/{filename}-*.png")
-            if Path(img).stat().st_size > 1000 and not self.is_monochromatic(img)
+            str(p) for p in self.tmp_dir.glob(pattern) if p.stat().st_size > 1000 and not self.is_monochromatic(str(p))
         ]
+
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
         ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
@@ -225,14 +220,13 @@ class ScreenshotGenerator:
     async def _generate_dvd_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for DVD, reusing valid existing ones."""
         num_needed = max(screens, contact_screens)
-        tmp_dir = self.base_dir / "tmp" / uuid
 
         # -- VALIDATION -- #
+        pattern = f"{filename}-*.png"
         existing_screenshots = [
-            img
-            for img in glob.glob(f"{tmp_dir}/{filename}-*.png")
-            if Path(img).stat().st_size > 1000 and not self.is_monochromatic(img)
+            str(p) for p in self.tmp_dir.glob(pattern) if p.stat().st_size > 1000 and not self.is_monochromatic(str(p))
         ]
+
         num_existing = len(existing_screenshots)
         num_to_generate = num_needed - num_existing
         ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
@@ -256,7 +250,13 @@ class ScreenshotGenerator:
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
-        max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
+        png_files = self.tmp_dir.glob(f"{filename}-*.png")
+        indices = []
+        for p in png_files:
+            match = re.search(r"\d+", p.name)
+            if match:
+                indices.append(int(match.group()))
+        max_idx = max(indices + [-1])
         tasks = [
             self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, meta.get("ffdebug", False), hdr=meta["hdr"])
             for i, t in enumerate(ss_times)
@@ -277,7 +277,8 @@ class ScreenshotGenerator:
         total_length = sum(vob["duration"] for vob in vobs)
         screens_per_vob = max(1, num_screens // len(vobs))
         extra_screens = num_screens % len(vobs)
-        max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
+        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
+        max_idx = max(indices + [-1])
         tasks = []
         for vob_idx, vob in enumerate(vobs):
             num = screens_per_vob + (1 if vob_idx < extra_screens else 0)
@@ -374,7 +375,8 @@ class ScreenshotGenerator:
         else:
             adjusted_ss_times = ss_times
 
-        max_idx = max([int(re.search(r"\d+", Path(f).name).group()) for f in glob.glob(f"{filename}-*.png")] + [-1])
+        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
+        max_idx = max(indices + [-1])
         tasks = [
             self._take_screenshot(
                 file_path,

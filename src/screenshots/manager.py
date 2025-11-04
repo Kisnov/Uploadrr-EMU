@@ -145,6 +145,73 @@ class ScreenshotManager:
                 if not contact_file.exists():
                     need_generation = True
 
+        # --- Handle XXX: user_cover and user_banner --- #
+        if meta.get("xxx"):
+            log.debug("Handling XXX content: checking user_cover and user_banner")
+            xxx_images = {"main": [], "episodes": {}, "contact_sheets": {}}
+
+            # Helper: check if URL is missing or not whitelisted
+            def needs_xxx_upload(field_key, current_url_key):
+                path = meta.get(field_key)
+                current_url = meta.get(current_url_key)
+
+                if not path:
+                    return False
+
+                path = Path(path)
+                if path.exists():
+                    return True  # local file → upload
+
+                # If it's a URL, check if it's valid and whitelisted
+                if self._is_valid_url(current_url):
+                    if tracker_whitelists:
+                        whitelist_hosts = set.union(*[set(wl) for wl in tracker_whitelists.values()])
+                        host = RehostManager._extract_host(current_url, whitelist_hosts)
+                        return not bool(host)  # not whitelisted → needs rehost/upload
+                    return False  # has valid URL, no tracker → keep
+                return True  # invalid or missing URL → upload
+
+            # Check user_cover
+            if needs_xxx_upload("user_cover", "cover_url"):
+                xxx_images["main"].append({"local_file": meta["user_cover"], "type": "user_cover"})
+
+            # Check user_banner
+            if needs_xxx_upload("user_banner", "banner_url"):
+                xxx_images["main"].append({"local_file": meta["user_banner"], "type": "user_banner"})
+
+            if needs_xxx_upload("trailer", "trailer_url"):
+                xxx_images["main"].append({"local_file": meta["trailer"], "type": "trailer"})
+
+            # Upload XXX images if needed
+            if xxx_images["main"] and not meta.get("skip_imghost_upload", False):
+                log.debug(">>> UPLOADING XXX USER IMAGES")
+                viable_hosts = RehostManager._get_viable_hosts(self.config, meta, tracker_whitelists)
+                uploaded = await self.uploader.upload_screenshots(meta, xxx_images, viable_hosts, tracker_whitelists)
+
+                # Merge into main image_list and update meta
+                image_list["main"].extend(uploaded.get("main", []))
+                for img in uploaded.get("main", []):
+                    local_file = img.get("local_file", "")
+                    img_url = img.get("raw_url")
+                    if local_file == meta.get("user_cover"):
+                        meta["cover_url"] = img_url
+                    elif local_file == meta.get("user_banner"):
+                        meta["banner_url"] = img_url
+                    elif local_file == meta.get("trailer"):
+                        meta["trailer_url"] = img_url
+
+                # Ensure no duplicates in main
+                seen = set()
+                deduped_main = []
+                for img in image_list["main"]:
+                    key = img.get("local_file") or img.get("raw_url")
+                    if key and key not in seen:
+                        seen.add(key)
+                        deduped_main.append(img)
+                image_list["main"] = deduped_main
+
+                need_upload = True
+
         log.debug(f"Need Generation = {need_generation} \n Need Upload = {need_upload}")
 
         if need_upload and not need_generation:
@@ -259,17 +326,34 @@ class ScreenshotManager:
         if tracker_whitelists:
             whitelist_hosts = set.union(*[set(wl) for wl in tracker_whitelists.values()])
 
-            def non_compliant(section):
+            def non_compliant_section(section):
                 return any(
                     not RehostManager._extract_host(img.get("img_url", ""), whitelist_hosts)
-                    for img in section
+                    for img in (section if isinstance(section, list) else section.values())
                     if isinstance(img, dict) and img.get("img_url")
                 )
 
-            if non_compliant(image_list["main"]) or any(non_compliant(lst) for lst in image_list["episodes"].values()):
+            # Check screenshots
+            screens_non_compliant = non_compliant_section(image_list["main"]) or any(
+                non_compliant_section(lst) for lst in image_list["episodes"].values()
+            )
+
+            # Check cover/banner URLs
+            urls_to_check = []
+            if meta.get("cover_url"):
+                urls_to_check.append(meta["cover_url"])
+            if meta.get("banner_url"):
+                urls_to_check.append(meta["banner_url"])
+            if meta.get("trailer_url"):
+                urls_to_check.append(meta["trailer_url"])
+
+            urls_non_compliant = any(
+                not RehostManager._extract_host(url, whitelist_hosts) for url in urls_to_check if self._is_valid_url(url)
+            )
+
+            if screens_non_compliant or urls_non_compliant:
                 log.debug(">>> REHOSTER CALLED")
                 await self.rehoster.ensure_compliance(meta, tracker_whitelists)
-
         return meta
 
     async def _prepare_music_images(self, meta: Dict) -> Dict:

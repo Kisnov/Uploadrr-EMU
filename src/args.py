@@ -2,6 +2,7 @@ import argparse
 import datetime
 import re
 import urllib.parse
+import uuid
 from argparse import ArgumentParser, ArgumentTypeError
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -107,6 +108,9 @@ class Args:
         parser.add_argument("-mal", "--mal", nargs="*", type=str, help="MAL ID")
         parser.add_argument("-mbid", "--mbid", nargs="?", type=self.validate_mbid, dest="mbid_manual", help="MusicBrainz Release ID")
         parser.add_argument("-discogs", "--discogs", nargs="*", type=str, dest="discogs_id", help="Discogs Release ID")
+        parser.add_argument(
+            "-pornid", "--tpdb", nargs="?", type=self.validate_porndb_id, dest="pdb_manual", help="ThePornDB ID or UUID"
+        )
 
         # Metadata arguments
         parser.add_argument("-g", "--tag", type=str, help="Group tag")
@@ -156,11 +160,18 @@ class Args:
             ("-vs --vapoursynth", "vapoursynth", "Use VapourSynth for screens"),
             ("-webdv --webdv", "webdv", "Contains a Dolby Vision layer"),
             ("-x --xxx", "xxx", "itssaaa pr0n"),
+            ("-xs --xscene", "xscene", "XXX Scene Mode"),
+            ("-xm --xmovie", "xmovie", "XXX Scene Mode"),
+            ("-jav --jav", "jav", "JAV"),
+            ("-pack --pack", "pack", "XXX: Mini/Mega Pack"),
         ]
         for flags, dest, help_text in boolean_args:
             parser.add_argument(*flags.split(), dest=dest, action="store_true", help=help_text)
 
         # Other arguments
+        parser.add_argument("-cv", "--cover", dest="user_cover", nargs="*", help="Path/URL to cover image")
+        parser.add_argument("-bn", "--banner", dest="user_banner", nargs="*", help="Path/URL to banner image")
+        parser.add_argument("-trailer", "--trailer", nargs="*", help="Path to trailer (webp or gif)")
         parser.add_argument("-ptp", "--ptp", nargs="*", type=str, help="PTP torrent ID/permalink")
         parser.add_argument("-blu", "--blu", nargs="*", type=str, help="BLU torrent ID/link")
         parser.add_argument("-hdb", "--hdb", nargs="*", type=str, help="HDB torrent ID/link")
@@ -223,6 +234,14 @@ class Args:
 
     def _process_arguments(self, args: Dict[str, Any], before_args: List[str], meta: Dict[str, Any]) -> Dict[str, Any]:
         """Process parsed arguments and update the meta dictionary."""
+        # Handle porn mode flags
+        if args.get("xscene"):
+            meta["xxx"] = meta["xscene"] = True
+        if args.get("xmovie"):
+            meta["xxx"] = meta["xmovie"] = True
+        if args.get("jav"):
+            meta["xxx"] = meta["jav"] = True
+
         # Handle full-auto mode
         if args.get("full_auto", False):
             args["unattended"] = args["auto_desc"] = True
@@ -267,10 +286,13 @@ class Args:
             "blu": lambda v: self._parse_blu_id(v),
             "hdb": lambda v: self._parse_tracker_id(v, "hdb", "id"),
             "trackers": lambda v: v if isinstance(v, list) else [v],
+            "pdb_manual": lambda v: v,
         }
 
         for key, value in args.items():
             if key == "path":
+                continue
+            if key == "xxx" and meta.get("xxx", False):
                 continue
             elif value not in (None, []):
                 if key in value_processors:
@@ -298,6 +320,16 @@ class Args:
         if not re.match(Args.uuid_pattern, mbid):
             raise argparse.ArgumentTypeError("Invalid MBID format. Use a valid UUID without quotes or altered dashes.")
         return mbid
+
+    @staticmethod
+    def validate_porndb_id(value: str) -> str:
+        if value.isdigit():
+            return value
+        try:
+            uuid.UUID(value)
+            return value
+        except ValueError:
+            raise ArgumentTypeError(f"Invalid PornDB ID: '{value}'. Must be digits or UUID.")
 
     @staticmethod
     def list_to_string(items: List[Any]) -> str:

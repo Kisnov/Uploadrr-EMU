@@ -68,7 +68,7 @@ class ScreenshotUploader:
 
                 if section == "main":
                     max_images = len(screens) if meta.get("is_music", False) else meta.get("screens", 3)
-                    uploaded = await self._upload_batch(meta, images, viable_hosts, f"main screenshots for {meta['name']}", max_images)
+                    uploaded = await self._upload_batch(meta, images, viable_hosts, meta["name"], max_images, meta["xxx"])
                     for i, up in enumerate(uploaded):
                         up["local_file"] = images[i]["local_file"]
                     result["main"] = uploaded
@@ -77,14 +77,14 @@ class ScreenshotUploader:
                     per_episode = self.config["SCREENS"].get("per_episode", 3)
                     for ep_name, ep_screens in images.items():
                         uploaded = await self._upload_batch(
-                            meta, ep_screens, viable_hosts, f"{ep_name} screenshots for {meta['name']}", per_episode
+                            meta, ep_screens, viable_hosts, f"{ep_name} - {meta['name']}", per_episode, meta["xxx"]
                         )
                         for i, up in enumerate(uploaded):
                             up["local_file"] = ep_screens[i]["local_file"]
                         result["episodes"][ep_name] = uploaded
 
                 elif section == "contact_sheets":
-                    uploaded = await self._upload_batch(meta, images, viable_hosts, f"contact sheet for {meta['name']}", len(images))
+                    uploaded = await self._upload_batch(meta, images, viable_hosts, f"CS - {meta['name']}", len(images), meta["xxx"])
                     for i, up in enumerate(uploaded):
                         up["local_file"] = images[i]["local_file"]
                     result["contact_sheets"] = uploaded
@@ -122,7 +122,33 @@ class ScreenshotUploader:
             return []
 
         last_exc = None
-        viable_hosts = list(dict.fromkeys(viable_hosts))
+        if adult:
+            adult_cfg = self.config.get("ADULT", {})
+            adult_keys = adult_cfg.get("API_KEYS", {})
+            adult_host_only = adult_cfg.get("adult_host_only", True)
+            imgbox_only = adult_cfg.get("imgbox_only", False)
+
+            # Build allowed hosts
+            allowed = set()
+            for host in viable_hosts:
+                if host in adult_keys:
+                    allowed.add(host)
+                elif not adult_host_only:
+                    # Allow fallback to SCREENS if host has key there
+                    if host in self.config["SCREENS"]["API_KEYS"]:
+                        allowed.add(host)
+                elif imgbox_only and host == "imgbox" and "imgbox" in self.config["SCREENS"]["API_KEYS"]:
+                    allowed.add(host)
+
+            viable_hosts = [h for h in viable_hosts if h in allowed]
+
+            if not viable_hosts:
+                log.warning(f"No viable adult hosts found for {label}")
+                return []
+        else:
+            screen_keys = self.config["SCREENS"]["API_KEYS"]
+            viable_hosts = [h for h in viable_hosts if h in screen_keys]
+
         for host in viable_hosts:
             try:
                 uploaded = await self._upload_with_retries(host, images, image_paths, meta, label, max_images, adult=adult)

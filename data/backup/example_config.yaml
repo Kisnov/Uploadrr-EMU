@@ -1,26 +1,44 @@
-version: '2.0.0'
+version: '2.1.0'
 
 DEFAULT:
   tmdb: TMDB_API_KEY
   add_trailer: false
   add_logo: true
-  default_torrent_client: "Client1"
+  default_torrent_client: Client1
   sfx_on_prompt: true
   always_anon: false
   # torrent_creation: mktorrent #default torf
 
+
+ADULT:
+  API_KEYS:
+    porndb: ThePornDB_API_KEY
+    ptscreens:  ptscreens_API_KEY
+    hamster: hamster_API_KEY
+    imghost: imghost_API_KEY
+  always_anon: true # makes all adult uploads anon
+  use_phash: false # this increases match probability but takes time to calculate
+  contact_sheet:
+    rows:
+    columns:
+    logo:
+      image: null # "Path/to/logo.png" 
+      text: Uploadrr
+      color:
+      size: 
+
 SCREENS:
   API_KEYS:
-    imgbb: "imgbb_API_KEY"
-    ptpimg: "ptpimg_API_KEY"
-    lensdump: "lensdump_API_KEY"
-    ptscreens: "ptscreens_API_KEY"
-    onlyimage: "onlyimage_API_KEY"
+    imgbb: imgbb_API_KEY
+    ptpimg: ptpimg_API_KEY
+    lensdump: lensdump_API_KEY
+    ptscreens: ptscreens_API_KEY
+    onlyimage: onlyimage_API_KEY
   img_hosts: [ptpimg, ptscreens, onlyimage, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
-  deinterlace_method: "yadif"
+  deinterlace_method: yadif
   tonemap_hdr: true
   hdr_method: "reinhard:desat=0" # Other presets: "hable:desat=0" (color accurate but dark) or "mobius:desat=10" (more pop sometimes) , or try your own!
   optimize: true # you can set 0-9 for compression lvl if desired.

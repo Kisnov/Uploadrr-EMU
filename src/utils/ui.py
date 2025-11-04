@@ -100,7 +100,7 @@ def build_db_info(meta: Dict) -> List[str]:
     elif meta.get("xxx"):
         porndb = meta.get("porndb", {})
         db_info = [
-            f"[bold]Title[/bold]: {meta['title']} ({meta['porndb']['date']})",
+            f"[bold]Title[/bold]: {meta['title']} ({porndb.get('date', meta['search_year'])})",
             f"[bold]Overview[/bold]: {porndb.get('description', 'N/A')}",
             f"[bold]Category[/bold]: {meta['category']}",
         ]

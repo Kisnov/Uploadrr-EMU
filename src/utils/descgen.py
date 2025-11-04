@@ -471,14 +471,15 @@ class DescGenerator:
         if not porndb:
             return
         else:
-            if "description" in porndb:
-                await descfile.write(f"[code][h5][color=#91FFF7]DESCRIPTION[/color][/h5]{porndb['description']}[/code]\n\n")
-            if "performers" in porndb:
-                await descfile.write(f"[code][h5][color=#91FFF7]PERFORMERS[/color][/h5][b]{porndb['performers']}[/b][/code]\n\n")
+            trailer = meta.get("trailer_url") if meta.get("trailer_url") != "" else None
+            desc = porndb.get("description", "").strip() or "N/A"
+            perf = porndb.get("performers", "").strip() or "N/A"
+            if trailer:
+                await descfile.write(f"[center][img]{trailer}[/img][/center]\n\n")
+            await descfile.write(f"[code][h4][color=#91FFF7]DESCRIPTION[/color][/h4][b]{desc}[/b][/code]\n\n")
+            await descfile.write(f"[code][h4][color=#91FFF7]PERFORMERS[/color][/h4][b]{perf}[/b][/code]\n\n")
             if tracker == "LDU":
-                await descfile.write(
-                    f"[url=torrent-cover={porndb['poster_url']} ][/url] [url=torrent-banner={porndb['image_url']} ][/url]"
-                )
+                await descfile.write(f"[url=torrent-cover={porndb['poster']} ][/url] [url=torrent-banner={porndb['image']} ][/url]")
             return
 
     async def _write_images(

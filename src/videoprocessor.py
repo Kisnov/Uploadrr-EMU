@@ -11,7 +11,7 @@ import requests
 from guessit import guessit
 from pymediainfo import MediaInfo
 
-from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze
+from src.databases import AniListHandler, IMDbHandler, PornDbHandler, TMDbHandler, is_scene, search_tvmaze
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
 from src.progress import ProgressManager
@@ -19,6 +19,7 @@ from src.utils.console import console
 
 from .utils.loads import get_distributor, get_region, load_json
 from .utils.meta import find_largest_clpi, get_dvd_size, get_video_codec
+from .utils.trailer import create_trailer
 
 
 class VideoProcessor:
@@ -36,6 +37,7 @@ class VideoProcessor:
         self.base_dir = base_dir
         self.TMDb = TMDbHandler(self.config)
         self.IMDb = IMDbHandler()
+        self.TPDb = PornDbHandler(self.config, self.mihandle)
 
     async def process_video(self, meta: Dict) -> Dict:
         """Orchestrate video metadata processing."""
@@ -127,11 +129,15 @@ class VideoProcessor:
                 meta["bdinfo"]["video"][0]["res"], self._cached_guessit(video), "OTHER", "p", "OTHER", 0
             )
             meta["filename"] = filename.split(" AKA ")[0] if " AKA " in filename.replace(".", " ") else filename
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
 
         elif meta["is_disc"] == "DVD":
@@ -147,11 +153,15 @@ class VideoProcessor:
                 vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
                 await self.mihandle.exportInfo(media_path=vob_path, is_dir=False, uuid=meta["uuid"], export_text=True)
             meta["dvd_size"] = get_dvd_size(meta["discs"])
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
 
         elif meta["is_disc"] == "HDDVD":
@@ -164,24 +174,30 @@ class VideoProcessor:
             meta["video"] = video
             if not meta.get("edit", False):
                 await self.mihandle.exportInfo(media_path=video, is_dir=False, uuid=meta["uuid"], export_text=False)
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
-
         else:  # Non-disc case
             videopath, filelist = self.get_video(videoloc, meta.get("mode", "discord"), meta.get("filelist", []))
             video, meta["scene"], meta["imdb"] = await is_scene(videopath, meta.get("imdb"))
             meta["video"] = str(videopath)
             guess = guess or self._cached_guessit(meta["video"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
-
             if meta["category"] == "TV":
                 guess_name = meta["uuid"].replace("-", " ")
             else:
@@ -195,7 +211,7 @@ class VideoProcessor:
                 await self.mihandle.exportInfo(
                     media_path=videopath, is_dir=meta.get("is_dir", False), uuid=meta["uuid"], export_text=True
                 )
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
         if self.is_sports(meta["uuid"]):
             meta["is_sports"] = True
             meta["category"] = "SPORTS"
@@ -327,6 +343,22 @@ class VideoProcessor:
                 meta["imdb_id"] = await self.IMDb.search_imdb(meta["filename"], meta["search_year"])
             if not meta.get("imdb_info") and int(meta["imdb_id"]) != 0:
                 meta["imdb_info"] = await self.IMDb.get_imdb_info(meta["imdb_id"], meta)
+        if meta["xxx"]:
+            meta["porndb"], meta["title"] = await self.TPDb.get_porndb_info(meta, self.config)
+            if not meta.get("year"):
+                my = meta.get("manual_year")
+                pdby = meta.get("porndb", {}).get("year", 0)
+                meta["year"] = my if my != 0 else pdby if pdby != 0 else meta["search_year"]
+            if not meta.get("title"):
+                meta["title"] = meta["filename"]
+            if self.config["ADULT"].get("add_trailer", False) and not meta.get("trailer"):
+                tmp_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
+                trailer_path = tmp_path / "trailer.webp"
+                if trailer_path.exists():
+                    meta["trailer"] = str(trailer_path)
+                else:
+                    main_video = meta["video_files"][0]
+                    meta["trailer"] = await create_trailer(main_video, tmp_path, self.config)
 
         meta["tag"] = meta.get("tag") or self.get_tag(meta["video"], meta)
         if meta["tag"] and not meta["tag"].startswith("-"):
@@ -383,7 +415,7 @@ class VideoProcessor:
     Get type, category, edition
     """
 
-    def get_type(self, uuid, scene, is_disc):
+    def get_type(self, uuid, scene, is_disc, xxx):
         uuid = uuid.lower()
         if "remux" in uuid:
             return "REMUX"
@@ -395,6 +427,11 @@ class VideoProcessor:
             return "HDTV"
         elif is_disc is not None:
             return "DISC"
+        elif xxx:
+            if any(word in uuid for word in ["bluray", "blu-ray", "dvdrip", "xvid"]):
+                return "ENCODE"
+            else:
+                return "WEBDL"
         else:
             return "ENCODE"
 
@@ -546,6 +583,12 @@ class VideoProcessor:
             tag = ""
         if tag[1:].lower() in ["nogroup", "nogrp"]:
             tag = ""
+
+        if meta.get("xxx") and tag:
+            vname = Path(video).name.lower()
+            ptag = tag[1:]
+            if (f"[{ptag.lower()}]" in vname) or vname.startswith(ptag):
+                tag = ""
         return tag
 
     async def tag_override(self, meta):
