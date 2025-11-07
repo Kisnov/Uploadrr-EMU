@@ -7,7 +7,7 @@ from src.utils.console import console
 class RF(Unit3d):
     tracker = "RF"
     source_flag = "ReelFliX"
-    domain = "https://reelflix.xyz"
+    domain = "https://reelflix.cc"
     allowed_imghosts = []
     banned_groups = [""]  # 25-08-30 Confirmed with Slikk no BAN GROUP LIST (Retags are banned obv)
 
