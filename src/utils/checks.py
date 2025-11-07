@@ -120,6 +120,7 @@ async def dupe_check(
 
 def check_banned_group(tracker: str, banned_group_list: Dict, meta: Dict, skipped_details: List[Tuple], path: str) -> bool:
     """Check if release group is banned on tracker."""
+    progress = ProgressManager.get_instance()
     group_tag = meta["tag"][1:] if meta.get("tag") else ""
     if not group_tag:
         return False
@@ -134,8 +135,9 @@ def check_banned_group(tracker: str, banned_group_list: Dict, meta: Dict, skippe
         console.print(
             f"[bold yellow]{group_tag}[/bold yellow][bold red] was found on [bold yellow]{tracker}'s[/bold yellow] list of banned groups."
         )
-        if meta.get("unattended", False) or not Confirm.ask("[bold red] Upload Anyways?"):
-            return True
+        with progress.pause_for_interaction():
+            if meta.get("unattended", False) or not Confirm.ask("[bold red] Upload Anyways?"):
+                return True
         return False
 
     banned_types = banned_group_list.get(group_tag, None)
