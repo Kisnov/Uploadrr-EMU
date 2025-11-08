@@ -54,10 +54,12 @@ class ScreenshotGenerator:
             contact_cfg = self.config.get("ADULT", {}).get("contact_sheet", {})
             rows = contact_cfg.get("row")
             columns = contact_cfg.get("column")
-            if rows is None or columns is None:
-                length = self._get_main_video_length(meta)
-                rows, columns = self._get_rows_columns(length)
-            contact_screens = rows * columns
+            if rows is not None and columns is not None:
+                contact_screens = rows * columns
+            else:
+                length = self._get_length(meta)
+                r, c = self._get_rows_columns(length)
+                contact_screens = r * c
 
         self.tmp_dir = tmp_dir = self.base_dir / "tmp" / uuid
         os.chdir(tmp_dir)
@@ -86,21 +88,60 @@ class ScreenshotGenerator:
             pm.update("Screenshot generation complete")
 
         # -- CONTACT SHEETS -- #
-        if contact_screens > 0 and result.get("main"):
+        if contact_screens > 0:
             if pm:
                 pm.update("Creating contact sheet")
 
-            meta_with_cache = meta.copy()
-            meta_with_cache["cached_screenshots"] = self.cache.get(uuid, [])
             video_files = meta.get("video_files", [meta.get("video")])
             max_sheets = contact_cfg.get("max", 1) if not meta.get("xmovie") else len(video_files)
             num_sheets = min(len(video_files), max_sheets)
 
             result["contact_sheets"] = []
-            for idx, vf in enumerate(video_files[:num_sheets]):
-                out_path = tmp_dir / f"contact_sheet_{idx + 1}.png"
-                await self.contact.generate_contact_sheet(result["main"][:contact_screens], meta_with_cache, out_path, rows, columns)
+            if meta.get("xmovie"):
+                for idx, vf in enumerate(video_files[:num_sheets]):
+                    if pm:
+                        pm.update(f"Generating screenshots for contact sheet {idx + 1}")
+
+                    scene_filename = f"{filename}-scene_{idx + 1}"
+                    length = float(ffmpeg.probe(vf)["format"]["duration"])
+                    rows = rows if rows is not None else self._get_rows_columns(length)[0]
+                    columns = columns if columns is not None else self._get_rows_columns(length)[1]
+                    num_needed = rows * columns
+                    file_screenshots = await self._generate_file_screenshots(
+                        meta, scene_filename, uuid, screens=num_needed, contact_screens=0, video_path=vf
+                    )
+                    screenshots = file_screenshots["main"]
+
+                    meta_with_cache = meta.copy()
+                    meta_with_cache.pop("cached_screenshots", None)
+
+                    out_path = tmp_dir / f"contact_sheet_{idx + 1}.png"
+                    await self.contact.generate_contact_sheet(screenshots, meta_with_cache, out_path, rows, columns, video_file=vf)
+                    result["contact_sheets"].append({"local_file": out_path.name})
+
+                    # Cleanup extra screenshots for this contact sheet
+                    for ss in screenshots:
+                        (tmp_dir / ss["local_file"]).unlink(missing_ok=True)
+            else:
+                length = self._get_main_video_length(meta)
+                rows = rows if rows is not None else self._get_rows_columns(length)[0]
+                columns = columns if columns is not None else self._get_rows_columns(length)[1]
+
+                meta_with_cache = meta.copy()
+                meta_with_cache["cached_screenshots"] = self.cache.get(uuid, [])
+
+                out_path = tmp_dir / "contact_sheet.png"
+                await self.contact.generate_contact_sheet(result["main"], meta_with_cache, out_path, rows, columns)
                 result["contact_sheets"].append({"local_file": out_path.name})
+
+                # Cleanup extra screenshots used only for contact sheet
+                if contact_screens > screens:
+                    all_screenshots_files = sorted(
+                        tmp_dir.glob(f"{filename}-*.png"), key=lambda p: int(re.search(r"-(\d+)\.png$", p.name).group(1))
+                    )
+                    extra_files = all_screenshots_files[screens:]
+                    for ef in extra_files:
+                        ef.unlink(missing_ok=True)
 
         # -- OPTIMIZATION with oxipng -- #
         if self.use_oxipng and OXIPNG_AVAILABLE:
@@ -117,8 +158,10 @@ class ScreenshotGenerator:
 
         return result
 
-    async def _generate_file_screenshots(self, meta, filename, uuid, screens, contact_screens):
+    async def _generate_file_screenshots(self, meta, filename, uuid, screens, contact_screens, video_path=None):
         """Generate screenshots for a single file, reusing valid existing ones."""
+        if video_path is None:
+            video_path = meta.get("video")
         num_needed = max(screens, contact_screens)
 
         pattern = f"{filename}-*.png"
@@ -131,7 +174,7 @@ class ScreenshotGenerator:
         ss_time_map = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
 
         if num_to_generate > 0:
-            new_screenshots = await self._generate_file(meta, filename, uuid, num_to_generate, meta.get("video"))
+            new_screenshots = await self._generate_file(meta, filename, uuid, num_to_generate, video_path)
             existing_pairs = [(img, ss_time_map.get(Path(img).name, 0)) for img in existing_screenshots]
             combined = existing_pairs + new_screenshots
             all_screenshots = [{"local_file": Path(path).name, "ss_time": t} for path, t in combined]
@@ -627,7 +670,36 @@ class ScreenshotGenerator:
         return Path(path).suffix.lower() in {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 
     def _get_main_video_length(self, meta):
-        return float(ffmpeg.probe(meta.get("path") or meta.get("filelist", [])[0])["format"]["duration"])
+        video_files = meta.get("video_files", [meta.get("video")])
+        return float(ffmpeg.probe(video_files[0])["format"]["duration"])
+
+    def _get_length(self, meta):
+        try:
+            if meta.get("bdinfo") not in (None, ""):
+                _, duration = self.get_main_m2ts_and_duration(meta, meta["uuid"])
+                return duration
+            elif meta.get("discs"):
+                disc_info = meta["discs"][0]
+                vobs = [
+                    vob
+                    for vob in sorted(glob.glob(f"{disc_info['path']}/VTS_*_*.VOB"))
+                    if float(ffmpeg.probe(vob)["format"]["duration"]) >= 60
+                ]
+                return sum(float(ffmpeg.probe(vob)["format"]["duration"]) for vob in vobs)
+            elif meta.get("tv_pack") == 1:
+                filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
+                first_ep = next((p for p in filelist if self._is_video_file(p)), None)
+                if first_ep:
+                    return float(ffmpeg.probe(first_ep)["format"]["duration"])
+                return 0
+            else:
+                video = meta.get("video", meta.get("video_files", [None])[0])
+                if video and Path(video).is_file():
+                    return float(ffmpeg.probe(video)["format"]["duration"])
+                return 0
+        except Exception as e:
+            log.warning(f"Failed to get length for contact sheet: {e}")
+            return 7200  # default assume medium
 
     def _get_rows_columns(self, length):
         if length <= 1500:

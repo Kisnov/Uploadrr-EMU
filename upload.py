@@ -49,14 +49,11 @@ class Uploadrr:
         # 1. EARLY EXPANSION: --auto-queue → inject paths
         # =====================================================================
         expanded_argv = expand_auto_queue(raw_argv)
-        console.print(f"[yellow]DEBUG: Expanded args: {expanded_argv}[/yellow]")
 
         # =====================================================================
         # 2. GROUP CLI: per-item blocks + global trailing args
         # =====================================================================
         items, global_argv = group_args_by_path(expanded_argv)
-        console.print(f"[yellow]DEBUG: Items (arg_block, path): {items}[/yellow]")
-        console.print(f"[yellow]DEBUG: Global args: {global_argv}[/yellow]")
 
         if not items:
             console.print("[red]❌ No valid paths to process.[/red]")
@@ -83,7 +80,6 @@ class Uploadrr:
 
         global_meta = normalize_args(global_ns)
         global_meta = apply_special_logic({**base_meta, **global_meta})
-        console.print(f"[yellow]DEBUG: Global meta (after logic): {global_meta}[/yellow]")
 
         # =====================================================================
         # 5. PARSE & MERGE PER-ITEM ARGS
@@ -105,7 +101,7 @@ class Uploadrr:
             item_meta = apply_special_logic(item_meta)
             item_meta["path"] = path
             queue.append(item_meta)
-            console.print(f"[green]✔ Item {i}: {Path(path).name} → {len(item_meta)} meta keys[/green]")
+            console.print(f"[green]✔ Item {i}: {Path(path).name}[/green]")
 
         # =====================================================================
         # 6. SET LOG LEVEL (from final global meta)
@@ -160,7 +156,6 @@ class Uploadrr:
         progress.start(total)
 
         screenshot_manager = ScreenshotManager(config=self.config, base_dir=base_dir)
-        self.screenshot_manager = screenshot_manager
 
         successful = skipped = 0
         skipped_details = []
@@ -172,9 +167,7 @@ class Uploadrr:
                 item_name = Path(path).name
                 progress.update(f"Processing {item_name} ({idx}/{total})")
 
-                console.print(f"[DEBUG] >> META B4 LOAD:\n {item_meta}")
                 item_meta = await load_existing_meta(base_dir, path, item_meta)
-                console.print(f"[magenta][DEBUG] >> META AFTER LOAD[/magenta]:\n {item_meta}")
                 await apply_delay(item_meta, self.config)
 
                 prep = Prep(config=self.config, base_dir=base_dir)

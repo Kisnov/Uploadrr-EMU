@@ -36,7 +36,9 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "no_season", "no_year", "nohash", "path", "personal_release", "ptp", "qbit_cat",
         "qbit_tag", "randomized", "rehash", "region", "screens", "season",
         "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation", "trackers",
-        "tmdb_manual", "pdb_manual", "type", "unattended", "webdv", "xxx"
+        "tmdb_manual", "pdb_manual", "type", "unattended", "webdv",
+        # XXX keys
+        "jav", "pack", "user_cover", "user_banner", "user_trailer", "xmovies", "xscene", "xxx"
     ]
     # fmt: on
     my_meta = {
@@ -67,7 +69,7 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         for key, value in new_meta.items():
             if key not in my_meta:
                 my_meta[key] = value
-    log.debug(f"meta keys after load_existing_meta: {list(my_meta.keys())}")
+    log.ddebug(f"meta keys after load_existing_meta: {list(my_meta.keys())}")
     return my_meta
 
 

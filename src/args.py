@@ -381,14 +381,14 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
         parser.add_argument(short, long, dest=dest, action="store_true", help=help_text)
 
     # --- Paths & Media ---
-    parser.add_argument("-cv", "--cover", dest="user_cover", nargs="*", help="Cover image (path/URL)")
-    parser.add_argument("-b", "--banner", dest="user_banner", nargs="*", help="Banner image (path/URL)")
-    parser.add_argument("-trailer", "--trailer", nargs="*", help="Trailer file (webp/gif)")
+    parser.add_argument("-cv", "--cover", dest="user_cover", help="Cover image (path/URL)")
+    parser.add_argument("-b", "--banner", dest="user_banner", help="Banner image (path/URL)")
+    parser.add_argument("-trailer", "--trailer", dest="user_trailer", help="Trailer file/url")
 
     # --- Descriptions ---
     parser.add_argument("-d", "--desc", nargs="*", help='Custom description (e.g., "[b]Hi![/b]")')
-    parser.add_argument("-pb", "--desclink", nargs="*", help="Pastebin URL")
-    parser.add_argument("-df", "--descfile", nargs="*", help="Local description file")
+    parser.add_argument("-pb", "--desclink", help="Pastebin URL")
+    parser.add_argument("-df", "--descfile", help="Local description file")
 
     # --- Other ---
     parser.add_argument("-ptp", "--ptp", nargs="*", help="PTP torrent ID or URL")

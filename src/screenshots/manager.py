@@ -18,7 +18,6 @@ class ScreenshotManager:
     def __init__(self, config: dict, base_dir: str | Path):
         self.config = config
         self.base_dir = Path(base_dir)
-
         self.generator = ScreenshotGenerator(config, self.base_dir)
         self.uploader = ScreenshotUploader(config, self.base_dir)
         self.rehoster = RehostManager(config, self.base_dir, self.uploader)
@@ -150,26 +149,28 @@ class ScreenshotManager:
             log.debug("Handling XXX content: checking user_cover and user_banner")
             xxx_images = {"main": [], "episodes": {}, "contact_sheets": {}}
 
-            # Helper: check if URL is missing or not whitelisted
             def needs_xxx_upload(field_key, current_url_key):
-                path = meta.get(field_key)
+                local_path = meta.get(field_key)
                 current_url = meta.get(current_url_key)
 
-                if not path:
+                if not local_path or not Path(local_path).exists():
                     return False
 
-                path = Path(path)
-                if path.exists():
-                    return True  # local file → upload
-
-                # If it's a URL, check if it's valid and whitelisted
                 if self._is_valid_url(current_url):
                     if tracker_whitelists:
                         whitelist_hosts = set.union(*[set(wl) for wl in tracker_whitelists.values()])
                         host = RehostManager._extract_host(current_url, whitelist_hosts)
-                        return not bool(host)  # not whitelisted → needs rehost/upload
-                    return False  # has valid URL, no tracker → keep
-                return True  # invalid or missing URL → upload
+                        if host:
+                            return False
+                    else:
+                        return False
+                return True
+
+            # LDU cover only works with jpg (temp measure until they update API)
+            cover_path = tmp_dir / "cover.jpg"
+            if "LDU" in meta["trackers"] and not meta.get("cover_url"):
+                if cover_path.exists():
+                    xxx_images["main"].append({"local_file": str(cover_path.name), "type": "user_cover"})
 
             # Check user_cover
             if needs_xxx_upload("user_cover", "cover_url"):
@@ -180,7 +181,7 @@ class ScreenshotManager:
                 xxx_images["main"].append({"local_file": meta["user_banner"], "type": "user_banner"})
 
             if needs_xxx_upload("trailer", "trailer_url"):
-                xxx_images["main"].append({"local_file": meta["trailer"], "type": "trailer"})
+                xxx_images["main"].append({"local_file": str(Path(meta["trailer"]).name), "type": "trailer"})
 
             # Upload XXX images if needed
             if xxx_images["main"] and not meta.get("skip_imghost_upload", False):
@@ -193,7 +194,7 @@ class ScreenshotManager:
                 for img in uploaded.get("main", []):
                     local_file = img.get("local_file", "")
                     img_url = img.get("raw_url")
-                    if local_file == meta.get("user_cover"):
+                    if local_file == meta.get("user_cover") or local_file == str(cover_path.name):
                         meta["cover_url"] = img_url
                     elif local_file == meta.get("user_banner"):
                         meta["banner_url"] = img_url
@@ -209,8 +210,6 @@ class ScreenshotManager:
                         seen.add(key)
                         deduped_main.append(img)
                 image_list["main"] = deduped_main
-
-                need_upload = True
 
         log.debug(f"Need Generation = {need_generation} \n Need Upload = {need_upload}")
 
@@ -398,10 +397,7 @@ class ScreenshotManager:
             if isinstance(item, str):
                 return True
             if isinstance(item, dict):
-                required_keys = {"img_url", "raw_url", "web_url"}
-                if required_keys.intersection(item.keys()):
-                    return False
-                return True
+                return not any(self._is_valid_url(item.get(k)) for k in ("img_url", "raw_url", "web_url"))
             return False
 
         if isinstance(section, list):

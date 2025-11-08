@@ -236,8 +236,14 @@ class NameGenerator:
         if category == "XXX":
             sites = self._xxx_network(processed_meta)
             name_notag = sites + name_notag
-            if meta.get("tag") == "":
+            tag = meta.get("tag")
+            date = meta.get("porndb", {}).get("date")
+            if not isinstance(tag, str) or not tag.strip():
                 meta["tag"] = "-NOGRP"
+            elif tag[1:].replace(" ", "").lower() in sites.lower():
+                meta["tag"] = "-NOGRP"
+            if meta.get("xscene") and date:
+                name_notag = name_notag.replace(f"{meta['year']}", f"{date}")
 
         tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
         name = name_notag + tag if tag and not name_notag.endswith(tag) else name_notag

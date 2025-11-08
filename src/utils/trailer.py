@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
+import httpx
+
 from src.progress import ProgressManager
 from src.utils.console import log
 
@@ -52,7 +54,7 @@ async def trailer_to_webp(video_path: Path, output_dir: Path, config: Dict) -> O
     output_path = output_dir / "trailer.webp"
 
     # Crop Detect
-    crop_filter = ""
+    crop_params = None
     if do_crop:
         crop_cmd = [
             "ffmpeg",
@@ -74,21 +76,21 @@ async def trailer_to_webp(video_path: Path, output_dir: Path, config: Dict) -> O
         else:
             m = re.search(r"crop=(\d+:\d+:\d+:\d+)", stderr)
             if m:
-                crop_raw = m.group(1)
-                w, h = map(int, crop_raw.split(":")[:2])
-                log.debug(f"Detected crop: {crop_raw} ({w}x{h})")
+                crop_params = m.group(1)
+                w, h, x, y = map(int, crop_params.split(":"))
+                log.debug(f"Detected crop: crop={crop_params} ({w}x{h}+{x}+{y})")
             else:
                 log.warning("cropdetect found no crop – using full frame")
-                w = h = 0  # will skip scaling based on crop
-    else:
-        w = h = 0  # force full-frame path
 
     # Final Dimensions
-    if w and h:
-        new_w = int(w * base_scale)
-        new_h = int(h * base_scale)
+    if crop_params:
+        # Use cropped dimensions
+        crop_w, crop_h, _, _ = map(int, crop_params.split(":"))
+        new_w = int(crop_w * base_scale)
+        new_h = int(crop_h * base_scale)
+        log.debug(f"Copping from: {crop_w}x{crop_h} -> scaled to {new_w}x{new_h}")
     else:
-        # Fallback: probe video resolution
+        # Fallback: probe original video resolution
         probe_cmd = [
             "ffprobe",
             "-v",
@@ -103,14 +105,15 @@ async def trailer_to_webp(video_path: Path, output_dir: Path, config: Dict) -> O
         ]
         ret, stdout, _ = await _run_ffmpeg(probe_cmd, "Probing resolution")
         if ret == 0 and "x" in stdout.strip():
-            new_w, new_h = map(int, stdout.strip().split("x"))
-            new_w = int(new_w * base_scale)
-            new_h = int(new_h * base_scale)
+            orig_w, orig_h = map(int, stdout.strip().split("x"))
+            new_w = int(orig_w * base_scale)
+            new_h = int(orig_h * base_scale)
+            log.debug(f"Using original dimensions: {orig_w}x{orig_h} -> scaled to {new_w}x{new_h}")
         else:
             log.error("Failed to probe video size – aborting WebP conversion")
             return None
 
-    # Enforce max width
+    # Enforce max width while maintaining aspect ratio
     if new_w > max_width:
         ratio = max_width / new_w
         new_w = int(new_w * ratio)
@@ -127,8 +130,8 @@ async def trailer_to_webp(video_path: Path, output_dir: Path, config: Dict) -> O
     log.debug(f"Final WebP size: {new_w}x{new_h}, FPS: {fps}")
 
     vf = []
-    if do_crop and crop_filter:
-        vf.append(f"crop={crop_raw}")
+    if do_crop and crop_params:
+        vf.append(f"crop={crop_params}")  # Apply the actual crop
     vf.append(f"scale={new_w}:{new_h}")
     vf.append(f"fps={fps}")
 
@@ -182,7 +185,7 @@ async def create_trailer(video_path: Path, output_dir: Path, config: Dict) -> Op
 
     if duration <= 40:
         log.warning(f"Video too short ({duration}s) to create trailer with credit avoidance")
-        return None
+        return await trailer_to_webp(video_path, output_dir, config)
 
     # Avoid pre/end credits
     start_range = 20
@@ -190,7 +193,7 @@ async def create_trailer(video_path: Path, output_dir: Path, config: Dict) -> Op
 
     if start_range >= end_range:
         log.warning("Video too short to safely avoid credits")
-        return None
+        return await trailer_to_webp(video_path, output_dir, config)
 
     # Select 4 random start times for 5-second segments
     selected_times = []
@@ -264,4 +267,62 @@ async def create_trailer(video_path: Path, output_dir: Path, config: Dict) -> Op
         concatenated = output_dir / "temp_concatenated.mp4"
         if concatenated.exists():
             concatenated.unlink()
+        return None
+
+
+async def download_trailer(
+    client: httpx.AsyncClient(),
+    url: str,
+    local_path: Path,
+    *,
+    chunk_size: int = 1024 * 256,  # 256 KiB
+) -> Optional[Path]:
+    """Stream-download a video file and save it to *local_path*."""
+    if not url:
+        return None
+
+    try:
+        head_resp = await client.head(url, timeout=10.0)
+        content_type = head_resp.headers.get("Content-Type", "").lower()
+        is_m3u8 = "m3u" in content_type or url.lower().endswith((".m3u8", ".m3u"))
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if is_m3u8:
+            log.debug(f"Detected m3u8 stream: {url}. Using ffmpeg to download.")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-i",
+                url,
+                "-map",
+                "0:v",
+                "-c",
+                "copy",
+                "-protocol_whitelist",
+                "file,http,https,tcp,tls,crypto",  # Allow necessary protocols
+                "-y",
+                str(local_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                log.warning(f"ffmpeg failed to download {url}: {stderr.decode().strip()}")
+                return None
+            log.debug("Trailer Downloaded Successfully.")
+        else:
+            log.debug(f"Detected direct video: {url}. Using httpx stream.")
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
+                with local_path.open("wb") as f:
+                    async for chunk in resp.aiter_bytes(chunk_size):
+                        f.write(chunk)
+            log.debug("Trailer Downloaded Successfully.")
+
+        if local_path.exists() and local_path.stat().st_size > 0:
+            return local_path
+        else:
+            log.warning(f"Downloaded file {local_path} is empty or missing.")
+            return None
+    except Exception as e:
+        log.warning(f"Failed to download trailer {url}: {e}")
         return None

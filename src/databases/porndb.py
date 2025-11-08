@@ -14,7 +14,7 @@ from rich.prompt import Prompt
 from src.progress import ProgressManager
 from src.utils.console import log
 from src.utils.phash import PerceptualHash
-from src.utils.trailer import trailer_to_webp
+from src.utils.trailer import download_trailer, trailer_to_webp
 
 
 class PornDbHandler:
@@ -110,7 +110,7 @@ class PornDbHandler:
             await self._download_image(client, back_url, path / "back.jpg")
 
             if config.get("ADULT", {}).get("add_trailer", False) and trailer and not meta.get("trailer"):
-                mp4trailer = await self._download_video(client, trailer, path / "trailer.mp4")
+                mp4trailer = await download_trailer(client, trailer, path / "trailer.mp4")
                 if mp4trailer and mp4trailer.exists():
                     meta["trailer"] = await trailer_to_webp(mp4trailer, path, config)
 
@@ -156,31 +156,6 @@ class PornDbHandler:
             return local_path
         except Exception as e:
             log.warning(f"Failed to download image {url}: {e}")
-            return None
-
-    async def _download_video(
-        self,
-        client,
-        url: str,
-        local_path: Path,
-        *,
-        chunk_size: int = 1024 * 256,  # 256 KiB
-    ) -> Optional[Path]:
-        """Stream-download a video file and save it to *local_path*."""
-        if not url:
-            return None
-
-        try:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                with local_path.open("wb") as f:
-                    async for chunk in resp.aiter_bytes(chunk_size):
-                        f.write(chunk)
-            log.debug(f"Downloaded trailer to {local_path}")
-            return local_path
-        except Exception as e:
-            log.warning(f"Failed to download trailer {url}: {e}")
             return None
 
     def compute_oshash(self, filepath: str) -> str:
@@ -285,9 +260,10 @@ class PornDbHandler:
     ) -> Tuple[str, List[Dict]]:  # Returns (match_method, scenes)
         headers = {"Authorization": f"Bearer {self.apikey}"}
         category_param = "&category_id=1" if endpoint == "scenes" else ""
-
-        # Compute and store hashes
-        hashes = await self._compute_hashes(meta["path"], duration, meta)
+        hashes = {}
+        # Compute hashes if not split/scene or pack
+        if len(meta["video_files"]) == 1:
+            hashes = await self._compute_hashes(meta["path"], duration, meta)
 
         # Try scene_id first if provided (manual direct ID)
         if scene_id:
@@ -299,6 +275,7 @@ class PornDbHandler:
                 data = resp.json()
                 scenes = [data["data"]] if "data" in data else []
                 if scenes:
+                    self._update_meta_endpoint_flags(meta, endpoint)
                     # Submit hashes since manual ID
                     await self._submit_hashes(client, endpoint, scene_id, hashes, filename, duration, meta)
                     return "manual_id", scenes
@@ -320,6 +297,7 @@ class PornDbHandler:
                     scenes = data.get("data", [])
                     if scenes:
                         log.info(f"Match found via PHASH with endpoint '{ep}' for {filename}")
+                        self._update_meta_endpoint_flags(meta, ep)
                         # Submit hashes (including oshash if available)
                         await self._submit_hashes(
                             client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
@@ -340,6 +318,7 @@ class PornDbHandler:
                     scenes = data.get("data", [])
                     if scenes:
                         log.info(f"Match found via OSHASH with endpoint '{ep}' for {filename}")
+                        self._update_meta_endpoint_flags(meta, ep)
                         # Submit hashes (including phash if available)
                         await self._submit_hashes(
                             client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
@@ -409,6 +388,7 @@ class PornDbHandler:
                             scenes = data.get("data", [])
                             if scenes:
                                 log.info(f"Match found via on-demand PHASH with endpoint '{ep}' for {filename}")
+                                self._update_meta_endpoint_flags(meta, ep)
                                 # Submit hashes
                                 await self._submit_hashes(
                                     client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
@@ -431,6 +411,7 @@ class PornDbHandler:
                         log.error("Empty or invalid response for provided ID.")
                         continue
                     log.debug(f"Received data: {data}")
+                    self._update_meta_endpoint_flags(meta, endpoint)
                     # Submit hashes for confirmed match
                     await self._submit_hashes(client, endpoint, input_id, hashes, filename, duration, meta)
                     return "manual_id", [data["data"]]
@@ -443,3 +424,8 @@ class PornDbHandler:
             except Exception as e:
                 log.error(f"Error fetching with provided ID: {e}")
         return "none", []
+
+    def _update_meta_endpoint_flags(self, meta: Dict, endpoint: str):
+        meta["xscene"] = endpoint == "scenes"
+        meta["jav"] = endpoint == "jav"
+        meta["xmovie"] = endpoint == "movies"

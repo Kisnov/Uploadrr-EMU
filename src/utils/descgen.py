@@ -468,19 +468,28 @@ class DescGenerator:
     async def _xxx_description(self, descfile, meta: Dict, tracker: str):
         """Helper method to write XXX description."""
         porndb = meta.get("porndb") or {}
-        if not porndb:
-            return
-        else:
-            trailer = meta.get("trailer_url") if meta.get("trailer_url") != "" else None
+        trailer = meta.get("trailer_url") if meta.get("trailer_url") != "" else None
+        if trailer:
+            await descfile.write(f"[center][img]{trailer}[/img][/center]\n\n")
+        if porndb:
             desc = porndb.get("description", "").strip() or "N/A"
             perf = porndb.get("performers", "").strip() or "N/A"
-            if trailer:
-                await descfile.write(f"[center][img]{trailer}[/img][/center]\n\n")
-            await descfile.write(f"[code][h4][color=#91FFF7]DESCRIPTION[/color][/h4][b]{desc}[/b][/code]\n\n")
-            await descfile.write(f"[code][h4][color=#91FFF7]PERFORMERS[/color][/h4][b]{perf}[/b][/code]\n\n")
-            if tracker == "LDU":
-                await descfile.write(f"[url=torrent-cover={porndb['poster']} ][/url] [url=torrent-banner={porndb['image']} ][/url]")
-            return
+            await descfile.write(f"[h4][color=#91FFF7]DESCRIPTION[/color][/h4][b]{desc}[/b]\n\n")
+            await descfile.write(f"[h4][color=#91FFF7]PERFORMERS[/color][/h4][b]{perf}[/b]\n\n")
+        if tracker == "LDU":
+            # LDU doesn't support api cover/banner upload they have a workaround but it must be .jpg
+            cover = next(
+                (url for url in [porndb.get("poster"), meta.get("cover_url")] if url and url.endswith((".jpg", ".jpeg"))),
+                porndb.get("poster") or meta.get("cover_url"),
+            )
+
+            banner = next(
+                (url for url in [porndb.get("image"), meta.get("banner_url")] if url and url.endswith((".jpg", ".jpeg"))),
+                porndb.get("image") or meta.get("banner_url"),
+            )
+
+            await descfile.write(f"[url=torrent-cover={cover} ][/url] [url=torrent-banner={banner} ][/url]")
+        return
 
     async def _write_images(
         self, descfile, meta: Dict, tracker: str, whitelist: List[str] = None, control: DescControl = None, img_size: int = None
