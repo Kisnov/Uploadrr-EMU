@@ -3,388 +3,490 @@ import datetime
 import re
 import urllib.parse
 import uuid
-from argparse import ArgumentParser, ArgumentTypeError
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.utils.console import console
 
+# =============================================================================
+# 🔑 GLOBAL-ONLY ARGUMENTS
+# These *cannot* be specified per-item — only once, globally.
+# Keep this list minimal and intentional.
+# =============================================================================
+GLOBAL_ARGS: Set[str] = {
+    # Core control flow
+    "full_dir",
+    "debug",
+    "deep_debug",
+    "unattended",
+    "quiet",
+    "show_queue",
+    "auto_queue",
+    "delay",
+    "full_auto",
+    "random",
+    "skip_dupe_check",
+    "auto_desc",
+    # Client/queue control
+    "no_seed",
+    "client",  # override client — likely global policy
+    "qbit_tag",
+    "qbit_cat",
+    "rtorrent_label",
+    # Structural
+    "trackers",  # default global; per-item would require complex tracker override logic
+}
 
-class Choices:
-    """Case-Insensitive Choice Validator"""
 
-    def __init__(self, valid_choices: List[str]):
-        self.valid_choices = {choice.lower(): choice for choice in valid_choices}
-        self.original_choices = valid_choices  # For error message
-
-    def __call__(self, value: str) -> str:
-        lower_value = value.lower()
-        if lower_value not in self.valid_choices:
-            raise ArgumentTypeError(f"invalid choice: '{value}' (choose from {', '.join(self.original_choices)})")
-        return value
-
-
-class Args:
+# =============================================================================
+# 🧰 Helper Validators (keep pure & testable)
+# =============================================================================
+def _validate_mbid(mbid: str) -> str:
     uuid_pattern = r"^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+    if not re.match(uuid_pattern, mbid):
+        raise argparse.ArgumentTypeError("Invalid MBID format. Must be a valid UUID (e.g., 83d9...)")
+    return mbid
 
-    def __init__(self, config: Dict[str, Any]) -> None:
-        self.config: Dict[str, Any] = config
 
-    def parse(self, args: List[str], meta: Dict[str, Any]) -> Tuple[Dict[str, Any], ArgumentParser, List[str]]:
-        """Parse command-line arguments and update the meta dictionary."""
-        parser = self._setup_parser()
-        parsed_args, before_args = self._parse_arguments(parser, args)
-        meta = self._process_arguments(vars(parsed_args), before_args, meta)
-        return meta, parser, before_args
+def _validate_porndb_id(value: str) -> str:
+    if value.isdigit():
+        return value
+    try:
+        uuid.UUID(value)
+        return value
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid PornDB ID: '{value}'. Must be digits or UUID.")
 
-    def _setup_parser(self) -> ArgumentParser:
-        """Set up the ArgumentParser with all defined arguments."""
-        parser = ArgumentParser(description="Command-line arguments for Uploadrr")
 
-        # Core arguments
-        parser.add_argument("path", nargs="*", help="Path to file/directory")
-        (
-            parser.add_argument(
-                "-fd",
-                "--full-directory",
-                dest="full_dir",
-                default=False,
-                action="store_true",
-                help="Uploads folder and all content within",
-            ),
-        )
-        parser.add_argument(
-            "-s",
-            "--screens",
-            type=int,
-            required=False,
-            help="Number of screenshots",
-            default=int(self.config.get("SCREENS", {}).get("screen_count", 3)),
-        )
-        parser.add_argument("-ih", "--imghost", type=str, default=None, help="Image host")
+def _season_or_episode(value: str) -> Dict[str, str]:
+    """
+    Parse Sxx, Exx, SxxExx → {"manual_season": "S02", "manual_episode": "E05"}
+    """
+    value = value.strip().lower()
+    # Match optional S## and optional E##
+    match = re.match(r"s?(\d+)?\s*e?(\d+)?", value)
+    if not match:
+        return {"manual_season": value}
 
-        # Define Choices
-        arg_choices = {
-            "category": {
-                "flags": ("-c", "--category"),
-                "type": Choices(["movie", "tv", "fanres", "sports", "music"]),
-                "help": "Category [MOVIE, TV, FANRES, SPORTS, MUSIC]",
-            },
-            "type": {
-                "flags": ("-t", "--type"),
-                "type": Choices(["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv"]),
-                "help": "Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV]",
-            },
-            "manual_source": {
-                "flags": ("--source",),
-                "type": Choices(["Blu-ray", "BluRay", "DVD", "HDDVD", "WEB", "HDTV", "UHDTV"]),
-                "help": "Source [Blu-ray, BluRay, DVD, HDDVD, WEB, HDTV, UHDTV]",
-            },
-            "resolution": {
-                "flags": ("-res", "--resolution"),
-                "type": Choices(["2160p", "1080p", "1080i", "720p", "576p", "576i", "480p", "480i", "8640p", "4320p", "other"]),
-                "help": "Resolution [2160p, 1080p, etc.]",
-            },
-            "piece_size_max": {
-                "flags": ("-ps", "--piece-size-max"),
-                "type": int,
-                "choices": [1, 2, 4, 8, 16],
-                "help": "Maximum piece size in MiB",
-            },
-            "torrent_creation": {
-                "flags": ("-tc", "--torrent-creation"),
-                "type": Choices(["torf", "torrenttools", "mktorrent"]),
-                "help": "Tool to create base .torrent",
-                "default": self.config["DEFAULT"].get("torrent_creation", "torf"),
-            },
-        }
+    season_num, episode_num = match.groups()
+    result = {}
+    if season_num:
+        result["manual_season"] = f"S{int(season_num):02d}"
+    if episode_num:
+        result["manual_episode"] = f"E{int(episode_num):02d}"
+    return result
 
-        for name, spec in arg_choices.items():
-            parser.add_argument(*spec["flags"], **{k: v for k, v in spec.items() if k != "flags"})
 
-        # ID-related arguments
-        parser.add_argument("-tmdb", "--tmdb", nargs="*", type=str, dest="tmdb_manual", help="TMDb ID")
-        parser.add_argument("-imdb", "--imdb", nargs="*", type=str, help="IMDb ID")
-        parser.add_argument("-mal", "--mal", nargs="*", type=str, help="MAL ID")
-        parser.add_argument("-mbid", "--mbid", nargs="?", type=self.validate_mbid, dest="mbid_manual", help="MusicBrainz Release ID")
-        parser.add_argument("-discogs", "--discogs", nargs="*", type=str, dest="discogs_id", help="Discogs Release ID")
-        parser.add_argument(
-            "-pornid", "--tpdb", nargs="?", type=self.validate_porndb_id, dest="pdb_manual", help="ThePornDB ID or UUID"
-        )
+# =============================================================================
+# 🧹 Normalization & Post-Processing
+# (Pure functions — no side effects)
+# =============================================================================
+def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
+    """
+    Convert parsed args → clean meta dict.
+    Handles type coercion, casing, simple defaults.
+    """
+    meta = vars(ns).copy()
+    # Remove dummy placeholder
+    meta.pop("dummy_path", None)
 
-        # Metadata arguments
-        parser.add_argument("-g", "--tag", type=str, help="Group tag")
-        parser.add_argument("-serv", "--service", nargs="*", type=str, help="Streaming service")
-        parser.add_argument("-dist", "--distributor", nargs="*", type=str, help="Disc distributor (e.g., Criterion, BFI)")
-        parser.add_argument(
-            "-edition",
-            "--edition",
-            "--repack",
-            nargs="*",
-            type=str,
-            dest="manual_edition",
-            default="",
-            help="Edition/Repack string (e.g., Director's Cut, REPACK)",
-        )
-        parser.add_argument("-season", "--season", type=self.season_or_episode, help="Season number (or SxxExx shorthand)")
-        parser.add_argument("-episode", "--episode", type=self.season_or_episode, help="Episode number (or SxxExx shorthand)")
-        parser.add_argument(
-            "-daily", "--daily", nargs=1, type=datetime.date.fromisoformat, dest="manual_date", help="Air date of episode (YYYY-MM-DD)"
-        )
-        parser.add_argument("-year", "--year", dest="manual_year", nargs="?", type=int, default=0, help="Year")
+    # --- Simple type coercions & defaults ---
+    if meta.get("screens") is not None:
+        meta["screens"] = int(meta["screens"])
 
-        # Boolean flags
-        boolean_args = [
-            ("-a --anon", "anon", "Upload anonymously"),
-            ("-debug --debug", "debug", "Debug mode with extra info"),
-            ("-ddebug --deep-debug", "deep_debug", "Deep debug even more info, hopefully"),
-            ("-dr --draft", "draft", "Send to drafts (BHD)"),
-            ("-ffdebug --ffdebug", "ffdebug", "Show ffmpeg info during screenshots"),
-            ("-hc --hardcoded-subs", "hardcoded_subs", "Contains hardcoded subs"),
-            ("-m --manual", "manual", "Manual mode, returns DDL links"),
-            ("-modq --mod-queue", "modq", "Opt into Mod Queue"),
-            ("-nfo --nfo", "nfo", "Use .nfo in directory for description"),
-            ("-nh --nohash", "nohash", "Don't hash .torrent"),
-            ("--no-aka", "no_aka", "Remove AKA from title"),
-            ("--no-dub", "no_dub", "Remove Dubbed from title"),
-            ("-ns --no-seed", "no_seed", "Do not add torrent to client"),
-            ("--no-season", "no_season", "Remove Season from title"),
-            ("--no-tag", "no_tag", "Remove Group Tag from title"),
-            ("--no-year", "no_year", "Remove Year from title"),
-            ("-pr --personal-release", "personalrelease", "Personal Release"),
-            ("-random --random", "random", "Randomize queue order"),
-            ("-rh --rehash", "rehash", "Force hash .torrent"),
-            ("-sdc --skip-dupe-check", "skip_dupe_check", "Skip duplicate check"),
-            ("-siu --skip-imagehost-upload", "skip_imghost_upload", "Skip uploading to an image host"),
-            ("-st --stream", "stream", "Stream Optimized Upload"),
-            ("-vs --vapoursynth", "vapoursynth", "Use VapourSynth for screens"),
-            ("-webdv --webdv", "webdv", "Contains a Dolby Vision layer"),
-            ("-x --xxx", "xxx", "itssaaa pr0n"),
-            ("-xs --xscene", "xscene", "XXX Scene Mode"),
-            ("-xm --xmovie", "xmovie", "XXX Scene Mode"),
-            ("-jav --jav", "jav", "JAV"),
-            ("-pack --pack", "pack", "XXX: Mini/Mega Pack"),
-        ]
-        for flags, dest, help_text in boolean_args:
-            parser.add_argument(*flags.split(), dest=dest, action="store_true", help=help_text)
+    if meta.get("category"):
+        meta["category"] = meta["category"].upper()
 
-        # Other arguments
-        parser.add_argument("-cv", "--cover", dest="user_cover", nargs="*", help="Path/URL to cover image")
-        parser.add_argument("-bn", "--banner", dest="user_banner", nargs="*", help="Path/URL to banner image")
-        parser.add_argument("-trailer", "--trailer", nargs="*", help="Path to trailer (webp or gif)")
-        parser.add_argument("-ptp", "--ptp", nargs="*", type=str, help="PTP torrent ID/permalink")
-        parser.add_argument("-blu", "--blu", nargs="*", type=str, help="BLU torrent ID/link")
-        parser.add_argument("-hdb", "--hdb", nargs="*", type=str, help="HDB torrent ID/link")
-        parser.add_argument("-d", "--desc", nargs="*", help=r"\"[b]Custom Description[/b]\"")
-        parser.add_argument("-pb", "--desclink", nargs="*", help=r"\"https://pastebin.com/URL\"")
-        parser.add_argument("-df", "--descfile", nargs="*", help=r"\"\path\to\description.txt\"")
-        parser.add_argument(
-            "-aid",
-            "--auto-insert-desc",
-            dest="auto_desc",
-            action="store_true",
-            default=self.config["AUTO"].get("always_aid", False),
-            help="Use existing .txt file for description",
-        )
-        parser.add_argument("-th", "--torrenthash", nargs="*", help="Torrent hash to reuse")
-        parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
-        parser.add_argument("-reg", "--region", nargs="*", help="Region for discs")
-        parser.add_argument(
-            "-mt", "--manual-title", dest="manual_name", nargs="*", type=str, help='Manually override name, e.g., "Full Name"'
-        )
-        parser.add_argument("-client", "--client", nargs="*", help="Override default torrent client")
-        parser.add_argument("-qbt", "--qbit-tag", dest="qbit_tag", nargs="*", help="qBittorrent tag")
-        parser.add_argument("-qbc", "--qbit-cat", dest="qbit_cat", nargs="*", help="qBittorrent category")
-        parser.add_argument("-rtl", "--rtorrent-label", dest="rtorrent_label", nargs="*", help="rTorrent label")
-        parser.add_argument(
-            "-tk",
-            "--trackers",
-            nargs="*",
-            help="Space-separated trackers (e.g., blu bhd)",
-            default=self.config["TRACKERS"].get("default_trackers", "MANUAL"),
-        )
-        parser.add_argument("-rt", "--randomized", nargs="*", default=0, help="Number of extra random infohash torrents")
-        parser.add_argument("-aq", "--auto-queue", dest="auto_queue", help="Automatically queue files in directory")
-        parser.add_argument("-sq", "--show-queue", dest="show_queue", action="store_true", help="Show queued files")
-        parser.add_argument("-delay", "--delay", dest="delay", type=int, help="Delay between queued torrents (seconds)")
-        parser.add_argument("-ua", "--unattended", action="store_true", required=False, help="Unattended Mode")
-        parser.add_argument(
-            "-fa",
-            "--full-auto",
-            dest="full_auto",
-            nargs="?",
-            const=True,
-            default=False,
-            type=str,
-            help="Compiles Queue, Grabs Desc if Avail, Unnatended",
-        )
-        parser.add_argument(
-            "-q",
-            "--quiet",
-            action="store_true",
-            default=self.config["AUTO"].get("keep_quiet", False),
-            help="Quiet mode, live processing + summary only",
-        )
-        parser.add_argument("-fl", "--freeleech", nargs="*", default=0, dest="freeleech", help="Freeleech percentage")
+    if meta.get("type"):
+        meta["type"] = meta["type"].upper().replace("-", "")
 
-        return parser
-
-    def _parse_arguments(self, parser: ArgumentParser, args: List[str]) -> Tuple[Any, List[str]]:
-        return parser.parse_known_args(args)
-
-    def _process_arguments(self, args: Dict[str, Any], before_args: List[str], meta: Dict[str, Any]) -> Dict[str, Any]:
-        """Process parsed arguments and update the meta dictionary."""
-        # Handle porn mode flags
-        if args.get("xscene"):
-            meta["xxx"] = meta["xscene"] = True
-        if args.get("xmovie"):
-            meta["xxx"] = meta["xmovie"] = True
-        if args.get("jav"):
-            meta["xxx"] = meta["jav"] = True
-
-        # Handle full-auto mode
-        if args.get("full_auto", False):
-            args["unattended"] = args["auto_desc"] = True
-            args["auto_queue"] = args["full_auto"]
-
-        if not args["path"]:
-            valid_paths = [p for p in before_args if Path(p).exists()]
-            args["path"] = valid_paths if valid_paths else args["path"]
+    if meta.get("manual_source"):
+        src = meta["manual_source"].lower()
+        if src == "bluray":
+            meta["manual_source"] = "BluRay"
+        elif src == "blu-ray":
+            meta["manual_source"] = "Blu-ray"
         else:
-            args["path"] = [p for p in args["path"] if Path(p).exists()]
+            meta["manual_source"] = src.upper()
 
-        if not args["path"] and not args.get("auto_queue"):
-            console.print("[red]No valid paths provided.[/red]")
-            args["path"] = []
+    if meta.get("resolution"):
+        meta["resolution"] = meta["resolution"].lower()
 
-        # Reset manual TMDb
-        if meta.get("tmdb_manual"):
-            meta["tmdb_manual"] = None
+    if meta.get("imghost"):
+        meta["imghost"] = meta["imghost"].lower()
 
-        # Process each argument (excluding 'path')
-        value_processors = {
-            "category": lambda v: v.upper() if v else None,
-            "type": lambda v: v.upper().replace("-", "") if v else None,
-            "manual_source": lambda v: "BluRay"
-            if v.lower() == "bluray"
-            else "Blu-ray"
-            if v.lower() == "blu-ray"
-            else v.upper()
-            if v
-            else None,
-            "resolution": lambda v: v.lower() if v else None,
-            "imghost": lambda v: v.lower() if v else None,
-            "piece_size_max": lambda v: v,
-            "torrent_creation": lambda v: v.lower() if v else None,
-            "tag": lambda v: f"-{v}" if isinstance(v, str) else "",
-            "screens": int,
-            "season": lambda v: v,
-            "episode": lambda v: v,
-            "manual_date": lambda v: v,
-            "tmdb_manual": lambda v: self.parse_tmdb_id(v[0], meta.get("category")) if isinstance(v, list) and v else ("", ""),
-            "ptp": lambda v: self._parse_tracker_id(v, "ptp", "torrentid"),
-            "blu": lambda v: self._parse_blu_id(v),
-            "hdb": lambda v: self._parse_tracker_id(v, "hdb", "id"),
-            "trackers": lambda v: v if isinstance(v, list) else [v],
-            "pdb_manual": lambda v: v,
-        }
+    if meta.get("torrent_creation"):
+        meta["torrent_creation"] = meta["torrent_creation"].lower()
 
-        for key, value in args.items():
-            if key == "path":
-                continue
-            if key == "xxx" and meta.get("xxx", False):
-                continue
-            elif value not in (None, []):
-                if key in value_processors:
-                    result = value_processors[key](value)
-                    if isinstance(result, dict):
-                        meta.update(result)
-                    elif isinstance(result, tuple) and len(result) == 2:
-                        if key == "tmdb_manual":
-                            meta["category"], meta[key] = result
-                        else:
-                            meta[result[0]] = result[1]
-                    else:
-                        meta[key] = result
-                else:
-                    meta[key] = self.list_to_string(value) if isinstance(value, list) else value
-            elif key in ("manual_edition", "freeleech"):
-                meta[key] = value if key != "freeleech" else 100
-            else:
-                meta[key] = meta.get(key, None)
+    if meta.get("tag") and isinstance(meta["tag"], str):
+        meta["tag"] = f"-{meta['tag']}"
 
-        return meta
+    # --- ID parsing (non-failing, just extract best effort) ---
+    if meta.get("tmdb"):
+        # tmdb can be list (e.g., ["123"] or ["movie/123"])
+        val = meta["tmdb"][0] if meta["tmdb"] else ""
+        meta["tmdb_manual"] = parse_tmdb_id(val, meta.get("category"))
+        # NOTE: returns (category, id) — handled in apply_special_logic
 
-    @staticmethod
-    def validate_mbid(mbid: str) -> str:
-        if not re.match(Args.uuid_pattern, mbid):
-            raise argparse.ArgumentTypeError("Invalid MBID format. Use a valid UUID without quotes or altered dashes.")
-        return mbid
+    if meta.get("ptp"):
+        meta["ptp"] = _parse_tracker_id(meta["ptp"][0], "ptp", "torrentid") if meta["ptp"] else ""
+    if meta.get("blu"):
+        meta["blu"] = _parse_blu_id(meta["blu"][0]) if meta["blu"] else ""
+    if meta.get("hdb"):
+        meta["hdb"] = _parse_tracker_id(meta["hdb"][0], "hdb", "id") if meta["hdb"] else ""
 
-    @staticmethod
-    def validate_porndb_id(value: str) -> str:
-        if value.isdigit():
-            return value
+    if meta.get("trackers"):
+        # trackers: str or list[str] → always list
+        t = meta["trackers"]
+        meta["trackers"] = t if isinstance(t, list) else [t]
+
+    # --- Freeleech: default 100 if flag used without value ---
+    if meta.get("freeleech") == []:
+        meta["freeleech"] = 100
+    elif meta.get("freeleech"):
+        meta["freeleech"] = int(meta["freeleech"][0]) if isinstance(meta["freeleech"], list) else int(meta["freeleech"])
+
+    # --- Edition: list → space-joined string ---
+    if isinstance(meta.get("manual_edition"), list):
+        meta["manual_edition"] = " ".join(meta["manual_edition"]) or ""
+
+    # --- Keywords: list → comma-separated string (as expected by uploaders) ---
+    if isinstance(meta.get("keywords"), list):
+        meta["keywords"] = ",".join(meta["keywords"])
+
+    return meta
+
+
+def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Apply higher-level logic that depends on multiple fields or side effects.
+    """
+    meta = meta.copy()
+
+    # --- XXX detection ---
+    xxx_flags = ("xxx", "xscene", "xmovie", "jav", "xpack")
+    if any(meta.get(flag) for flag in xxx_flags):
+        meta["xxx"] = True
+        for flag in xxx_flags:
+            if meta.get(flag):
+                meta[flag] = True
+
+    # --- Full-auto mode ---
+    if meta.get("full_auto"):
+        meta["unattended"] = True
+        meta["auto_desc"] = True
+        meta["auto_queue"] = meta["full_auto"]  # could be str (dir) or True
+
+    # --- TMDB post-processing: extract (category, id) → separate fields ---
+    if "tmdb_manual" in meta and isinstance(meta["tmdb_manual"], tuple):
+        cat, tid = meta["tmdb_manual"]
+        meta["category"] = cat or meta.get("category")
+        meta["tmdb_manual"] = tid
+
+    # --- Season/Episode parsing from --season/--episode CLI args ---
+    for key in ("season", "episode"):
+        if meta.get(key):
+            extra = _season_or_episode(meta[key])
+            # e.g., {"manual_season": "S02", "manual_episode": "E05"}
+            meta.update(extra)
+            meta.pop(key, None)  # remove raw 'season'/'episode'
+
+    # --- Manual date: ensure it's a date obj (already done by argparse, but confirm) ---
+    if meta.get("manual_date") and not isinstance(meta["manual_date"], datetime.date):
         try:
-            uuid.UUID(value)
-            return value
-        except ValueError:
-            raise ArgumentTypeError(f"Invalid PornDB ID: '{value}'. Must be digits or UUID.")
+            meta["manual_date"] = datetime.date.fromisoformat(meta["manual_date"])
+        except Exception:
+            meta.pop("manual_date", None)
 
-    @staticmethod
-    def list_to_string(items: List[Any]) -> str:
-        if not items:
-            return "None"
-        return " ".join(str(item) for item in items)
+    return meta
 
-    @staticmethod
-    def season_or_episode(value: str) -> Dict[str, str]:
-        value = value.strip().lower()
-        result = {}
-        match = re.match(r"(s?\d+)?(e\d+)?", value)
-        if match:
-            season, episode = match.groups()
-            if season:
-                season_num = re.sub(r"\D", "", season)
-                result["manual_season"] = f"S{int(season_num):02d}"
-            if episode:
-                episode_num = re.sub(r"\D", "", episode)
-                result["manual_episode"] = f"E{int(episode_num):02d}"
-        return result or {"manual_season": value}
 
-    def parse_tmdb_id(self, id: str, category: Optional[str]) -> Tuple[str, str]:
-        try:
-            id = id.strip().lower()
-            if "/" in id:
-                type_part, id_part = id.split("/", 1)
+# =============================================================================
+# 🌐 ID Parsing Helpers (URL → ID extraction)
+# =============================================================================
+def parse_tmdb_id(id_str: str, fallback_category: Optional[str] = None) -> Tuple[str, str]:
+    """Returns (detected_category, id)"""
+    try:
+        id_str = id_str.strip().lower()
+        if "/" in id_str:
+            parts = id_str.split("/", 2)
+            if len(parts) >= 2:
+                type_part, id_part = parts[0], parts[1]
                 if type_part == "tv":
                     return "TV", id_part
                 elif type_part == "movie":
                     return "MOVIE", id_part
-            return category or "", id
-        except Exception:
-            console.print(f"[red]Invalid TMDb ID format: {id}")
-            return category or "", id
+        return fallback_category or "", id_str
+    except Exception as e:
+        console.print(f"[red]⚠️ Failed to parse TMDb ID '{id_str}': {e}")
+        return fallback_category or "", id_str
 
-    def _parse_tracker_id(self, value: str, tracker: str, query_param: str) -> str:
-        if value.startswith("http"):
-            try:
-                parsed = urllib.parse.urlparse(value)
-                return urllib.parse.parse_qs(parsed.query)[query_param][0]
-            except Exception as e:
-                console.print(f"[red]Failed to parse {tracker} ID from URL: {value}. Error: {e}")
-                console.print(f"[red]Continuing without --{tracker}")
-                return value
-        return value
 
-    def _parse_blu_id(self, value: str) -> str:
-        if value.startswith("http"):
-            try:
-                parsed = urllib.parse.urlparse(value)
-                path = parsed.path.rstrip("/")
-                return path.split("/")[-1]
-            except Exception as e:
-                console.print(f"[red]Unable to parse BLU ID from URL: {value}. Error: {e}")
-                console.print("[red]Continuing without --blu")
-                return value
-        return value
+def _parse_tracker_id(url_or_id: str, tracker: str, query_param: str) -> str:
+    if url_or_id.startswith("http"):
+        try:
+            parsed = urllib.parse.urlparse(url_or_id)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if query_param in qs:
+                return qs[query_param][0]
+        except Exception as e:
+            console.print(f"[red]⚠️ Failed to parse {tracker} ID from URL: {url_or_id} → {e}")
+    return url_or_id
+
+
+def _parse_blu_id(url_or_id: str) -> str:
+    if url_or_id.startswith("http"):
+        try:
+            path = urllib.parse.urlparse(url_or_id).path.rstrip("/")
+            return path.split("/")[-1]
+        except Exception as e:
+            console.print(f"[red]⚠️ Failed to parse BLU ID from URL: {url_or_id} → {e}")
+    return url_or_id
+
+
+# =============================================================================
+# 🛠️ Parser Construction
+# =============================================================================
+def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Uploadrr — Upload media with rich metadata", add_help=True, allow_abbrev=False)
+    # Dummy to absorb positional args (will be stripped later)
+    parser.add_argument("dummy_path", nargs="*", help=argparse.SUPPRESS)
+
+    # ========================
+    # 🌍 GLOBAL-ONLY Arguments
+    # (Enforced after parsing via `enforce_global_only`)
+    # ========================
+    parser.add_argument("-fd", "--full-dir", action="store_true", help="Upload folder and all content within")
+    parser.add_argument("-D", "--debug", action="store_true", default=False, help="Enable debug logging")
+    parser.add_argument("-DD", "--deep-debug", dest="deep_debug", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("-ua", "--unattended", action="store_true", help="Run without interactive prompts")
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=config.get("AUTO", {}).get("keep_quiet", False),
+        help="Quiet mode: only show summary and errors",
+    )
+    parser.add_argument("-sq", "--show-queue", action="store_true", help="Show queued files before processing")
+    parser.add_argument("-aq", "--auto-queue", metavar="DIR", help="Automatically queue all items in DIR")
+    parser.add_argument("-delay", "--delay", type=int, help="Delay between uploads (seconds)")
+    parser.add_argument(
+        "-fa",
+        "--full-auto",
+        nargs="?",
+        const=True,
+        default=False,
+        help="Full auto: queue, grab desc, unattended (optionally specify dir)",
+    )
+    parser.add_argument("-random", "--random", action="store_true", help="Randomize upload order")
+    parser.add_argument("-sdc", "--skip-dupe-check", action="store_true", help="Skip duplicate checking")
+    parser.add_argument("-ns", "--no-seed", action="store_true", help="Do not add torrent to client")
+    parser.add_argument("-client", "--client", help="Override default torrent client")
+    parser.add_argument("-qbt", "--qbit-tag", dest="qbit_tag", help="qBittorrent tag")
+    parser.add_argument("-qbc", "--qbit-cat", dest="qbit_cat", help="qBittorrent category")
+    parser.add_argument("-rtl", "--rtorrent-label", dest="rtorrent_label", help="rTorrent label")
+    parser.add_argument(
+        "-tk",
+        "--trackers",
+        nargs="*",
+        default=config.get("TRACKERS", {}).get("default_trackers", ["MANUAL"]),
+        help="Trackers to upload to (e.g., blu bhd)",
+    )
+    parser.add_argument(
+        "-aid",
+        "--auto-insert-desc",
+        dest="auto_desc",
+        action="store_true",
+        default=config.get("AUTO", {}).get("always_aid", False),
+        help="Use existing .txt file for description",
+    )
+
+    # ========================
+    # 🎯 Per-Item or Global Arguments
+    # ========================
+    parser.add_argument(
+        "-s", "--screens", type=int, default=int(config.get("SCREENS", {}).get("screen_count", 3)), help="Number of screenshots"
+    )
+    parser.add_argument("-ih", "--imghost", type=str, default=None, help="Image hosting service")
+
+    # --- Choices ---
+    parser.add_argument("-c", "--category", choices=["movie", "tv", "fanres", "sports", "music"], help="Content category")
+    parser.add_argument("-t", "--type", choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv"], help="Release type")
+    parser.add_argument(
+        "--source", dest="manual_source", choices=["Blu-ray", "BluRay", "DVD", "HDDVD", "WEB", "HDTV", "UHDTV"], help="Source media"
+    )
+    parser.add_argument(
+        "-res",
+        "--resolution",
+        choices=["2160p", "1080p", "1080i", "720p", "576p", "576i", "480p", "480i", "8640p", "4320p", "other"],
+        help="Video resolution",
+    )
+    parser.add_argument("-ps", "--piece-size-max", type=int, choices=[1, 2, 4, 8, 16], help="Max piece size (MiB)")
+    parser.add_argument(
+        "-tc",
+        "--torrent-creation",
+        choices=["torf", "torrenttools", "mktorrent"],
+        default=config.get("DEFAULT", {}).get("torrent_creation", "torf"),
+        help="Torrent creation tool",
+    )
+
+    # --- IDs ---
+    parser.add_argument("-tmdb", "--tmdb", nargs="*", help="TMDb ID (e.g., 123 or movie/123)")
+    parser.add_argument("-imdb", "--imdb", nargs="*", help="IMDb ID")
+    parser.add_argument("-mal", "--mal", nargs="*", help="MyAnimeList ID")
+    parser.add_argument("-mbid", "--mbid", type=_validate_mbid, dest="mbid_manual", help="MusicBrainz Release ID (UUID)")
+    parser.add_argument("-discogs", "--discogs", nargs="*", dest="discogs_id", help="Discogs Release ID")
+    parser.add_argument("-tpdb", "--tpdb", type=_validate_porndb_id, dest="pdb_manual", help="ThePornDB ID or UUID")
+
+    # --- Metadata ---
+    parser.add_argument("-g", "--tag", help="Group tag (e.g., RARBG)")
+    parser.add_argument("-serv", "--service", nargs="*", help="Streaming service (e.g., Netflix, Hulu)")
+    parser.add_argument("-dist", "--distributor", nargs="*", help="Disc distributor (e.g., Criterion)")
+    parser.add_argument(
+        "-edition", "--edition", "--repack", nargs="*", dest="manual_edition", help="Edition string (e.g., Director's Cut, REPACK)"
+    )
+    parser.add_argument("-season", "--season", help="Season (e.g., 2 or S02)")
+    parser.add_argument("-episode", "--episode", help="Episode (e.g., 5 or E05)")
+    parser.add_argument("-daily", "--daily", dest="manual_date", type=datetime.date.fromisoformat, help="Air date (YYYY-MM-DD)")
+    parser.add_argument("-year", "--year", dest="manual_year", type=int, default=0, help="Release year")
+
+    # --- Boolean flags (per-item) ---
+    bool_flags = [
+        ("-a", "--anon", "anon", "Upload anonymously"),
+        ("-dr", "--draft", "draft", "Send to drafts (BHD)"),
+        ("-ffdebug", "--ffdebug", "ffdebug", "Show ffmpeg debug during screenshots"),
+        ("-hc", "--hardcoded-subs", "hardcoded_subs", "Contains hardcoded subtitles"),
+        ("-m", "--manual", "manual", "Manual mode (returns DDL links)"),
+        ("-modq", "--mod-queue", "modq", "Opt into Mod Queue"),
+        ("-nfo", "--nfo", "nfo", "Use .nfo file for description"),
+        ("-nh", "--nohash", "nohash", "Skip hashing"),
+        ("-noaka", "--no-aka", "no_aka", "Remove AKA from title"),
+        ("-nodub", "--no-dub", "no_dub", "Remove 'Dubbed' from title"),
+        ("-noszn", "--no-season", "no_season", "Remove season from title"),
+        ("-g0", "--no-tag", "no_tag", "Remove group tag from title"),
+        ("-ny", "--no-year", "no_year", "Remove year from title"),
+        ("-pr", "--personal-release", "personalrelease", "Mark as personal release"),
+        ("-rh", "--rehash", "rehash", "Force rehash"),
+        ("-siu", "--skip-imagehost-upload", "skip_imghost_upload", "Skip image upload"),
+        ("-st", "--stream", "stream", "Stream-optimized encoding"),
+        ("-vs", "--vapoursynth", "vapoursynth", "Use VapourSynth for screenshots"),
+        ("-webdv", "--webdv", "webdv", "Contains Dolby Vision layer"),
+        ("-x", "--xxx", "xxx", "XXX content"),
+        ("-xs", "--xscene", "xscene", "XXX Scene mode"),
+        ("-xm", "--xmovie", "xmovie", "XXX Movie mode"),
+        ("-jav", "--jav", "jav", "JAV content"),
+        ("-xp", "--pack", "xpack", "XXX Pack (mini/mega)"),
+    ]
+    for short, long, dest, help_text in bool_flags:
+        parser.add_argument(short, long, dest=dest, action="store_true", help=help_text)
+
+    # --- Paths & Media ---
+    parser.add_argument("-cv", "--cover", dest="user_cover", nargs="*", help="Cover image (path/URL)")
+    parser.add_argument("-b", "--banner", dest="user_banner", nargs="*", help="Banner image (path/URL)")
+    parser.add_argument("-trailer", "--trailer", nargs="*", help="Trailer file (webp/gif)")
+
+    # --- Descriptions ---
+    parser.add_argument("-d", "--desc", nargs="*", help='Custom description (e.g., "[b]Hi![/b]")')
+    parser.add_argument("-pb", "--desclink", nargs="*", help="Pastebin URL")
+    parser.add_argument("-df", "--descfile", nargs="*", help="Local description file")
+
+    # --- Other ---
+    parser.add_argument("-ptp", "--ptp", nargs="*", help="PTP torrent ID or URL")
+    parser.add_argument("-blu", "--blu", nargs="*", help="BLU torrent ID or URL")
+    parser.add_argument("-hdb", "--hdb", nargs="*", help="HDB torrent ID or URL")
+    parser.add_argument("-th", "--torrenthash", nargs="*", help="Reuse existing torrent hash")
+    parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
+    parser.add_argument("-reg", "--region", nargs="*", help="Region (for discs)")
+    parser.add_argument("-mt", "--manual-title", dest="manual_name", nargs="*", help="Override generated name")
+    parser.add_argument("-rt", "--randomized", nargs="*", default=0, help="Number of extra randomized torrents")
+    parser.add_argument("-fl", "--freeleech", nargs="*", help="Freeleech percentage (default 100 if flag used alone)")
+
+    return parser
+
+
+# =============================================================================
+# 🔒 Scoping Enforcement
+# =============================================================================
+def enforce_global_only(ns: argparse.Namespace, is_global: bool, parser: argparse.ArgumentParser) -> None:
+    """
+    Raises ValueError if a global-only arg is used in a per-item context.
+    Ignores default values from config/parser.
+    """
+    if is_global:
+        return
+
+    for arg in GLOBAL_ARGS:
+        if hasattr(ns, arg):
+            value = getattr(ns, arg)
+            default = parser.get_default(arg)
+            if value != default:
+                flag = arg.replace("_", "-")
+                raise ValueError(f"Argument --{flag} is global-only and cannot be used per-item. Move it to the end of the command.")
+
+
+def group_args_by_path(argv: List[str]) -> Tuple[List[Tuple[List[str], str]], List[str]]:
+    """
+    Grouping:
+    - Only treat a token as a path if:
+        a) it doesn't start with '-', AND
+        b) it exists as a file/directory, AND
+        c) it's NOT consumed by a preceding flag
+
+    Strategy: collect args until we hit a *non-flag, non-consumed* token that is a path.
+    We assume most paths come *first* or after `--`.
+    """
+    items: List[Tuple[List[str], str]] = []
+    current_block: List[str] = []
+    i = 0
+    n = len(argv)
+
+    # Common flags that take path-like args (so their values shouldn't be items)
+    PATH_FLAGS = {"--cover", "-cv", "--banner", "-bn", "--trailer", "--descfile", "-df", "--desclink"}
+
+    while i < n:
+        arg = argv[i]
+
+        if arg == "--":
+            # Explicit separator: everything after is path
+            i += 1
+            while i < n:
+                p = Path(argv[i])
+                if p.exists():
+                    items.append((current_block.copy(), str(p.resolve())))
+                    current_block.clear()
+                else:
+                    console.print(f"[yellow]⚠️ Non-existent path after '--': {argv[i]}[/yellow]")
+                i += 1
+            break
+
+        if arg.startswith("-"):
+            current_block.append(arg)
+            i += 1
+            # Look ahead: if next token exists and is not a flag,
+            # and this flag is in PATH_FLAGS or likely takes a value, consume it
+            if i < n and not argv[i].startswith("-"):
+                # Heuristic: if flag is known to take a path, or value looks like a path
+                next_val = argv[i]
+                next_path = Path(next_val)
+                if arg in PATH_FLAGS or next_path.exists() or next_val.lower().endswith((".png", ".jpg", ".mp4", ".txt", ".webp")):
+                    current_block.append(next_val)
+                    i += 1
+            continue
+
+        # Non-flag: likely a path
+        p = Path(arg)
+        if p.exists() or (i == 0 and not items):  # first non-flag is likely main path
+            items.append((current_block.copy(), str(p.resolve() if p.exists() else p)))
+            current_block.clear()
+        else:
+            # Unknown — keep in block (e.g., bare words like "skip" in edit)
+            current_block.append(arg)
+        i += 1
+
+    return items, current_block
+
+
+# =============================================================================
+# 📦 Exported Interface
+# =============================================================================
+__all__ = ["build_parser", "normalize_args", "apply_special_logic", "enforce_global_only", "group_args_by_path", "GLOBAL_ARGS"]

@@ -12,7 +12,7 @@ import yaml
 from discord.ext import commands
 from torrentman import TorrentMaker
 
-from src.args import Args
+from src.args import *
 from src.clients import Clients
 from src.prep import Prep
 from src.search import Search
@@ -24,8 +24,9 @@ from src.trackers.LCD import LCD
 config_path = Path(__file__).parent.parent / "data" / "config.yaml"
 
 """
-THIS IS DEFUNCT. Updating some endpoints to make it easier for anyone that wishes to revive discord functionality. 
+THIS IS DEFUNCT. Updating some endpoints to make it easier for anyone that wishes to revive discord functionality.
 CvT <--> Unable to test. 
+LUST NOTE: This is defunct, I dont use discord either -- would need to rewritten to use new args.py
 """
 
 

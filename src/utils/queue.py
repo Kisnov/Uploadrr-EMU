@@ -3,9 +3,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-from rich.markdown import Markdown
 from rich.progress import Progress, TimeRemainingColumn
-from rich.style import Style
 
 from src.utils.console import console
 
@@ -21,31 +19,28 @@ def normalize_trackers(meta: Dict) -> List[str]:
     return trackers
 
 
-def prepare_queue(meta: Dict, argv: List[str]) -> List[str]:
-    """Prepare file queue based on input arguments."""
-    queue = []
-    if meta.get("auto_queue"):
-        directory = Path(meta["auto_queue"])
-        if not directory.is_dir():
-            console.print(f"[red]Directory not found: {directory}[/red]")
-            sys.exit(1)
-        queue = list_directory(str(directory))
-    else:
-        paths = [arg for arg in argv if Path(arg).exists()]  # Filter valid paths from argv
-        if not paths:
-            console.print("[red]No valid paths provided.[/red]")
-            sys.exit(1)
-        queue = [str(Path(path).resolve()) for path in paths]
-
-    if not queue:
-        console.print("[red]No valid items to process.[/red]")
-        sys.exit(1)
-
-    if meta.get("show_queue") or meta.get("debug"):
-        console.print("\n[bold green]Queuing these files:[/bold green]")
-        console.print(Markdown("\n- " + "\n- ".join(queue), style=Style(color="cyan")))
-    console.print(f"\nUnique uploads queued: [bold cyan]{len(queue)}[/bold cyan]")
-    return queue
+def expand_auto_queue(argv: List[str]) -> List[str]:
+    """Expand --auto-queue DIR → list of paths in DIR (non-hidden)"""
+    expanded: List[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-aq", "--auto-queue"):
+            if i + 1 >= len(argv):
+                console.print("[red]--auto-queue requires a directory[/red]")
+                sys.exit(1)
+            dir_path = Path(argv[i + 1])
+            if not dir_path.is_dir():
+                console.print(f"[red]--auto-queue directory not found: {dir_path}[/red]")
+                sys.exit(1)
+            for entry in dir_path.iterdir():
+                if not entry.name.startswith(".") and entry.exists():
+                    expanded.append(str(entry.resolve()))
+            i += 2
+        else:
+            expanded.append(arg)
+            i += 1
+    return expanded
 
 
 def list_directory(directory: str) -> List[str]:

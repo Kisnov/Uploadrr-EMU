@@ -1,14 +1,14 @@
 #!/usr/bin/env python
+from __future__ import annotations
 
 import asyncio
 import sys
 import time
-import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import src.utils.imports  # noqa: F401
-from src.args import Args
+from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args
 from src.cleanrr import CleanupHandler
 from src.clients import Clients
 from src.exceptions import BDInfoExtractionError
@@ -20,7 +20,7 @@ from src.utils.config import check_python_version, load_yaml_config
 from src.utils.console import console, log, redactor, set_log_level
 from src.utils.loads import load_trackers
 from src.utils.meta import edit_meta, load_existing_meta, save_meta
-from src.utils.queue import apply_delay, normalize_trackers, prepare_queue
+from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
 from src.utils.upload import get_confirmation, upload_to_trackers
@@ -39,82 +39,169 @@ class Uploadrr:
         self.config = config
         self.handler = CleanupHandler(name="Uploadrr")
         self.client = Clients(config=self.config)
-        self.parser = Args(config=self.config)
 
     async def do_the_thing(self, base_dir: Path) -> None:
-        """Main upload orchestration method."""
         print_banner()
-        meta = {"base_dir": str(base_dir)}
-        meta, _, _ = self.parser.parse(sys.argv[1:], meta)  # Note: parser returns meta, parser, _
-        set_log_level(debug=meta.get("debug", False), ddebug=meta.get("deep_debug", False), quiet=meta.get("quiet", False))
+        base_meta: Dict[str, Any] = {"base_dir": str(base_dir)}
+        raw_argv = sys.argv[1:]
 
-        trackers = normalize_trackers(meta)
-        tracker_registry = load_trackers(trackers, self.config)
-        if not any(t in tracker_registry or t == "MANUAL" for t in trackers):
-            console.print(f"[bold red]No valid trackers: {', '.join(trackers)}[/bold red]", justify="center")
+        # =====================================================================
+        # 1. EARLY EXPANSION: --auto-queue → inject paths
+        # =====================================================================
+        expanded_argv = expand_auto_queue(raw_argv)
+        console.print(f"[yellow]DEBUG: Expanded args: {expanded_argv}[/yellow]")
+
+        # =====================================================================
+        # 2. GROUP CLI: per-item blocks + global trailing args
+        # =====================================================================
+        items, global_argv = group_args_by_path(expanded_argv)
+        console.print(f"[yellow]DEBUG: Items (arg_block, path): {items}[/yellow]")
+        console.print(f"[yellow]DEBUG: Global args: {global_argv}[/yellow]")
+
+        if not items:
+            console.print("[red]❌ No valid paths to process.[/red]")
             sys.exit(1)
 
-        queue = prepare_queue(meta, sys.argv[1:])  # Adjusted to pass sys.argv[1:] for paths
-        if not queue:
-            sys.exit(0)
+        # =====================================================================
+        # 3. BUILD PARSER
+        # =====================================================================
+        parser = build_parser(self.config)
 
+        # =====================================================================
+        # 4. PARSE GLOBAL ARGS
+        # =====================================================================
         try:
-            await self._process_queue(queue, meta, trackers, tracker_registry, base_dir)
+            global_ns = parser.parse_args(global_argv)
+            enforce_global_only(global_ns, is_global=True, parser=parser)
+        except SystemExit:
+            # argparse calls sys.exit(2) on error — catch and re-raise cleanly
+            console.print("[red]❌ Error parsing global arguments.[/red]")
+            sys.exit(1)
+        except Exception as e:
+            console.print(f"[red]❌ Global arg parsing failed: {e}[/red]")
+            sys.exit(1)
+
+        global_meta = normalize_args(global_ns)
+        global_meta = apply_special_logic({**base_meta, **global_meta})
+        console.print(f"[yellow]DEBUG: Global meta (after logic): {global_meta}[/yellow]")
+
+        # =====================================================================
+        # 5. PARSE & MERGE PER-ITEM ARGS
+        # =====================================================================
+        queue: List[Dict[str, Any]] = []
+        for i, (arg_block, path) in enumerate(items, 1):
+            item_updates: Dict[str, Any] = {}
+            if arg_block:
+                try:
+                    ns = parser.parse_args(arg_block)
+                    enforce_global_only(ns, is_global=False)
+                    raw = normalize_args(ns)
+                    item_updates = {k: v for k, v in raw.items() if v is not None and v != [] and v != ""}
+                except Exception as e:
+                    console.print(f"[red]❌ Item {i} ({path}): {e}[/red]")
+                    sys.exit(1)
+
+            item_meta = {**global_meta, **item_updates}
+            item_meta = apply_special_logic(item_meta)
+            item_meta["path"] = path
+            queue.append(item_meta)
+            console.print(f"[green]✔ Item {i}: {Path(path).name} → {len(item_meta)} meta keys[/green]")
+
+        # =====================================================================
+        # 6. SET LOG LEVEL (from final global meta)
+        # =====================================================================
+        set_log_level(
+            debug=global_meta.get("debug", False), ddebug=global_meta.get("deep_debug", False), quiet=global_meta.get("quiet", False)
+        )
+
+        # =====================================================================
+        # 7. SHOW QUEUE (if requested)
+        # =====================================================================
+        if global_meta.get("show_queue") or global_meta.get("debug"):
+            console.print("\n[bold green]Queuing these files:[/bold green]")
+            paths = [Path(item["path"]).name for item in queue]
+            from rich.markdown import Markdown
+            from rich.style import Style
+
+            console.print(Markdown("\n- " + "\n- ".join(paths), style=Style(color="cyan")))
+            console.print(f"\nUnique uploads queued: [bold cyan]{len(paths)}[/bold cyan]\n")
+
+        # =====================================================================
+        # 8. VALIDATE TRACKERS
+        # =====================================================================
+        trackers = normalize_trackers(global_meta)
+        tracker_registry = load_trackers(trackers, self.config)
+        if not any(t in tracker_registry or t == "MANUAL" for t in trackers):
+            console.print(f"[bold red]❌ No valid trackers: {', '.join(trackers)}[/bold red]")
+            sys.exit(1)
+
+        # =====================================================================
+        # 9. RUN QUEUE
+        # =====================================================================
+        try:
+            await self._process_queue(queue, global_meta, trackers, tracker_registry, base_dir)
         except KeyboardInterrupt:
-            raise
+            console.print("\n[yellow]⚠️ Upload interrupted by user.[/yellow]")
+            sys.exit(1)
 
     async def _process_queue(
-        self, queue: List[str], base_meta: Dict, trackers: List[str], tracker_registry: Dict, base_dir: Path
+        self,
+        queue: List[Dict[str, Any]],
+        global_meta: Dict[str, Any],
+        trackers: List[str],
+        tracker_registry: Dict[str, Any],
+        base_dir: Path,
     ) -> None:
+        """Process the upload queue — one item at a time."""
+
         log.info("[yellow]Starting queue processing[/yellow]")
-        total_files = len(queue)
-        successful_uploads = 0
-        skipped_files = 0
-        skipped_details = []
-        skipped_tmdb_files = []
+        total = len(queue)
+        progress = ProgressManager(console, quiet=global_meta.get("quiet", False), unattended=global_meta.get("unattended", False))
+        progress.start(total)
 
         screenshot_manager = ScreenshotManager(config=self.config, base_dir=base_dir)
         self.screenshot_manager = screenshot_manager
 
-        progress = ProgressManager(console, quiet=base_meta.get("quiet", False), unattended=base_meta.get("unattended", False))
-        progress.start(total_files)
+        successful = skipped = 0
+        skipped_details = []
+        skipped_tmdb = []
 
         try:
-            for i, path in enumerate(queue, 1):
-                item_path = Path(path).name
-                progress.update(f"Processing {item_path} ({i}/{total_files})")
+            for idx, item_meta in enumerate(queue, 1):
+                path = item_meta["path"]
+                item_name = Path(path).name
+                progress.update(f"Processing {item_name} ({idx}/{total})")
 
-                meta = dict(base_meta)
-                meta["path"] = path
-                meta["uuid"] = meta.get("uuid") or item_path
+                console.print(f"[DEBUG] >> META B4 LOAD:\n {item_meta}")
+                item_meta = await load_existing_meta(base_dir, path, item_meta)
+                console.print(f"[magenta][DEBUG] >> META AFTER LOAD[/magenta]:\n {item_meta}")
+                await apply_delay(item_meta, self.config)
 
-                meta = await load_existing_meta(base_dir, path, meta)
-                await apply_delay(meta, self.config)
                 prep = Prep(config=self.config, base_dir=base_dir)
                 try:
-                    meta = await prep.gather_prep(meta=meta, mode="cli")
+                    item_meta = await prep.gather_prep(meta=item_meta, mode="cli")
                 except BDInfoExtractionError as e:
                     log.warning(f"[yellow]Skipping due to prep error: {e}[/yellow]")
-                    progress.update(f"Processing {item_path}: Skipped (Prep error)")
-                    skipped_files += 1
+                    progress.update(f"Processing {item_name}: Skipped (Prep error)")
+                    skipped += 1
                     skipped_details.append((path, "Prep error"))
                     continue
 
-                await save_meta(meta, base_dir, meta["uuid"])
+                await save_meta(item_meta, base_dir, item_meta["uuid"])
 
-                if meta.get("tmdb_not_found"):
-                    progress.update(f"Processing {item_path}: Skipped (TMDB not found)")
-                    skipped_files += 1
+                if item_meta.get("tmdb_not_found"):
+                    progress.update(f"Processing {item_name}: Skipped (TMDB not found)")
+                    skipped += 1
                     skipped_details.append((path, "TMDB not found"))
-                    skipped_tmdb_files.append(path)  # Collect for summary
+                    skipped_tmdb.append(path)
                     continue
 
                 tracker_upload_ok = await pre_upload_checks(
-                    meta, trackers, tracker_registry, skipped_details, path, progress, self.config
+                    item_meta, trackers, tracker_registry, skipped_details, path, progress, self.config
                 )
                 if not any(tracker_upload_ok.values()):
-                    progress.update(f"Processing {item_path}: Skipped (pre-upload checks failed)")
-                    skipped_files += 1
+                    progress.update(f"Processing {item_name}: Skipped (pre-upload checks failed)")
+                    skipped += 1
                     skipped_details.append((path, "Pre-upload checks failed"))
                     continue
 
@@ -125,49 +212,51 @@ class Uploadrr:
                     if t in tracker_registry
                 }
 
-                if int(meta.get("screens", 0)) > 0 or len(meta.get("user_images", [])) > 0:
-                    meta = await screenshot_manager.handle_screenshots(meta, tracker_whitelists)
-                    await save_meta(meta, base_dir, meta["uuid"])
+                if int(item_meta.get("screens", 0)) or item_meta.get("user_images"):
+                    item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
+                    await save_meta(item_meta, base_dir, item_meta["uuid"])
 
-                meta = await handle_torrent_creation(self.config, meta)
+                item_meta = await handle_torrent_creation(self.config, item_meta)
 
-                if not meta.get("unattended"):
+                if not item_meta.get("unattended"):
                     with progress.pause_for_interaction():
-                        confirm = await get_confirmation(meta, viable_trackers, tracker_registry, self.config)
+                        confirm = await get_confirmation(item_meta, viable_trackers, tracker_registry, self.config)
                         if not confirm:
-                            meta = await edit_meta(prep, meta, viable_trackers, tracker_registry, self.config)
-                        if not meta:
-                            progress.update(f"Processing {Path(path).name}: Skipped (user cancelled)")
-                            skipped_files += 1
+                            item_meta = await edit_meta(prep, item_meta, viable_trackers, tracker_registry, self.config)
+                        if not item_meta:
+                            progress.update(f"Processing {item_name}: Skipped (user cancelled)")
+                            skipped += 1
                             skipped_details.append((path, "User cancelled"))
                             continue
                 else:
                     console.print(f"[yellow]Unattended mode: Skipping confirmation for {path}[/yellow]")
 
-                success, skip = await upload_to_trackers(
-                    meta,
+                success, _ = await upload_to_trackers(
+                    item_meta,
                     trackers,
                     tracker_registry,
-                    successful_uploads,
-                    skipped_files,
+                    successful,
+                    skipped,
                     skipped_details,
                     path,
                     progress,
                     self.client,
                     self.config,
                 )
-                successful_uploads += 1 if success else 0
-                skipped_files += 1 if not success else 0
+                successful += int(success)
+                skipped += int(not success)
 
-                progress.update(f"Processing {Path(path).name}: {'Uploaded' if success else 'Skipped'}")
+                progress.update(f"Processing {item_name}: {'Uploaded' if success else 'Skipped'}")
 
         except KeyboardInterrupt:
             progress.update("Cancelling...")
             raise
         finally:
-            await save_meta(meta, base_dir, meta["uuid"])
+            if "item_meta" in locals():
+                await save_meta(item_meta, base_dir, item_meta.get("uuid"))
             progress.stop()
-        print_summary(total_files, successful_uploads, skipped_files, skipped_details, skipped_tmdb_files)
+
+        print_summary(total, successful, skipped, skipped_details, skipped_tmdb)
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""

@@ -10,7 +10,7 @@ from pymediainfo import MediaInfo
 
 from src.utils.console import console, log
 
-from .args import Args
+from .args import parse_tmdb_id
 
 
 class MediaInfoHandler:
@@ -508,8 +508,7 @@ class MediaInfoHandler:
                 extra = mi["media"]["track"][0]["extra"]
                 for key in extra:
                     if key.lower().startswith("tmdb"):
-                        parser = Args(config=self.config)
-                        category, tmdbid = parser.parse_tmdb_id(id=extra[key], category=category)
+                        category, tmdbid = parse_tmdb_id(id=extra[key], category=category)
                     if key.lower().startswith("imdb"):
                         try:
                             imdbid = str(int(extra[key].replace("tt", ""))).zfill(7)
