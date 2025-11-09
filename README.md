@@ -1,3 +1,15 @@
+>[!WARNING]  
+> Branches recently changed where `v2` is the default and now `main`  
+> The old default `master` branch is now `legacy`  
+> **To update your local repo:**
+> ```bash  
+>git checkout v2
+>git branch -m main
+>git branch -u origin/main main
+>```
+> To keep using legacy do the same just swap `v2` -> `master` and `main` -> `legacy`
+
+
 # Uploadrr
 
 Uploadrr is a tool for preping and uploading torrents for Movies, TV Shows + Music. It automates metadata gathering, screenshot generation, torrent creation, and uploading to various private trackers.
