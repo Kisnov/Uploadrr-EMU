@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 from typing import Any, Dict
 
-from src.trackers.UNIT3D import Unit3d
+from src.mediainfo import MediaInfoHandler
+
+from .UNIT3D import Unit3d
 
 
 class RHD(Unit3d):
@@ -8,86 +12,131 @@ class RHD(Unit3d):
     source_flag = "RocketHD"
     domain = "https://rocket-hd.cc"
     allowed_imghosts = []
-    banned_groups = [  # Updated 25-08-29 == https://rocket-hd.cc/pages/1
+    # Updated 25-11-11 == https://rocket-hd.cc/wikis/4
+    banned_groups = [
         "1XBET",
-        "MEGA",
-        "MTZ",
-        "Whistler",
-        "WOTT",
-        "Taylor.D",
-        "HELD",
+        "266ers",
+        "2BA",
+        "BB",
+        "CAM",
         "FSX",
         "FuN",
-        "MagicX",
-        "w00t",
-        "PaTroL",
-        "BB",
-        "266 ers",
         "GTF",
+        "HELD",
         "JellyfinPlex",
-        "2BA",
+        "LD",
+        "MagicX",
+        "MEGA",
+        "Mic",
+        "MTZ",
+        "PaTroL",
+        "Taylor.D",
+        "TS",
+        "Whistler",
+        "w00t",
+        "WOTT",
     ]
 
+    @staticmethod
+    def _detect_german(uuid: str) -> str:
+        """
+        Return one of:  "", "GERMAN", "GERMAN DL", "GERMAN SUBBED"
+
+        The MediaInfo JSON lives in ``MediaInfoHandler._instance._cache[uuid]``.
+        """
+        handler = MediaInfoHandler._instance
+        if handler is None or uuid not in handler._cache:
+            return ""
+
+        mi = handler._cache[uuid]
+        tracks = mi.get("media", {}).get("track", [])
+        if not isinstance(tracks, list):
+            tracks = []
+
+        german_audio = False
+        other_audio_langs = set()
+        german_text = False
+
+        for t in tracks:
+            typ = t.get("@type", "").lower()
+            lang = str(t.get("Language", "")).lower()
+            title = str(t.get("Title", "")).lower()
+
+            # Filter out musical scores/commentary
+            is_commentary = "comment" in title or "review" in title
+            is_nonverbal = lang == "zxx" or "score" in title
+
+            if typ == "audio" and not is_commentary and not is_nonverbal:
+                if lang in {"de", "ger", "deu"} or "german" in title:
+                    german_audio = True
+                else:
+                    other_audio_langs.add(lang)
+
+            if typ == "text":
+                if lang in {"de", "ger", "deu"} or "german" in title:
+                    german_text = True
+
+        if german_text and not german_audio:
+            return "GERMAN SUBBED"
+        if german_audio:
+            if len(other_audio_langs) >= 2:
+                return "GERMAN ML"
+            elif len(other_audio_langs) == 1:
+                return "GERMAN DL"
+            else:
+                return "GERMAN"
+        return ""
+
+    @staticmethod
+    def _build_overrides(meta: Dict[str, Any]) -> Dict[str, Any]:
+        """Values that are injected into the template before formatting."""
+        overrides: Dict[str, Any] = {}
+
+        # ---- GERMAN (DL/SUBBED)-----------------------------------------
+        overrides["lang"] = RHD._detect_german(meta["uuid"])
+
+        # ---- TITLE -----------------------------------------------------
+        if meta.get("original_language") == "de":
+            overrides["title"] = meta.get("original_title") or meta.get("Title", "")
+
+        else:
+            akas = meta.get("imdb_info", {}).get("akas", [])
+            ger_title = None
+
+            for aka in akas:
+                if aka.get("language") == "de":
+                    ger_title = aka["title"]
+                    break
+
+            if ger_title:
+                main_title = meta.get("Title", "")
+                if ger_title.strip().lower() != main_title.strip().lower():
+                    overrides["title"] = f"{ger_title} AKA {main_title}"
+                else:
+                    overrides["title"] = ger_title
+            else:
+                aka = meta.get("aka", "")
+                if aka:
+                    aka = f" AKA {aka}"
+                overrides["title"] = f"{meta.get('Title', '')}{aka}"
+
+        # ---- GROUP TAG -------------------------------------------------
+        tag = meta.get("tag", "")
+        if not tag:
+            tag = "NOGRP"
+        overrides["tag"] = tag
+
+        return overrides
+
     async def edit_name(self, meta: Dict[str, Any]) -> str:
-        rhd_name = meta["name"]
-        lang_tag = ""
-        _known = {
-            "4K",
-            "UHD",
-            "1080P",
-            "720P",
-            "HDR",
-            "DV",
-            "DOLBY.VISION",
-            "HDR10",
-            "HDR10+",
-            "HLG",
-            "REMUX",
-            "BLURAY",
-            "WEB-DL",
-            "WEBDL",
-            "WEB",
-            "HDTV",
-            "SD",
+        from src.name import NameGenerator
+
+        template = {
+            "MOVIE": "{title} {year} {lang} {audio} {resolution} {source} {hdr} {video_codec}{tag}",
+            "TV": "{title} {year_opt} {season}{episode} {episode_title} {lang} {audio} {resolution} {source} {hdr} {video_codec}{tag}",
         }
-        for track in meta.get("mediainfo", {}).get("media", {}).get("track", []):
-            if track.get("@type") == "Audio":
-                lang = track.get("Language", "").lower()
-                title = track.get("Title", "").lower()
-                if lang in ("de", "ger", "deu", "german") or "german" in title:
-                    lang_tag = "GERMAN"
-                    break
-            if track.get("@type") == "Text":
-                lang = track.get("Language", "").lower()
-                title = track.get("Title", "").lower()
-                if lang in ("de", "ger", "deu", "german") or "german" in title:
-                    lang_tag = "GERMAN SUBBED"
-                    break
-        if meta.get("dual_audio"):
-            lang_tag = "GERMAN DL"
-        if meta.get("uhd"):
-            lang_tag = lang_tag + " UHD" if lang_tag else "UHD"
-        name_parts = [
-            part
-            for part in [
-                meta.get("edition"),
-                meta.get("hybrid") + " HYBRID" if meta.get("hybrid") else "",
-                meta.get("source"),
-                meta.get("uhd"),
-            ]
-            if part
-        ]
-        if lang_tag:
-            name_parts = rhd_name.split()
-            existing_lang_tags = {"GERMAN", "GERMAN DL", "GERMAN ML", "GERMAN SUBBED"}
-            name_parts = [part for part in name_parts if part.upper() not in existing_lang_tags]
-            insert_index = next((i for i, part in enumerate(name_parts) if part.upper() in _known), len(name_parts))
-            name_parts.insert(insert_index, lang_tag)
-            rhd_name = " ".join(name_parts)
-        if lang_tag == "GERMAN DL":
-            rhd_name = rhd_name.replace("Dual-Audio ", "")
-        if not meta.get("tag") and not (rhd_name.endswith("-NOGRP") or rhd_name.endswith("-NOGROUP")):
-            rhd_name += "-NOGRP"
-            rhd_name = " ".join(rhd_name.split())
-            meta["rhd_name"] = rhd_name
+
+        overrides = self._build_overrides(meta)
+        rhd_name = await NameGenerator().generate_tracker_name(meta, self.tracker, template, overrides)
+
         return rhd_name
