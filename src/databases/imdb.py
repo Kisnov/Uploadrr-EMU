@@ -148,6 +148,19 @@ class IMDbHandler:
 
             akas_list.append(aka_info)
 
+        # Dedupe AKAs
+        seen = set()
+        deduped_akas = []
+        for item in akas_list:
+            title_norm = item["title"].strip().lower()
+            lang = item.get("language")
+            country = item.get("country", "") if "country" in item else ""
+            key = (title_norm, lang or country)
+            if key not in seen:
+                seen.add(key)
+                deduped_akas.append(item)
+        akas_list = deduped_akas
+
         if orig_lang == "en":
             return "", self._normalize_language(info.languages), akas_list
 
