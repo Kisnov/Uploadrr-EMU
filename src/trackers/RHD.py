@@ -109,7 +109,7 @@ class RHD(Unit3d):
                     break
 
             if ger_title:
-                main_title = meta.get("Title", "")
+                main_title = meta.get("original_title", "")
                 if ger_title.strip().lower() != main_title.strip().lower():
                     overrides["title"] = f"{ger_title} AKA {main_title}"
                 else:
@@ -118,7 +118,7 @@ class RHD(Unit3d):
                 aka = meta.get("aka", "")
                 if aka:
                     aka = f" AKA {aka}"
-                overrides["title"] = f"{meta.get('Title', '')}{aka}"
+                overrides["title"] = f"{meta.get('original_title', '')}{aka}"
 
         # ---- GROUP TAG -------------------------------------------------
         tag = meta.get("tag", "")
@@ -132,8 +132,8 @@ class RHD(Unit3d):
         from src.name import NameGenerator
 
         template = {
-            "MOVIE": "{title} {year} {lang} {audio} {resolution} {source} {hdr} {video_codec}{tag}",
-            "TV": "{title} {year_opt} {season}{episode} {episode_title} {lang} {audio} {resolution} {source} {hdr} {video_codec}{tag}",
+            "MOVIE": "{title} {year} {cut} {ratio} {edition} {repack} {lang} {audio} {resolution} {uhd} {source} {hdr} {video_codec}{tag}",
+            "TV": "{title} {year} {season}{episode} {episode_title} {part} {cut} {ratio} {edition} {repack} {lang} {audio} {resolution} {uhd} {source} {hdr} {video_codec}{tag}",
         }
 
         overrides = self._build_overrides(meta)
