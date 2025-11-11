@@ -233,7 +233,7 @@ class Unit3d:
                                         torrent_data = torrent_response.content
                                         new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
                                         new_torrent.write_bytes(torrent_data)
-                                        url = raw_url.replace("/download", "")
+                                        url = raw_url.replace("/download", "s")
                                         url = re.sub(r"/(\d+)\..*$", r"/\1", url)
                                         comment = f"Made by Uploadrr for: {url}"
                                         await edit_torrent(torrent_path=new_torrent, comment=comment)
