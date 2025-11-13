@@ -76,8 +76,61 @@ class NameGenerator:
             "WAV": "{artist} - {album} ({year}) {edition} [{source} {type} {bit_depth}bit]",
             "default": "{artist} - {album} ({year}) {edition} [{source} {type} {bitrate}]",
         },
+        "XXX": {
+            "default": "{title} ({year}) {resolution} {source} {audio} {video_encode}",
+        },
     }
     # fmt: on
+
+    @staticmethod
+    def _xxx_network(meta: Dict) -> str:
+        """Get XXX network from porndb data."""
+        porndb = meta.get("porndb", {})
+        parent = porndb.get("parent", "")
+        network = porndb.get("network", "")
+        site = porndb.get("site", "")
+        candidates = [(parent, parent.lower()), (network, network.lower()), (site, site.lower())]
+
+        parts = []
+        for i, (val, lval) in enumerate(candidates):
+            if not val:
+                continue
+            redundant = False
+            for j in range(i + 1, len(candidates)):
+                if candidates[j][1] and lval in candidates[j][1]:
+                    redundant = True
+                    break
+            if redundant:
+                continue
+            if lval not in [p.lower() for p in parts]:
+                styled_val = NameGenerator._stylize(val)
+                parts.append(styled_val)
+
+        return "[" + "/".join(parts) + "] " if parts else ""
+
+    @staticmethod
+    def _stylize(val: str) -> str:
+        """Stylize the value with special cases and conditional title casing."""
+        if not val:
+            return ""
+        specials = {"onlyfans": "OnlyFans", "manyvids": "ManyVids"}
+        if ":" in val:
+            subparts = val.split(":")
+        else:
+            subparts = [val]
+        styled_subparts = []
+        for p in subparts:
+            if not p:
+                continue
+            sl = p.lower()
+            if sl in specials:
+                styled_subparts.append(specials[sl])
+            else:
+                if any(c.isupper() for c in p[1:]):
+                    styled_subparts.append(p)
+                else:
+                    styled_subparts.append(p.title())
+        return ":".join(styled_subparts)
 
     @staticmethod
     def get_template(
@@ -118,7 +171,7 @@ class NameGenerator:
 
         # Fall back to built-in templates (original logic)
         templates = NameGenerator.NAMING_TEMPLATES.get(category, {})
-        if category == "MUSIC":
+        if category in ("MUSIC", "XXX"):
             return templates.get(media_type, templates["default"])
         if media_type == "DISC":
             return templates[media_type].get(is_disc, "")
@@ -179,6 +232,18 @@ class NameGenerator:
             except (KeyError, ValueError) as e:
                 log.warning(f"Template formatting error: {e}")
                 name_notag = "TEMPLATE_ERROR"
+
+        if category == "XXX":
+            sites = self._xxx_network(processed_meta)
+            name_notag = sites + name_notag
+            tag = meta.get("tag")
+            date = meta.get("porndb", {}).get("date")
+            if not isinstance(tag, str) or not tag.strip():
+                meta["tag"] = "-NOGRP"
+            elif tag[1:].replace(" ", "").lower() in sites.lower():
+                meta["tag"] = "-NOGRP"
+            if meta.get("xscene") and date:
+                name_notag = name_notag.replace(f"{meta['year']}", f"{date}")
 
         tag = "" if meta.get("no_tag") or not meta.get("tag") else meta["tag"]
         name = name_notag + tag if tag and not name_notag.endswith(tag) else name_notag

@@ -1,12 +1,12 @@
 import itertools
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from rich.prompt import Prompt
 from rich.text import Text
 
-from src.args import Args
+from src.args import apply_special_logic, build_parser, enforce_global_only, normalize_args
 from src.name import NameGenerator
 from src.utils.console import console, log
 
@@ -36,7 +36,9 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "no_season", "no_year", "nohash", "path", "personal_release", "ptp", "qbit_cat",
         "qbit_tag", "randomized", "rehash", "region", "screens", "season",
         "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation", "trackers",
-        "tmdb_manual", "type", "unattended", "webdv",
+        "tmdb_manual", "pdb_manual", "type", "unattended", "webdv",
+        # XXX keys
+        "jav", "pack", "user_cover", "user_banner", "user_trailer", "xmovies", "xscene", "xxx"
     ]
     # fmt: on
     my_meta = {
@@ -67,43 +69,69 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         for key, value in new_meta.items():
             if key not in my_meta:
                 my_meta[key] = value
-    log.debug(f"meta keys after load_existing_meta: {list(my_meta.keys())}")
+    log.ddebug(f"meta keys after load_existing_meta: {list(my_meta.keys())}")
     return my_meta
 
 
-async def edit_meta(prep, meta: Dict, trackers: Optional[List[str]], tracker_registry: Optional[Dict], config: Dict) -> Optional[Dict]:
-    """Handle manual metadata correction."""
+async def edit_meta(
+    prep, meta: Dict[str, Any], trackers: Optional[List[str]], tracker_registry: Optional[Dict], config: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Handle manual metadata correction with CLI-like editing."""
+    parser = build_parser(config)  # reuse standard parser
+
     while True:
         console.print("Input args to correct (e.g., --tag PMEDIA --tmdb 12345) or 'skip'")
-        editargs = Prompt.ask("")
-        if editargs.lower() == "skip":
-            return None
-        if not editargs:
-            console.print("Invalid input. Try again or 'skip'.", style="dim")
-            continue
-        editargs = (meta["path"],) + tuple(editargs.split())
-        if meta.get("debug"):
-            editargs += ("--debug",)
+        raw_input = Prompt.ask("").strip()
 
-        new_meta, _, _ = Args(config=config).parse(editargs, meta)
+        if raw_input.lower() == "skip":
+            return None
+
+        if not raw_input:
+            console.print("⚠️ Invalid input. Try again or 'skip'.", style="dim")
+            continue
+
+        try:
+            edit_argv = raw_input.split()
+            ns = parser.parse_args(edit_argv)
+            enforce_global_only(ns, is_global=False)
+
+        except (ValueError, SystemExit, Exception) as e:
+            console.print(f"[red]❌ Parse error: {e}[/red]")
+            console.print("[dim]Hint: Use --flag value (e.g., --tmdb 12345, --tag GROUP)[/dim]")
+            continue
+
+        edit_meta_dict = normalize_args(ns)
+        new_meta = {**meta, **edit_meta_dict}
+        new_meta = apply_special_logic(new_meta)
         new_meta["edit"] = True
 
         base_dir = Path(meta["base_dir"])
-        meta = await load_existing_meta(base_dir, meta["path"], new_meta)
+        new_meta = await load_existing_meta(base_dir, meta["path"], new_meta)
 
-        reprocess_keys = ["tmdb_manual", "imdb", "mbid", "discogs"]
-        if any(key in new_meta for key in reprocess_keys):
-            meta = await prep.gather_prep(meta=meta, mode="cli")
-        if meta["category"] != "SPORTS":
+        reprocess_keys = ["tmdb_manual", "imdb", "mbid", "discogs", "pdb_manual"]
+        if any(key in edit_meta_dict for key in reprocess_keys):
+            new_meta = await prep.gather_prep(meta=new_meta, mode="cli")
+
+        # Regenerate name (if non-sports)
+        if new_meta.get("category", "").upper() != "SPORTS":
             name_gen = NameGenerator()
-            meta["name_notag"], meta["name"], meta["clean_name"], meta["potential_missing"] = await name_gen.get_name(meta)
+            (
+                new_meta["name_notag"],
+                new_meta["name"],
+                new_meta["clean_name"],
+                new_meta["potential_missing"],
+            ) = await name_gen.get_name(new_meta)
 
-        await save_meta(meta, base_dir, meta["uuid"])
+        # Save
+        await save_meta(new_meta, base_dir, new_meta["uuid"])
 
+        # Confirm
         from src.utils.upload import get_confirmation
 
-        if await get_confirmation(meta, trackers, tracker_registry, config):
-            return meta
+        if await get_confirmation(new_meta, trackers, tracker_registry, config):
+            return new_meta
+
+        meta = new_meta
 
 
 def get_missing(meta: Dict) -> None:

@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+from pymediainfo import MediaInfo
 
 from src.utils.console import log
 
@@ -8,26 +10,34 @@ from src.utils.console import log
 class ContactSheetGenerator:
     def __init__(self, config, base_dir, media_info_handler):
         self.config = config
+        self.contact = self.config.get("ADULT", {}).get("contact_sheet", {})
+        self.logo = self.contact.get("logo", {})
         self.base_dir = Path(base_dir)
         self.mihandle = media_info_handler
 
-    async def generate_contact_sheet(self, screenshots, meta, output_path, rows, columns):
+    async def generate_contact_sheet(self, screenshots, meta, output_path, rows, columns, video_file=None):
         """Generate contact sheet using cached MediaInfo metadata and screenshots."""
         if not screenshots:
             log.warning("No screenshots provided for contact sheet generation")
             return
 
-        media_info = self.mihandle._cache.get(meta["uuid"], {})
+        if video_file:
+            mi_json = MediaInfo.parse(video_file, output="JSON")
+            mi = json.loads(mi_json)
+
+        else:
+            video_file = meta["video_files"][0]
+            mi = self.mihandle._cache.get(meta["uuid"], {})
+
         general_track = None
         video_track = None
 
-        for track in media_info.get("media", {}).get("track", []):
+        for track in mi.get("media", {}).get("track", []):
             if track.get("@type") == "General":
                 general_track = track
             elif track.get("@type") == "Video":
                 video_track = track
 
-        filename = general_track.get("FileName", "Unknown File") if general_track else "Unknown File"
         duration_str = general_track.get("Duration_String4", "00:00:00") if general_track else "00:00:00"
         file_size_str = general_track.get("FileSize_String3", "0 B") if general_track else "0 B"
 
@@ -38,13 +48,13 @@ class ContactSheetGenerator:
         fps = video_track.get("FrameRate_String", "") if video_track else ""
         bitrate_str = bitrate if fps == "" else f"{bitrate} @ {fps}"
 
-        if not filename or filename == "Unknown File":
-            filename = Path(meta["uuid"]).stem
+        filename = Path(video_file).stem
+        sorted_screens = sorted(screenshots, key=lambda x: x.get("ss_time", 0))
 
         cached_screenshots = meta.get("cached_screenshots", [])
         if not cached_screenshots:
             log.warning(f"No cached screenshots found for UUID {meta['uuid']}, falling back to input list")
-            full_screenshot_list = screenshots
+            full_screenshot_list = sorted_screens
         else:
             full_screenshot_list = [
                 ss
@@ -56,7 +66,7 @@ class ContactSheetGenerator:
             full_screenshot_list.sort(key=lambda x: x.get("ss_time", 0))
 
         if not full_screenshot_list:
-            full_screenshot_list = screenshots
+            full_screenshot_list = sorted_screens
 
         total_needed = rows * columns
         if len(full_screenshot_list) < total_needed:
@@ -96,7 +106,7 @@ class ContactSheetGenerator:
         # --- FONTS --- #
         font_size_header = 22
         font_size_meta = 18
-        font_size_logo_text = 32
+        font_size_logo_text = self.logo.get("size", 32)
         myfont = self.config["SCREENS"].get("font")
         font_path = myfont if myfont else str(self.base_dir / "src" / "screenshots" / "fonts" / "dosis.ttf")
         logo_font_path = str(self.base_dir / "src" / "screenshots" / "fonts" / "sexandbreakfast.ttf")
@@ -125,7 +135,7 @@ class ContactSheetGenerator:
         draw.text((meta1_x, meta1_y), fileinfo, fill=(200, 200, 200), font=font_meta)
 
         # --- LOGO (Image or Text) --- #
-        logo_path = self.config["SCREENS"]["contact_sheet"].get("logo")
+        logo_path = self.logo.get("image", None)
         logo = None
         logo_x = 0
         logo_y = 0
@@ -144,8 +154,8 @@ class ContactSheetGenerator:
 
         # If no valid image logo, use text-based logo
         if not logo:
-            logo_text = self.config["SCREENS"]["contact_sheet"].get("logo_text", "uploadrr")
-            logo_text_color = self.config["SCREENS"]["contact_sheet"].get("logo_text", {}).get("color", (255, 255, 255))
+            logo_text = self.logo.get("text", "uploadrr")
+            logo_text_color = self.logo.get("color", (255, 255, 255))
             if isinstance(logo_text_color, str):
                 try:
                     logo_text_color = tuple(int(logo_text_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))

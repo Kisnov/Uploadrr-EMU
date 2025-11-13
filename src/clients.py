@@ -413,6 +413,7 @@ class Clients:
         if save_path.is_dir() and (
             (meta.get("category") in {"Anime", "MOVIE", "TV", "XXX"} and len(meta.get("video_files", [])) > 1)
             or meta.get("category") == "MUSIC"
+            and len(meta.get("music_files", [])) > 1
         ):
             path_str = str(Path(path_str).parent)
         if not path_str.endswith("/"):
@@ -604,7 +605,10 @@ class Clients:
 
     def _adjust_path(self, save_path: Path, local_path: str, remote_path: str) -> str:
         """Adjust save path for remote mapping."""
+        if not save_path.is_dir():
+            save_path = save_path.parent
         path_str = str(save_path)
+
         if local_path.lower() in path_str.lower() and local_path != remote_path:
             path_str = path_str.replace(local_path, remote_path).replace("\\", "/")
         return path_str

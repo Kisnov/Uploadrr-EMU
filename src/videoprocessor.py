@@ -3,7 +3,7 @@ import functools
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
 
 import aiofiles
 import anitopy
@@ -11,7 +11,7 @@ import requests
 from guessit import guessit
 from pymediainfo import MediaInfo
 
-from src.databases import AniListHandler, IMDbHandler, TMDbHandler, is_scene, search_tvmaze
+from src.databases import AniListHandler, IMDbHandler, PornDbHandler, TMDbHandler, is_scene, search_tvmaze
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
 from src.progress import ProgressManager
@@ -19,6 +19,11 @@ from src.utils.console import console
 
 from .utils.loads import get_distributor, get_region, load_json
 from .utils.meta import find_largest_clpi, get_dvd_size, get_video_codec
+from .utils.trailer import create_trailer, download_trailer, trailer_to_webp
+
+DEFAULT_OPTS: FrozenSet[tuple[str, FrozenSet[str]]] = frozenset()
+EXCLUDE_COUNTRY_LANG: FrozenSet[tuple[str, FrozenSet[str]]] = frozenset({("excludes", frozenset(["country", "language"]))})
+EXCLUDE_PART: FrozenSet[tuple[str, FrozenSet[str]]] = frozenset({("excludes", frozenset(["part"]))})
 
 
 class VideoProcessor:
@@ -36,6 +41,7 @@ class VideoProcessor:
         self.base_dir = base_dir
         self.TMDb = TMDbHandler(self.config)
         self.IMDb = IMDbHandler()
+        self.TPDb = PornDbHandler(self.config, self.mihandle)
 
     async def process_video(self, meta: Dict) -> Dict:
         """Orchestrate video metadata processing."""
@@ -104,7 +110,7 @@ class VideoProcessor:
     async def _process_disc_type(self, meta: Dict, videoloc: Optional[Path]) -> Dict:
         """Handle video processing based on disc type and set initial metadata."""
         guess = None
-        manual_year = meta.get("manual_year")
+        manual_year = int(meta.get("manual_year"))
         if meta["is_disc"] == "BDMV":
             video, meta["scene"], meta["imdb"] = await is_scene(meta["path"], meta.get("imdb"))
             meta["video"] = video
@@ -115,87 +121,106 @@ class VideoProcessor:
             try:
                 title = meta["discs"][0]["bdinfo"]["title"]
                 guess_name = re.sub(r"Blu-ray™|-\s*|Vol\.\s*\d+", "", title).strip()
-                opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-                filename = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), opts)["title"]
+                filename = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), EXCLUDE_COUNTRY_LANG)["title"]
                 meta["search_year"] = manual_year if manual_year > 0 else self._cached_guessit(meta["bdinfo"]["title"]).get("year", "")
             except Exception:
                 guess_name = meta["bdinfo"]["label"].replace("-", " ")
-                opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-                filename = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), opts)["title"]
+                filename = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), EXCLUDE_COUNTRY_LANG)["title"]
                 meta["search_year"] = manual_year if manual_year > 0 else self._cached_guessit(meta["bdinfo"]["label"]).get("year", "")
             meta["resolution"] = self.mihandle._map_resolution(
                 meta["bdinfo"]["video"][0]["res"], self._cached_guessit(video), "OTHER", "p", "OTHER", 0
             )
             meta["filename"] = filename.split(" AKA ")[0] if " AKA " in filename.replace(".", " ") else filename
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
 
         elif meta["is_disc"] == "DVD":
             disc_path = meta["discs"][0]["path"]
             video, meta["scene"], meta["imdb"] = await is_scene(meta["path"], meta.get("imdb"))
             guess_name = disc_path.replace("-", " ")
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            meta["filename"] = self._cached_guessit(guess_name, opts)["title"]
-            meta["search_year"] = manual_year if manual_year > 0 else self._cached_guessit(video).get("year", "")
+            meta["filename"] = self._cached_guessit(guess_name, EXCLUDE_COUNTRY_LANG)["title"]
+            meta["search_year"] = manual_year if manual_year > 0 else self._cached_guessit(video, DEFAULT_OPTS).get("year", "")
             meta["video"] = video
             if not meta.get("edit", False):
                 title_set = meta["discs"][0]["main_set"][0][:2]
                 vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
                 await self.mihandle.exportInfo(media_path=vob_path, is_dir=False, uuid=meta["uuid"], export_text=True)
             meta["dvd_size"] = get_dvd_size(meta["discs"])
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
 
         elif meta["is_disc"] == "HDDVD":
             video, meta["scene"], meta["imdb"] = await is_scene(meta["path"], meta.get("imdb"))
             guess_name = meta["discs"][0]["path"].replace("-", "")
             guess_name = disc_path.replace("-", " ")
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            meta["filename"] = self._cached_guessit(guess_name, opts)["title"]
+            meta["filename"] = self._cached_guessit(guess_name, EXCLUDE_COUNTRY_LANG)["title"]
             meta["search_year"] = self._cached_guessit(meta["discs"][0]["path"]).get("year", "")
             meta["video"] = video
             if not meta.get("edit", False):
                 await self.mihandle.exportInfo(media_path=video, is_dir=False, uuid=meta["uuid"], export_text=False)
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
-
         else:  # Non-disc case
             videopath, filelist = self.get_video(videoloc, meta.get("mode", "discord"), meta.get("filelist", []))
             video, meta["scene"], meta["imdb"] = await is_scene(videopath, meta.get("imdb"))
             meta["video"] = str(videopath)
             guess = guess or self._cached_guessit(meta["video"])
             meta["category"] = (
-                meta.get("category")
-                or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
-                or guess.get("type", "MOVIE").upper()
+                (
+                    meta.get("category")
+                    or self.get_cat(meta["video"], meta["is_disc"], meta.get("discs", []))
+                    or guess.get("type", "MOVIE").upper()
+                )
+                if not meta.get("xxx")
+                else "XXX"
             )
-
-            if meta["category"] == "TV":
+            if meta["category"] in ("TV", "XXX"):
                 guess_name = meta["uuid"].replace("-", " ")
             else:
                 guess_name = Path(video).name.replace("-", " ")
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            guess_result = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), opts)
+            guess_result = self._cached_guessit(re.sub(r"[^0-9a-zA-Z\[\]]+", " ", guess_name), EXCLUDE_COUNTRY_LANG)
             default_result = guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})
-            meta["filename"] = guess_result.get("title", default_result.get("title", ""))
-            meta["search_year"] = manual_year if manual_year > 0 else self._cached_guessit(video).get("year", "")
+            if not meta["xxx"]:
+                meta["filename"] = guess_result.get("title", default_result.get("title", ""))
+            else:
+                # guessit often thinks studio is title so we use episode_title if it exists else title
+                meta["filename"] = (
+                    guess_result.get("episode_title")
+                    or default_result.get("episode_title")
+                    or guess_result.get("title")
+                    or default_result.get("title")
+                    or ""
+                )
+            meta["search_year"] = manual_year if manual_year > 0 else self._get_year(self._cached_guessit(video, DEFAULT_OPTS))
             if not meta.get("edit", False):
                 await self.mihandle.exportInfo(
                     media_path=videopath, is_dir=meta.get("is_dir", False), uuid=meta["uuid"], export_text=True
                 )
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"])
+            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
         if self.is_sports(meta["uuid"]):
             meta["is_sports"] = True
             meta["category"] = "SPORTS"
@@ -258,8 +283,7 @@ class VideoProcessor:
             return self.get_source(meta["type"], meta["video"], meta["path"], meta["is_disc"], meta)
 
         async def fetch_uhd():
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            guess = self._cached_guessit(meta["path"], opts)
+            guess = self._cached_guessit(meta["path"], EXCLUDE_COUNTRY_LANG)
             return self.get_uhd(meta["type"], guess, meta["resolution"], meta["path"])
 
         async def fetch_hdr():
@@ -327,6 +351,41 @@ class VideoProcessor:
                 meta["imdb_id"] = await self.IMDb.search_imdb(meta["filename"], meta["search_year"])
             if not meta.get("imdb_info") and int(meta["imdb_id"]) != 0:
                 meta["imdb_info"] = await self.IMDb.get_imdb_info(meta["imdb_id"], meta)
+        if meta["xxx"]:
+            if not meta.get("xpack") and str(meta.get("pdb_manual")) != "0":
+                meta["porndb"], meta["title"] = await self.TPDb.get_porndb_info(meta, self.config)
+            if not meta.get("year"):
+                candidates = [
+                    meta.get("manual_year") or None,
+                    meta.get("porndb", {}).get("year") or None,
+                    meta.get("search_year") or None,
+                ]
+                meta["year"] = next((y for y in candidates if y not in (None, 0, "")), "")
+
+            if not meta.get("title"):
+                meta["title"] = meta["filename"]
+            if self.config["ADULT"].get("add_trailer", False):
+                tmp_dir = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
+                trailer_path = tmp_dir / "trailer.webp"
+                user_trailer = meta.get("user_trailer")
+
+                if not meta.get("trailer"):
+                    if trailer_path.exists() and trailer_path.stat().st_size > 0:
+                        meta["trailer"] = str(trailer_path)
+                    elif user_trailer:
+                        if user_trailer.startswith("http"):
+                            import httpx
+
+                            mp4trailer = await download_trailer(httpx.AsyncClient(), user_trailer, tmp_dir / "trailer.mp4")
+                            if mp4trailer and mp4trailer.exists():
+                                meta["trailer"] = await trailer_to_webp(mp4trailer, tmp_dir, self.config)
+                                if trailer_path.exists() and trailer_path.stat().st_size > 0:
+                                    Path(tmp_dir / "trailer.mp4").unlink()
+                        elif not user_trailer.endswith((".gif", ".webp")):  # user-linked trailer may be video
+                            meta["trailer"] = await create_trailer(user_trailer, tmp_dir, self.config)
+                    else:
+                        main_video = meta["video_files"][0]
+                        meta["trailer"] = await create_trailer(main_video, tmp_dir, self.config)
 
         meta["tag"] = meta.get("tag") or self.get_tag(meta["video"], meta)
         if meta["tag"] and not meta["tag"].startswith("-"):
@@ -383,7 +442,7 @@ class VideoProcessor:
     Get type, category, edition
     """
 
-    def get_type(self, uuid, scene, is_disc):
+    def get_type(self, uuid, scene, is_disc, xxx):
         uuid = uuid.lower()
         if "remux" in uuid:
             return "REMUX"
@@ -395,6 +454,11 @@ class VideoProcessor:
             return "HDTV"
         elif is_disc is not None:
             return "DISC"
+        elif xxx:
+            if any(word in uuid for word in ["bluray", "blu-ray", "dvdrip", "xvid"]):
+                return "ENCODE"
+            else:
+                return "WEBDL"
         else:
             return "ENCODE"
 
@@ -425,8 +489,7 @@ class VideoProcessor:
 
         try:
             video = video.lower().startswith("dc") and video.replace("dc", "", 1) or video
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            guess = self._cached_guessit(video, opts)
+            guess = self._cached_guessit(video, EXCLUDE_COUNTRY_LANG)
             repack = ""
             cut = ""
             ratio = ""
@@ -452,7 +515,7 @@ class VideoProcessor:
 
                 if not manual_editions:
                     if bdinfo:
-                        edition_raw = self._cached_guessit(bdinfo["label"], opts).get("edition", "")
+                        edition_raw = self._cached_guessit(bdinfo["label"], EXCLUDE_COUNTRY_LANG).get("edition", "")
                     else:
                         edition_raw = guess.get("edition", "")
                     detected_editions = (
@@ -546,6 +609,12 @@ class VideoProcessor:
             tag = ""
         if tag[1:].lower() in ["nogroup", "nogrp"]:
             tag = ""
+
+        if meta.get("xxx") and tag:
+            vname = Path(video).name.lower()
+            ptag = tag[1:]
+            if (f"[{ptag.lower()}]" in vname) or vname.startswith(ptag):
+                tag = ""
         return tag
 
     async def tag_override(self, meta):
@@ -572,9 +641,8 @@ class VideoProcessor:
             source = meta.get("manual_source")
             if not source:
                 try:
-                    opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-                    guess = self._cached_guessit(video, opts)
-                    source = guess.get("source", self._cached_guessit(path, opts).get("source", "BluRay"))
+                    guess = self._cached_guessit(video, EXCLUDE_COUNTRY_LANG)
+                    source = guess.get("source", self._cached_guessit(path, EXCLUDE_COUNTRY_LANG).get("source", "BluRay"))
                 except Exception:
                     source = "BluRay"
             if source in ("Blu-ray", "Ultra HD Blu-ray", "BluRay", "BR") or is_disc == "BDMV":
@@ -618,6 +686,17 @@ class VideoProcessor:
             source = "BluRay"
 
         return source, type
+
+    def _get_year(self, guess: dict) -> str:
+        if not guess:
+            return ""
+        year = guess.get("year")
+        if year:
+            return str(year)
+        date = guess.get("date")
+        if date and hasattr(date, "year"):
+            return str(date.year)
+        return ""
 
     def stream_optimized(self, stream_opt):
         if stream_opt is True:
@@ -677,8 +756,7 @@ class VideoProcessor:
             video_name = re.sub("[.()]", " ", video.replace(tag, "").replace(guess_title, ""))
             video_name = video_name.replace("DTS-HD.MA.", "").replace("DTS-HD MA ", "")
 
-            opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-            guess_title_check = self._cached_guessit(video, opts).get("title", "")
+            guess_title_check = self._cached_guessit(video, EXCLUDE_COUNTRY_LANG).get("title", "")
 
             # Iterate over service codes and their alias lists
             for service_code, aliases in self.services.items():
@@ -705,8 +783,7 @@ class VideoProcessor:
         filelist = meta["filelist"]
         meta.update({"tv_pack": 0, "episode_title_storage": "", "episode_title": ""})
 
-        opts = frozenset({"excludes": frozenset(["country", "language"])}.items())
-        video_guess = self._cached_guessit(video, opts)
+        video_guess = self._cached_guessit(video, EXCLUDE_COUNTRY_LANG)
 
         if not meta.get("anime", False):
             # Regular TV processing
@@ -825,8 +902,7 @@ class VideoProcessor:
         else:
             meta["episode"] = episode
 
-        episode_opts = frozenset({"excludes": frozenset(["part"])}.items())
-        episode_guess = self._cached_guessit(video, episode_opts)
+        episode_guess = self._cached_guessit(video, EXCLUDE_PART)
         meta["episode_title_storage"] = episode_guess.get("episode_title", "")
 
         if meta["season"] == "S00" or meta["episode"] == "E00":
@@ -844,12 +920,16 @@ class VideoProcessor:
         return meta
 
     @functools.lru_cache(maxsize=128)
-    def _cached_guessit(self, input_str: str, options: frozenset = None) -> dict:
+    def _cached_guessit(self, input_str: str, options: FrozenSet = DEFAULT_OPTS) -> dict:
         try:
-            opts = dict(options) if options else {}
-            if "excludes" in opts:
-                opts["excludes"] = list(opts["excludes"])
-            return guessit(input_str, opts)
+            # Convert our frozen options to dict expected by guessit
+            guessit_opts = {}
+            for key, value in options:
+                if key == "excludes" and isinstance(value, frozenset):
+                    guessit_opts[key] = list(value)
+                else:
+                    guessit_opts[key] = value
+            return guessit(input_str, guessit_opts)
         except Exception as e:
             console.print(f"[red]Error parsing with guessit: {e}[/red]")
             return {}

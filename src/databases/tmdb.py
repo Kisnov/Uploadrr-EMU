@@ -10,7 +10,7 @@ from aiocache import cached
 from guessit import guessit
 from rich.prompt import Prompt
 
-from src.args import Args
+from src.args import parse_tmdb_id
 from src.progress import ProgressManager
 from src.utils.console import console, log
 
@@ -62,8 +62,7 @@ class TMDbHandler:
                 if meta.get("mode", "discord") == "cli":
                     console.print("[yellow]No TMDb entry found")
                     tmdb_id = console.input("Please enter TMDb ID: ")
-                    parser = Args(config=self.config)
-                    meta["category"], meta["tmdb"] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
+                    meta["category"], meta["tmdb"] = parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
         return meta
 
     @cached(ttl=180)
@@ -148,8 +147,7 @@ class TMDbHandler:
                     progress = ProgressManager.get_instance()
                     with progress.pause_for_interaction():
                         tmdb_id = Prompt.ask("Please enter TMDb ID (tv/12345 or movie/12345): ")
-                    parser = Args(config=self.config)
-                    meta["category"], meta["tmdb"] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
+                    meta["category"], meta["tmdb"] = parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
                     meta["tmdb_manual"] = meta["tmdb"]
         return meta
 
@@ -315,8 +313,7 @@ class TMDbHandler:
         elif error.response.status_code == 404:
             console.print("[red]Invalid TMDb ID.")
             tmdb_id = Prompt.ask("Please enter TMDb ID (tv/12345 or movie/12345): ")
-            parser = Args(config=self.config)
-            meta["category"], meta["tmdb"] = parser.parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
+            meta["category"], meta["tmdb"] = parse_tmdb_id(id=tmdb_id, category=meta.get("category"))
             meta["tmdb_manual"] = meta["tmdb"]
         else:
             await asyncio.sleep(1)

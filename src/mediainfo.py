@@ -10,7 +10,7 @@ from pymediainfo import MediaInfo
 
 from src.utils.console import console, log
 
-from .args import Args
+from .args import parse_tmdb_id
 
 
 class MediaInfoHandler:
@@ -355,7 +355,7 @@ class MediaInfoHandler:
         soundmix = meta.get("imdb_info", {}).get("soundmix") or []
         keywords = [k.strip().lower() for k in (meta.get("keywords") or "").split(",") if k.strip()]
         release_date = meta.get("full_date", "")
-        year = meta.get("year", "")
+        year = str(meta.get("year", ""))
 
         try:
             parsed_date = datetime.strptime(release_date, "%Y-%m-%d")
@@ -508,8 +508,7 @@ class MediaInfoHandler:
                 extra = mi["media"]["track"][0]["extra"]
                 for key in extra:
                     if key.lower().startswith("tmdb"):
-                        parser = Args(config=self.config)
-                        category, tmdbid = parser.parse_tmdb_id(id=extra[key], category=category)
+                        category, tmdbid = parse_tmdb_id(id=extra[key], category=category)
                     if key.lower().startswith("imdb"):
                         try:
                             imdbid = str(int(extra[key].replace("tt", ""))).zfill(7)

@@ -12,7 +12,7 @@
 
 # Uploadrr
 
-Uploadrr is a tool for preping and uploading torrents for Movies, TV Shows + Music. It automates metadata gathering, screenshot generation, torrent creation, and uploading to various private trackers.
+Uploadrr is a tool for preping and uploading torrents for Movies, TV Shows, Music & Adult Content. It automates metadata gathering, screenshot generation, torrent creation, and uploading to various private trackers.
 
 This project is a fork of [Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) by L4G, with the goal of giving users more control over the upload process.
 
@@ -49,8 +49,10 @@ cp data/backup/example_config.yaml data/config.yaml
 
 >[!IMPORTANT]  
 > For Movies/TV/Anime you need a TMDb API (v3) key from **[TMDb](https://developer.themoviedb.org/docs/getting-started)**
+> For Adult Content you should have a TPDb key from **[TPDb](https://theporndb.net/user/api-tokens)**
 
-- **DEFAULT**: Basic settings like TMDB API key, default torrent client, and anonymity preferences
+- **DEFAULT**: Basic settings like TMDb API key, default torrent client, and anonymity preferences
+- **ADULT**: This is your adult config, TPDb key, seperate screen api keys if desired, adult anon override, contactsheet settings etc.
 - **SCREENS**: Screenshot generation settings, including API keys for image hosting services
 - **SIGNATURES**: Custom signatures for uploads (global and per-tracker)
 - **AUTO**: Automation settings like delay between uploads and duplicate detection
@@ -87,10 +89,30 @@ Upload TV show with custom screenshots:
 python upload.py --screens 8 --trackers BLU HDB /path/to/tv_show/
 ```
 
+Upload some music:
+```bash
+python upload.py /path/to/album
+```
+
+>[!NOTE]
+> For adult content one of `--xxx`, `--xscene` , `--xmovie`, `-jav` or `--pack` is necessary.  
+> For best results be specific.
+
+Upload some adult scene:
+```bash
+python upload.py --xxx /path/to/adultscene.mp4
+```
+
+Upload adult movie split scene:
+```bash
+python upload.py -xm /path/to/adult_movie2000
+```
+
+
 ## Features
 
-- Automatic metadata gathering from TMDb/IMDb or MusizBrainz/Discogs
-- Screenshot generation with customizable settings (tonempaping, frame stats etc)
+- Automatic metadata gathering from TMDb/IMDb or MusizBrainz/Discogs or TPDb
+- Screenshot generation with customizable settings (tonempaping, frame stats, contact sheets etc)
 - Torrent creation with multiple client support
 - Support for numerous private trackers
 - Batch processing capabilities
@@ -105,4 +127,5 @@ Contributions are welcome! Please feel free to submit issues, feature requests, 
 
 All credit for the original codebase goes to [L4G](https://github.com/L4GSP1KE) and contributors to the [Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) project.
 
-Many hands make light work - thank you to everyone who has contributed to improving torrent automation tools.
+Many hands make light work - thank you to everyone who has contributed!
+Specific shoutouts to @LustWorks (Adult-Support),  @Lokilicious (RHD Support), and @evaporate (Misc Fixes)
