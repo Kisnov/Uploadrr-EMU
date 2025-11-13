@@ -189,9 +189,7 @@ class Uploadrr:
                     skipped_tmdb.append(path)
                     continue
 
-                tracker_upload_ok = await pre_upload_checks(
-                    item_meta, trackers, tracker_registry, skipped_details, path, progress, self.config
-                )
+                tracker_upload_ok = await pre_upload_checks(item_meta, trackers, tracker_registry, skipped_details, path, self.config)
                 if not any(tracker_upload_ok.values()):
                     progress.update(f"Processing {item_name}: Skipped (pre-upload checks failed)")
                     skipped += 1
@@ -199,18 +197,6 @@ class Uploadrr:
                     continue
 
                 viable_trackers = [t for t, ok in tracker_upload_ok.items() if ok]
-                tracker_whitelists = {
-                    t: getattr(tracker_registry[t]["class"](config=self.config), "allowed_imghosts", [])
-                    for t in viable_trackers
-                    if t in tracker_registry
-                }
-
-                if int(item_meta.get("screens", 0)) or item_meta.get("user_images"):
-                    item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
-                    await save_meta(item_meta, base_dir, item_meta["uuid"])
-
-                item_meta = await handle_torrent_creation(self.config, item_meta)
-
                 if not item_meta.get("unattended"):
                     with progress.pause_for_interaction():
                         confirm = await get_confirmation(item_meta, viable_trackers, tracker_registry, self.config)
@@ -223,6 +209,18 @@ class Uploadrr:
                             continue
                 else:
                     console.print(f"[yellow]Unattended mode: Skipping confirmation for {path}[/yellow]")
+
+                tracker_whitelists = {
+                    t: getattr(tracker_registry[t]["class"](config=self.config), "allowed_imghosts", [])
+                    for t in viable_trackers
+                    if t in tracker_registry
+                }
+
+                if int(item_meta.get("screens", 0)) or item_meta.get("user_images"):
+                    item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
+                    await save_meta(item_meta, base_dir, item_meta["uuid"])
+
+                item_meta = await handle_torrent_creation(self.config, item_meta)
 
                 success, _ = await upload_to_trackers(
                     item_meta,

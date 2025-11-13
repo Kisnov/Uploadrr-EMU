@@ -10,17 +10,13 @@ from src.utils.console import console
 
 
 async def pre_upload_checks(
-    meta: Dict,
-    trackers: List[str],
-    tracker_registry: Dict,
-    skipped_details: List[Tuple],
-    path: str,
-    progress: ProgressManager,
-    config: Dict,
+    meta: Dict, trackers: List[str], tracker_registry: Dict, skipped_details: List[Tuple], path: str, config: Dict
 ) -> Dict[str, bool]:
     """Perform pre-upload checks and return tracker-specific upload decisions."""
     common = COMMON(config=config)
     tracker_upload_ok = {tracker: True for tracker in trackers}
+    progress = ProgressManager.get_instance()
+    progress.update("Pre-Upload Checks..")
 
     if meta.get("skip_dupe_check", False):
         console.print("[yellow]Skipping dupe check..")
@@ -52,9 +48,9 @@ async def pre_upload_checks(
 
         if not meta.get("skip_dupe_check", False):
             dupes = await tracker_instance.search_existing(meta)
-            if not meta.get("is_music", False):
+            if not meta.get("is_music", False) and not meta["xxx"]:
                 dupes = await common.filter_dupes(dupes, meta)
-            meta, skipped = await dupe_check(dupes, meta, config, skipped_details, path, progress)
+            meta, skipped = await dupe_check(dupes, meta, config, skipped_details, path)
             if skipped:
                 skipped_details.append((path, f"Potential duplicate on {tracker}"))
                 tracker_upload_ok[tracker] = False
@@ -63,11 +59,12 @@ async def pre_upload_checks(
     return tracker_upload_ok
 
 
-async def dupe_check(
-    dupes: Dict, meta: Dict, config: Dict, skipped_details: List[Tuple], path: str, progress: ProgressManager
-) -> Tuple[Dict, bool]:
+async def dupe_check(dupes: Dict, meta: Dict, config: Dict, skipped_details: List[Tuple], path: str) -> Tuple[Dict, bool]:
     """Check for duplicates and decide if upload should proceed."""
     from rich.table import Table
+
+    progress = ProgressManager.get_instance()
+    progress.update("Dupe Check..")
 
     if meta.get("skip_dupe_check", False):
         console.print("[yellow]Skipping duplicate check as requested.")
@@ -79,13 +76,14 @@ async def dupe_check(
         meta["upload"] = True
         return meta, False
 
-    table = Table(title="Are these dupes?", show_header=True, header_style="bold underline", expand=True, box=None)
-    table.add_column("Name")
-    table.add_column("Size", justify="center")
-    for name, size in dupes.items():
-        size_gb = f"{round(int(size) / (1024**3), 2)} GB" if isinstance(size, (int, float)) and size > 0 else "N/A"
-        table.add_row(name, f"[magenta]{size_gb}[/magenta]")
-    console.print(table)
+    if not meta.get("unattended", False):
+        table = Table(title="Are these dupes?", show_header=True, header_style="bold underline", expand=True, box=None)
+        table.add_column("Name")
+        table.add_column("Size", justify="center")
+        for name, size in dupes.items():
+            size_gb = f"{round(int(size) / (1024**3), 2)} GB" if isinstance(size, (int, float)) and size > 0 else "N/A"
+            table.add_row(name, f"[magenta]{size_gb}[/magenta]")
+        console.print(table)
 
     similarity_threshold = max(config.get("AUTO", {}).get("dupe_similarity", 90.00) / 100, 0.70)
     size_tolerance = max(min(config.get("AUTO", {}).get("size_tolerance", 30), 100), 1) / 100

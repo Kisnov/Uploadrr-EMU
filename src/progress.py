@@ -30,7 +30,7 @@ class ProgressManager:
 
     def start(self, total_files: int) -> None:
         """Start the Live display."""
-        if not self.live and (self.quiet or not self.unattended):
+        if not self.live:
             self.live = Live(self.progress_group, console=self.console, transient=True, refresh_per_second=10)
             self.live.start()
             self.update(f"Ready to process {total_files} files")

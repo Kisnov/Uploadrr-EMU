@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import httpx
 
 from src.trackers.UNIT3D import Unit3d
-from src.utils.console import console
+from src.utils.console import console, log
 
 
 class BP(Unit3d):
@@ -166,26 +166,37 @@ class BP(Unit3d):
         dupes: Dict[str, Any] = {}
         console.print(f"[yellow]Searching for existing torrents on {self.tracker}...")
 
-        params = {
+        async def run_search(params: Dict[str, Any], label: str) -> Dict[str, Any]:
+            results: Dict[str, Any] = {}
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                try:
+                    response = await client.get(self.search_url, params=params)
+                    if response.status_code == 200:
+                        response_json = response.json()
+                        for item in response_json.get("data", []):
+                            name = item["attributes"]["name"]
+                            size = item["attributes"]["size"]
+                            results[name] = size
+                    else:
+                        log.warning(f"[red]Failed to search {label}: HTTP {response.status_code}[/red]")
+                except Exception as e:
+                    log.error(f"[red]Unable to search {label}: {e}[/red]")
+                    await asyncio.sleep(5)
+            return results
+
+        # --- Search by file_name (exact match) ---
+        if meta.get("video_files"):
+            file_name_params = {
+                "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
+                "file_name": Path(meta["video_files"][0]).name,
+            }
+            dupes.update(await run_search(file_name_params, "file_name"))
+
+        # --- Search by title/types/resolutions (broader match) ---
+        title_params = {
             "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
-            "tmdbId": 0,
-            "types[]": await self.get_type_id(meta),
             "resolutions[]": await self.get_res_id(meta),
             "name": meta.get("title", ""),
         }
-
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(self.search_url, params=params)
-                if response.status_code == 200:
-                    response_json = response.json()
-                    for item in response_json.get("data", []):
-                        name = item["attributes"]["name"]
-                        size = item["attributes"]["size"]
-                        dupes[name] = size
-                else:
-                    console.print(f"[red]Failed to search: HTTP {response.status_code}[/red]")
-            except Exception as e:
-                console.print(f"[red]Unable to search for existing torrents: {e}[/red]")
-                await asyncio.sleep(5)
+        dupes.update(await run_search(title_params, "title/resolutions"))
         return dupes

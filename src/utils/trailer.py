@@ -154,7 +154,7 @@ async def trailer_to_webp(video_path: Path, output_dir: Path, config: Dict) -> O
         str(output_path),
     ]
 
-    ret, _, stderr = await _run_ffmpeg(encode_cmd, "Encoding WebP")
+    ret, _, stderr = await _run_ffmpeg(encode_cmd, "Converting Trailer to WebP")
     if ret != 0:
         log.error(f"WebP encoding failed: {stderr.splitlines()[-3:]}")
         return None
