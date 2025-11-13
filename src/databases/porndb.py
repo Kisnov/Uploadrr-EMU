@@ -12,7 +12,7 @@ from PIL import Image
 from rich.prompt import Prompt
 
 from src.progress import ProgressManager
-from src.utils.console import log
+from src.utils.console import console, log
 from src.utils.phash import PerceptualHash
 from src.utils.trailer import download_trailer, trailer_to_webp
 
@@ -28,62 +28,95 @@ class PornDbHandler:
         if not self.apikey:
             log.error("API key 'porndb' not found in config['ADULT']")
             return {}, ""
-        if meta.get("xmovie"):
-            endpoint = "movies"
-        elif meta.get("jav"):
-            endpoint = "jav"
-        else:
-            endpoint = "scenes"
 
+        endpoint = "movies" if meta.get("xmovie") else "jav" if meta.get("jav") else "scenes"
+
+        # ── duration ─────────────────────────────────────────────────────────────
         try:
             mi = await self.mi_handler.load(meta["uuid"], meta["path"], meta["is_dir"])
             general_track = next((t for t in mi.get("media", {}).get("track", []) if t.get("@type") == "General"), None)
             duration = float(general_track.get("Duration", 0)) if general_track else 300.0
         except Exception as e:
             log.warning(f"Failed to extract duration from MediaInfo for {meta['uuid']}: {e}")
-            duration = 300.0  # 5-minute fallback
-            log.info(f"Falling back to default duration: {duration}s")
+            duration = 300.0
         log.debug(f"DURATION = {duration}")
+
+        # ── basic prep ───────────────────────────────────────────────────────────
         normalized = re.sub(r"[^a-zA-Z0-9]+", ".", meta["uuid"]).strip(".")
         filename = meta["filename"]
         scene_id = None
-        id = None if not meta.get("pdb_manual") else meta["pdb_manual"]
-
-        if id:
+        if manual := meta.get("pdb_manual"):
             try:
-                uuid.UUID(id)
-                scene_id = id
+                uuid.UUID(manual)
+                scene_id = manual
             except ValueError:
-                if id.isdigit():
-                    scene_id = id
+                if manual.isdigit():
+                    scene_id = manual
                 else:
-                    normalized = id
+                    normalized = manual
 
         async with httpx.AsyncClient() as client:
-            match_method, scenes = await self._search_porndb(client, endpoint, scene_id, normalized, filename, meta, duration)
-            log.debug(f"Scenes returned: {scenes}")
+            match_method, scenes, hashes = await self._search_porndb(client, endpoint, scene_id, normalized, filename, meta, duration)
+
             if not scenes:
                 log.warning("No valid scenes found, returning empty data.")
                 return {}, ""
 
-            # For manual ID or created, scenes may contain a single dict; otherwise, it's a list
-            selected = None
-            if scene_id or match_method == "created":
-                selected = scenes[0] if scenes else None
+            unattended = meta.get("unattended", False)
+            search_year = None
+            if (sy := meta.get("search_year")) and isinstance(sy, str) and sy.isdigit():
+                search_year = int(sy)
+
+            # ── choose the correct scene ───────────────────────────────────────────
+            if match_method in {"phash", "oshash", "manual_id"}:
+                selected = scenes[0]
             else:
-                for scene in scenes:
-                    api_duration = scene.get("duration", 0)
-                    if abs(api_duration - duration) < 10:
-                        selected = scene
-                        break
-                if not selected and scenes:
-                    selected = scenes[0]
+                good_year_cands, all_sorted = self._filter_and_sort_by_year(scenes, search_year, unattended)
+
+                if unattended and not good_year_cands:
+                    log.warning("No scene within ±1 year in unattended mode → skipping")
+                    return {}, ""
+
+                pool = good_year_cands or all_sorted
+                if not pool:
+                    return {}, ""
+
+                best = None
+                best_diff = float("inf")
+                for scene in pool:
+                    api_dur = scene.get("duration") or 0
+                    diff = abs(api_dur - duration)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best = scene
+
+                if best and best_diff <= 60:
+                    selected = best
+                else:
+                    selected = pool[0]
+
+                should_ask = len(good_year_cands) > 1 or (len(good_year_cands) == 0 and len(pool) > 1)
+
+                if should_ask and not unattended:
+                    with ProgressManager.get_instance().pause_for_interaction():
+                        display_cands = all_sorted[:3]
+                        selected = await self._interactive_select(client, display_cands, endpoint, meta, filename, hashes, duration)
+                    if not selected:
+                        return {}, ""
 
             if not selected:
-                log.error("No scene selected after search.")
+                log.error("No scene selected after all filters.")
                 return {}, ""
 
+            # Submit hashes for filename-based matches
+            if match_method == "filename" and hashes:
+                sid = selected.get("id") or selected.get("_id", "")
+                if sid:
+                    await self._submit_hashes(client, endpoint, sid, hashes, filename, duration, meta)
+
+            # ── extract data ───────────────────────────────────────────────────────
             log.debug(f"Selected scene: {selected}")
+
             desc_text = selected.get("description", "")
             performers = [p["name"] for p in selected.get("performers", [])]
             tags = [t["name"] for t in selected.get("tags", [])]
@@ -96,6 +129,7 @@ class PornDbHandler:
             date = selected.get("date", "")
             year = date.split("-")[0] if date and "-" in date else ""
             url = selected.get("url", "")
+
             path = Path(meta["base_dir"]) / "tmp" / meta["uuid"]
             site_info = selected.get("site") or {}
             network_info = site_info.get("network") or {}
@@ -104,12 +138,18 @@ class PornDbHandler:
             network = network_info.get("name", "").replace(" ", "")
             parent = parent_info.get("name", "").replace(" ", "")
 
-            # Download images
+            # ── download images ───────────────────────────────────────────────────
             await self._download_image(client, image_url, path / "image.jpg")
             await self._download_image(client, poster_url, path / "cover.jpg")
             await self._download_image(client, back_url, path / "back.jpg")
 
-            if config.get("ADULT", {}).get("add_trailer", False) and trailer and not meta.get("trailer"):
+            # ── trailer ───────────────────────────────────────────────────────────
+            if (
+                config.get("ADULT", {}).get("add_trailer", False)
+                and trailer
+                and not meta.get("trailer")
+                and not meta.get("user_trailer")
+            ):
                 mp4trailer = await download_trailer(client, trailer, path / "trailer.mp4")
                 if mp4trailer and mp4trailer.exists():
                     meta["trailer"] = await trailer_to_webp(mp4trailer, path, config)
@@ -131,7 +171,8 @@ class PornDbHandler:
                 "network": network,
                 "parent": parent,
             }
-            log.info("Successfully Fetched ThePornDB data.")
+
+            log.info("Successfully fetched ThePornDB data.")
             return porndb_data, title
 
     async def _download_image(self, client, url: str, local_path: Path) -> Optional[Path]:
@@ -256,8 +297,8 @@ class PornDbHandler:
                 log.warning(f"Failed to submit {hash_type} for {filename}: {e}")
 
     async def _search_porndb(
-        self, client, endpoint: str, scene_id: str, normalized: str, filename: str, meta: Dict, duration: float
-    ) -> Tuple[str, List[Dict]]:  # Returns (match_method, scenes)
+        self, client, endpoint: str, scene_id: Optional[str], normalized: str, filename: str, meta: Dict, duration: float
+    ) -> Tuple[str, List[Dict], Dict[str, str]]:  # Returns (match_method, scenes, hashes)
         headers = {"Authorization": f"Bearer {self.apikey}"}
         category_param = "&category_id=1" if endpoint == "scenes" else ""
         hashes = {}
@@ -278,10 +319,10 @@ class PornDbHandler:
                     self._update_meta_endpoint_flags(meta, endpoint)
                     # Submit hashes since manual ID
                     await self._submit_hashes(client, endpoint, scene_id, hashes, filename, duration, meta)
-                    return "manual_id", scenes
+                    return "manual_id", scenes, hashes
             except Exception as e:
                 log.error(f"Failed to fetch with scene ID: {e}")
-            return "none", []
+            return "none", [], hashes
 
         endpoints = [endpoint, "jav", "movies", "scenes"]
 
@@ -302,7 +343,7 @@ class PornDbHandler:
                         await self._submit_hashes(
                             client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
                         )
-                        return "phash", scenes
+                        return "phash", scenes, hashes
                 except Exception as e:
                     log.debug(f"PHASH search with endpoint '{ep}' failed: {e}")
 
@@ -323,7 +364,7 @@ class PornDbHandler:
                         await self._submit_hashes(
                             client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
                         )
-                        return "oshash", scenes
+                        return "oshash", scenes, hashes
                 except Exception as e:
                     log.debug(f"OSHASH search with endpoint '{ep}' failed: {e}")
 
@@ -337,14 +378,14 @@ class PornDbHandler:
             data = resp.json()
             scenes = data.get("data", [])
             if scenes:
-                return "filename", scenes
+                return "filename", scenes, hashes
             log.debug(f"Trying: [blue]{url2}")
             resp = await client.get(url2, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             scenes = data.get("data", [])
             if scenes:
-                return "filename", scenes
+                return "filename", scenes, hashes
         except Exception as e:
             log.error(f"Failed to fetch by name: {e}")
 
@@ -353,7 +394,7 @@ class PornDbHandler:
             if not self.use_phash:
                 log.info("Reminder: Enabling use_phash in config may improve matching success.")
             log.warning("Skipping in unattended mode.")
-            return "none", []
+            return "none", [], hashes
 
         progress = ProgressManager.get_instance()
         while True:
@@ -365,7 +406,7 @@ class PornDbHandler:
                 input_id = Prompt.ask(prompt_text).strip().lower()
             if not input_id or input_id == "skip":
                 log.warning("No database info provided.")
-                return "none", []
+                return "none", [], hashes
 
             if input_id == "phash" and not self.use_phash:
                 if meta.get("phash"):
@@ -393,7 +434,7 @@ class PornDbHandler:
                                 await self._submit_hashes(
                                     client, ep, scenes[0].get("id") or scenes[0].get("_id", ""), hashes, filename, duration, meta
                                 )
-                                return "phash", scenes
+                                return "phash", scenes, hashes
                         except Exception as e:
                             log.debug(f"On-demand PHASH search with endpoint '{ep}' failed: {e}")
                     log.warning("No match found even with on-demand PHASH.")
@@ -414,7 +455,7 @@ class PornDbHandler:
                     self._update_meta_endpoint_flags(meta, endpoint)
                     # Submit hashes for confirmed match
                     await self._submit_hashes(client, endpoint, input_id, hashes, filename, duration, meta)
-                    return "manual_id", [data["data"]]
+                    return "manual_id", [data["data"]], hashes
                 else:
                     log.error("Invalid ID format. Must be digits or UUID.")
             except httpx.HTTPStatusError as e:
@@ -423,9 +464,102 @@ class PornDbHandler:
                 log.error("Invalid UUID format.")
             except Exception as e:
                 log.error(f"Error fetching with provided ID: {e}")
-        return "none", []
+        return "none", [], hashes
 
     def _update_meta_endpoint_flags(self, meta: Dict, endpoint: str):
         meta["xscene"] = endpoint == "scenes"
         meta["jav"] = endpoint == "jav"
         meta["xmovie"] = endpoint == "movies"
+
+    def _filter_and_sort_by_year(
+        self, scenes: List[Dict], search_year: Optional[int], unattended: bool
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Returns (good_year_candidates, all_sorted_candidates)
+        good_year_candidates = scenes with year diff <= 1 (or all if no search_year)
+        """
+        if not search_year:
+            return scenes[:], scenes[:]
+
+        scored = []
+        for scene in scenes:
+            diff = 9999
+            date = scene.get("date", "")
+            if date and "-" in date:
+                try:
+                    scene_year = int(date.split("-")[0])
+                    diff = abs(scene_year - search_year)
+                except ValueError:
+                    pass
+            scored.append((diff, scene))
+
+        scored.sort(key=lambda x: x[0])
+        all_sorted = [s for _, s in scored]
+        good = [s for d, s in scored if d <= 1]
+
+        if unattended:
+            return (good if good else [], all_sorted)
+
+        return good, all_sorted
+
+    async def _interactive_select(
+        self, client, candidates: List[Dict], endpoint: str, meta: Dict, filename: str, hashes: Dict[str, str], duration: float
+    ) -> Optional[Dict]:
+        console.print(f"\n[bold yellow]Multiple possible matches for[/] [bright_magenta]{filename}[/]")
+        options = candidates[:3]
+        if len(candidates) > 3:
+            console.print(f"[dim]Showing top 3 of {len(candidates)} results (closest year first)[/]")
+
+        for i, scene in enumerate(options, 1):
+            title = (scene.get("title") or "Untitled")[:80]
+            date = scene.get("date") or "????-??-??"
+            year = date[:4]
+            performers = ", ".join(p["name"] for p in scene.get("performers", [])[:4])
+            if not performers:
+                performers = "Solo"
+            site = (scene.get("site") or {}).get("name", "Unknown")
+            dur = scene.get("duration")
+            dur_str = f"{int(dur // 60)}m" if dur else "?"
+            sid = scene.get("id") or scene.get("_id", "") or "?"
+
+            console.print(f"  [bold cyan]{i}[/] {title}  [{year}]  {performers}  @ {site}  ({dur_str})  ID: {sid}")
+
+        while True:
+            choice = Prompt.ask(
+                f"\n[green]?[/] Select [1-{len(options)}] (Enter = 1), type a scene ID, or [red]s[/]kip", default="1"
+            ).strip()
+
+            if choice.lower() in {"s", "skip"}:
+                log.info("Match skipped by user")
+                return None
+
+            # Valid numbered choice
+            if choice.isdigit():
+                num = int(choice)
+                if 1 <= num <= len(options):
+                    selected = options[num - 1]
+                    sid = selected.get("id") or selected.get("_id", "")
+                    if sid and hashes:
+                        await self._submit_hashes(client, endpoint, sid, hashes, filename, duration, meta)
+                    return selected
+
+            # Anything else → treat as manual scene ID
+            manual_id = choice.strip()
+            if not manual_id:
+                continue
+
+            try:
+                url = f"https://api.theporndb.net/{endpoint}/{manual_id}"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {self.apikey}"})
+                resp.raise_for_status()
+                data = resp.json().get("data")
+                if data:
+                    log.info(f"User-provided ID {manual_id} resolved successfully")
+                    sid = data.get("id") or data.get("_id", "")
+                    if sid and hashes:
+                        await self._submit_hashes(client, endpoint, sid, hashes, filename, duration, meta)
+                    return data
+                else:
+                    console.print("[red]ID not found[/]")
+            except Exception as e:
+                console.print(f"[red]Error fetching ID: {e}[/]")

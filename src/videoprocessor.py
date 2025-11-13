@@ -198,7 +198,7 @@ class VideoProcessor:
                 if not meta.get("xxx")
                 else "XXX"
             )
-            if meta["category"] == "TV":
+            if meta["category"] in ("TV", "XXX"):
                 guess_name = meta["uuid"].replace("-", " ")
             else:
                 guess_name = Path(video).name.replace("-", " ")
