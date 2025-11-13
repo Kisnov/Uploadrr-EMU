@@ -12,29 +12,21 @@ DEFAULT:
 
 ADULT:
   API_KEYS:
-    porndb: ThePornDB_API_KEY
-    ptscreens:  ptscreens_API_KEY
-    hamster: hamster_API_KEY
-    imghost: imghost_API_KEY
+    porndb: null
+    ptscreens:  null
+    hamster: null
+    imghost: null 
   always_anon: true # makes all adult uploads anon
-  use_phash: false # this increases match probability but takes time to calculate
-  contact_sheet:
-    rows:
-    columns:
-    logo:
-      image: null # "Path/to/logo.png" 
-      text: Uploadrr
-      color:
-      size: 
+  use_phash: true
 
 SCREENS:
   API_KEYS:
-    imgbb: imgbb_API_KEY
-    ptpimg: ptpimg_API_KEY
-    lensdump: lensdump_API_KEY
-    ptscreens: ptscreens_API_KEY
-    onlyimage: onlyimage_API_KEY
-  img_hosts: [ptpimg, ptscreens, onlyimage, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
+    imgbb: null
+    ptpimg: null
+    lensdump: null
+    ptscreens: null
+    onlyimage: null
+  img_hosts: [ptpimg, ptscreens, onlyimage, hamster, imghost, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
