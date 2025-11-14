@@ -54,7 +54,7 @@ class ScreenshotManager:
         if meta.get("back_cover") and not self._is_valid_url(meta.get("album_back")):
             needs_upload = True
 
-        if meta.get("user_proof"):
+        if meta.get("user_proof") and not self._is_valid_url(meta.get("user_proof")):
             needs_upload = True
 
         if needs_upload and not meta.get("skip_imghost_upload", False):
@@ -68,13 +68,13 @@ class ScreenshotManager:
                 )
 
                 for img in meta["image_list"]["main"]:
-                    if img.get("local_file", "").startswith("front_cover"):
-                        meta["album_cover"] = img.get("img_url")
-                    elif img.get("local_file", "").startswith("back_cover"):
-                        meta["album_back"] = img.get("img_url")
-                    elif img.get("local_file", "").startswith("proof"):
+                    if img.get("local_file", "") == meta.get("user_cover"):
+                        meta["album_cover"] = img.get("raw_url")
+                    elif img.get("local_file", "") == meta.get("back_cover"):
+                        meta["album_back"] = img.get("raw_url")
+                    elif img.get("local_file", "") == meta.get("user_proof"):
                         if "proof_url" not in meta:
-                            meta["proof_url"] = img.get("img_url")
+                            meta["proof_url"] = img.get("raw_url")
 
         # Handle rehosting
         if tracker_whitelists and needs_upload:
