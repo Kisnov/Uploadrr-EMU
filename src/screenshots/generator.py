@@ -40,12 +40,15 @@ class ScreenshotGenerator:
         self.screens = self.config.get("SCREENS", {})
         self.use_oxipng = self.screens.get("use_oxipng", False) and OXIPNG_AVAILABLE
         self.pyoxipng_level = self.screens.get("oxipng_level", 4)  # Default level 4
+        self.ffdebug = False
 
     async def generate_screenshots(self, meta: Dict, filename: str, uuid: str) -> Dict:
         """Generate screenshots for the given media, reusing existing ones if valid."""
         pm = ProgressManager.get_instance()
         if pm:
             pm.update(f"Starting screenshot generation for {meta.get('name', filename)}")
+
+        self.ffdebug = meta.get("ffdebug", False) or meta.get("deep_debug")
 
         screens = meta.get("screens", self.config.get("DEFAULT", {}).get("screens", 3))
         contact_screens = 0
@@ -301,7 +304,7 @@ class ScreenshotGenerator:
                 indices.append(int(match.group()))
         max_idx = max(indices + [-1])
         tasks = [
-            self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, meta.get("ffdebug", False), hdr=meta["hdr"])
+            self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
             for i, t in enumerate(ss_times)
         ]
         results = await asyncio.gather(*tasks)
@@ -333,7 +336,7 @@ class ScreenshotGenerator:
                         f"{filename}-{max_idx + 1 + vob_idx * screens_per_vob + i}.png",
                         t,
                         "none",
-                        meta.get("ffdebug", False),
+                        self.ffdebug,
                         vobs=vobs,
                     )
                 )
@@ -343,11 +346,12 @@ class ScreenshotGenerator:
     async def _generate_file(self, meta, filename, uuid, num_screens, file_path):
         if not Path(file_path).is_file():
             return []
-        ffdebug = meta.get("ffdebug", False)
         keyframe = "none"
         try:
-            probe = await self._ffprobe(file_path, "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", ffdebug=ffdebug)
-            format_info = await self._ffprobe(file_path, "-show_format", ffdebug=ffdebug)
+            probe = await self._ffprobe(
+                file_path, "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", ffdebug=self.ffdebug
+            )
+            format_info = await self._ffprobe(file_path, "-show_format", ffdebug=self.ffdebug)
 
             length = float(format_info["format"]["duration"])
             frame_rate_str = probe["streams"][0]["r_frame_rate"]
@@ -356,7 +360,7 @@ class ScreenshotGenerator:
 
         except (KeyError, ValueError, RuntimeError) as e:
             try:
-                probe = await self._ffprobe(file_path, "-show_format", ffdebug=ffdebug)
+                probe = await self._ffprobe(file_path, "-show_format", ffdebug=self.ffdebug)
                 length = float(probe["format"]["duration"])
                 frame_rate = 23.976  # Fallback
                 log.warning(f"Failed to probe frame rate for {file_path}: {e}")
@@ -388,10 +392,10 @@ class ScreenshotGenerator:
                     "-show_frames",
                     "-read_intervals",
                     intervals,
-                    ffdebug=ffdebug,
+                    ffdebug=self.ffdebug,
                 )
-                if ffdebug:
-                    log.debug(f"Raw ffprobe output for keyframes: {keyframe_probe}")
+                if self.ffdebug:
+                    log.info(f"Raw ffprobe output for keyframes: {keyframe_probe}")
                 keyframes = []
                 for frame in keyframe_probe.get("frames", []):
                     if frame.get("key_frame") == 1:
@@ -426,7 +430,7 @@ class ScreenshotGenerator:
                 f"{filename}-{max_idx + 1 + i}.png",
                 t,
                 keyframe,
-                meta.get("ffdebug", False),
+                self.ffdebug,
                 hdr=meta.get("hdr"),
                 frame_rate=frame_rate,
                 adjusted_ss_time=t,
@@ -439,7 +443,7 @@ class ScreenshotGenerator:
     async def _take_screenshot(
         self, file, output, ss_time, keyframe, ffdebug, retries=3, vobs=None, hdr=None, frame_rate=23.976, adjusted_ss_time=None
     ):
-        loglevel = "verbose" if (ffdebug or log.ddebug) else "error"
+        loglevel = "verbose" if ffdebug else "error"
         vf_filters = []
         if vobs:
             vf_filters.append(self.screens.get("deinterlace_method", "yadif"))
@@ -496,7 +500,8 @@ class ScreenshotGenerator:
                     args.insert(1, "-skip_frame")
                     args.insert(2, "nokey")
 
-                log.debug(f" COMMAND CALLED:\n [blue]{args} \n")
+                if ffdebug:
+                    log.info(f" COMMAND CALLED:\n [blue]{args} \n")
 
                 process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                 stdout, stderr = await process.communicate()
@@ -538,7 +543,7 @@ class ScreenshotGenerator:
             start_idx = len(valid) + 1
             tasks = [
                 self._take_screenshot(
-                    file, f"{filename}-{start_idx + i}.png", t, keyframe, meta.get("ffdebug", False), vobs=vobs, hdr=meta.get("hdr")
+                    file, f"{filename}-{start_idx + i}.png", t, keyframe, self.ffdebug, vobs=vobs, hdr=meta.get("hdr")
                 )
                 for i, t in enumerate(new_times)
             ]
@@ -718,8 +723,8 @@ class ScreenshotGenerator:
         import json
 
         cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", *extra_args, str(file_path)]  # Use str(file_path) for safety
-        if ffdebug or log.ddebug:
-            log.debug(f"Running ffprobe: {' '.join(cmd)!r}")
+        if ffdebug:
+            log.info(f"Running ffprobe: {' '.join(cmd)!r}")
         try:
             process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
             try:
