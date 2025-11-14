@@ -59,7 +59,8 @@ cp data/backup/example_config.yaml data/config.yaml
 - **TRACKERS**: Configuration for supported private trackers (API keys, usernames, etc.)
 - **TORRENT_CLIENTS**: Settings for torrent clients (qBittorrent, Deluge, etc.)
 
-See the example config file for detailed options and supported trackers.
+>[!TIP] 
+>See the __[Full Config Guide](https://codeberg.org/CvT/Uploadrr/wiki/Full-Config-Guide)__ for detailed options and supported trackers.
 
 ## Usage
 
