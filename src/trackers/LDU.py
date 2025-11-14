@@ -18,32 +18,26 @@ class LDU(Unit3d):
 
     async def get_cat_id(self, meta):
         category_name = meta["category"]
-        anime = meta.get("anime", False)
 
-        if not meta.get("xxx"):
-            genres = list(map(str.strip, meta.get("genres", "").lower().split(",")))
-            keywords = list(map(str.strip, meta.get("keywords", "").lower().split(",")))
-
-        edition = meta.get("edition", "")
         adult = meta.get("adult", False)
-        is_silent = meta.get("is_silent", False)
-        original_language = meta.get("original_language")
+        anime = meta.get("anime", False)
+        edition = meta.get("edition", "")
+        genres = set([g.strip().lower() for g in meta.get("genres", "").split(",") if g.strip()])
         hc = meta.get("hardcoded_subs", False)
+        is_silent = meta.get("is_silent", False)
+        keywords = set([k.strip().lower() for k in meta.get("keywords", "").split(",") if k.strip()])
+        original_language = meta.get("original_language")
+        xxx = meta.get("xxx")
 
         tag = self.get_language_tag(meta) or ""
         tags = [t[1:] for t in tag.split("]") if t]
 
-        # fmt: off
-        category_id = {
-            "MOVIE": "1",
-            "TV": "2",
-            "Anime": "8",
-            "FANRES": "12",
-            "SPORTS": "35",
-            "MUSIC": "3",
-            "XXX": "6"
-        }.get(category_name, "0")
-        # fmt: on
+        # DVD language tags not guarteed due to mediainfo bug (NOTE dvd_patch should fix?)
+        lang_unknown = meta.get("is_disc") != "DVD" and "???" in tags and original_language != "en"
+
+        # Keywords in Sets
+        holidays = {"holiday", "christmas", "xmas", "hanukkah", "easter"}
+
         if category_name == "SPORTS":
             return "35"
         if category_name == "MUSIC":
@@ -51,11 +45,11 @@ class LDU(Unit3d):
 
         if adult and (anime or "hentai" in keywords or "animation" in keywords):
             return "10"  # Adult anime/hentai
-        if adult:
-            return "6"  # Adult content
+        if adult and not xxx:
+            return "6"  # Adult TMDb Listed
 
         if category_name == "MOVIE":
-            if (meta["is_disc"] != "DVD" and "???" in tags and original_language != "en") or hc:
+            if lang_unknown or hc:
                 return "27"
             if "ENG" not in "".join(tags):
                 return "22"
@@ -67,20 +61,20 @@ class LDU(Unit3d):
                 return "8"
             if "silent film" in keywords or is_silent:
                 return "18"
-            if "holiday" in keywords:
+            if holidays & keywords:
                 return "24"
             if "musical" in keywords:
                 return "25"
             if "documentary" in genres:
                 return "17"
-            if "stand-up" in keywords or "stand-up comedy" in keywords:
+            if "stand-up" in keywords or "stand up" in keywords:
                 return "20"
             if "short film" in keywords:
                 return "19"
             return "1"  # Default for MOVIE
 
         elif category_name == "TV":
-            if (meta["is_disc"] != "DVD" and "???" in tags and original_language != "en") or hc:
+            if lang_unknown or hc:
                 return "31"
             if "ENG" not in "".join(tags):
                 return "29"
@@ -95,6 +89,20 @@ class LDU(Unit3d):
                 return "30"
             if meta.get("tmdb") and "ENG" not in "".join(tags):
                 return "45"
+            return "6"
+
+        # === Safeguard ===
+        # fmt: off
+        category_id = {
+            "MOVIE": "1",
+            "TV": "2",
+            "Anime": "8",
+            "FANRES": "12",
+            "SPORTS": "35",
+            "MUSIC": "3",
+            "XXX": "6"
+        }.get(category_name, "0")
+        # fmt: on
         return category_id
 
     async def get_type_id(self, meta: Dict[str, Any]) -> str:
