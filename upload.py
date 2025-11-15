@@ -189,6 +189,21 @@ class Uploadrr:
                     skipped_tmdb.append(path)
                     continue
 
+                screens_handled = False
+
+                async def handle_screens():
+                    nonlocal item_meta
+                    item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
+                    await save_meta(item_meta, base_dir, item_meta["uuid"])
+
+                needs_screenshots = int(item_meta.get("screens", 0)) or item_meta.get("user_images")
+
+                if self.config.get("SCREENS", {}).get("generate_b4_confirm", False) and needs_screenshots:
+                    # Generation was put after to avoid needless generation if no valid upload found
+                    # Some users however wanted it done beforehand to inspect screens -this is for them-
+                    await handle_screens()
+                    screens_handled = True
+
                 tracker_upload_ok = await pre_upload_checks(item_meta, trackers, tracker_registry, skipped_details, path, self.config)
                 if not any(tracker_upload_ok.values()):
                     progress.update(f"Processing {item_name}: Skipped (pre-upload checks failed)")
@@ -216,9 +231,8 @@ class Uploadrr:
                     if t in tracker_registry
                 }
 
-                if int(item_meta.get("screens", 0)) or item_meta.get("user_images"):
-                    item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
-                    await save_meta(item_meta, base_dir, item_meta["uuid"])
+                if needs_screenshots and not screens_handled:
+                    await handle_screens()
 
                 item_meta = await handle_torrent_creation(self.config, item_meta)
 
