@@ -374,6 +374,7 @@ class MediaInfoHandler:
         lang = ""
         if meta.get("original_language") and not is_silent:
             original_lang = meta["original_language"].lower()
+            chinese_codes = ["cmn", "yue", "nan", "hak", "wuu", "cjy", "gan", "hsn", "mnp", "cdo", "czh", "lzh", "zho"]
             languages = set()
             language_tracks = []
 
@@ -385,7 +386,10 @@ class MediaInfoHandler:
                 title = t.get("Title", "").lower()
                 if "comment" in title or "score" in title or "review" in title or l3 in ("", "zxx"):
                     continue  # Exclude commentary, isolated score, zxx
-                languages.add(lang_code)
+                if original_lang == "zh" and l3 in chinese_codes:
+                    languages.add("zh")
+                elif lang_code:
+                    languages.add(lang_code)
                 language_tracks.append(t)
 
             has_original = original_lang in languages
@@ -396,7 +400,9 @@ class MediaInfoHandler:
             elif num_languages == 1:
                 if has_original:
                     for t in language_tracks:
-                        if t.get("Language_String2", "").lower() == original_lang:
+                        if (original_lang == "zh" and t.get("Language_String3", "").lower() in chinese_codes) or t.get(
+                            "Language_String2", ""
+                        ).lower() == original_lang:
                             lang = t.get("Language_String", "").split(" ")[0].upper()
                             break
                 else:
