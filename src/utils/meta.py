@@ -93,7 +93,7 @@ async def edit_meta(
         try:
             edit_argv = raw_input.split()
             ns = parser.parse_args(edit_argv)
-            enforce_global_only(ns, is_global=False)
+            enforce_global_only(ns, is_global=False, parser=parser)
 
         except (ValueError, SystemExit, Exception) as e:
             console.print(f"[red]❌ Parse error: {e}[/red]")

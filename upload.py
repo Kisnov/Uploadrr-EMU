@@ -90,7 +90,7 @@ class Uploadrr:
             if arg_block:
                 try:
                     ns = parser.parse_args(arg_block)
-                    enforce_global_only(ns, is_global=False)
+                    enforce_global_only(ns, is_global=False, parser=parser)
                     raw = normalize_args(ns)
                     item_updates = {k: v for k, v in raw.items() if v is not None and v != [] and v != ""}
                 except Exception as e:
