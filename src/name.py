@@ -210,6 +210,12 @@ class NameGenerator:
         if processed.get("lang", "ENGLISH") == "ENGLISH":
             processed["lang"] = ""
 
+        # Handle no_aka and no_dub flags
+        if processed.get("no_aka"):
+            processed["aka"] = ""
+        if processed.get("no_dub"):
+            processed["lang"] = processed.get("lang", "").replace("DUBBED", "")
+
         return processed
 
     async def get_name(self, meta: Dict) -> Tuple[str, str, str, List[str]]:
