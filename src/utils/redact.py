@@ -13,7 +13,7 @@ class Redactrr:
 
     def load_from_config(self, config: Dict[str, Any]) -> None:
         """Inspect config dict and register sensitive keys or entire sections automatically."""
-        sensitive_keys = {"tmdb", "api_key", "password", "pass", "token", "pid", "user", "username", "announce_key", "annouce_url"}
+        sensitive_keys = {"tmdb", "api_key", "password", "pass", "token", "pid", "announce_key", "annouce_url"}
         sensitive_paths = {"SCREENS.API_KEYS", "ADULT.API_KEYS"}
         placeholders = {}
 
