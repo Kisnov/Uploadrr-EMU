@@ -627,6 +627,10 @@ class DescGenerator:
                     "https://www.discogs.com/release/{}",
                     "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png",
                 ),
+                "discogs_master": (
+                    "https://www.discogs.com/master/{}",
+                    "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png",
+                ),
                 "discogs_url": (
                     "{}",
                     "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/Discogs_logo_black.svg/2880px-Discogs_logo_black.svg.png",
@@ -637,10 +641,25 @@ class DescGenerator:
                 ),
                 "wikidata": ("{}", "https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg"),
                 "genius": ("{}", "https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg"),
+                "deezer": ("{}", "https://upload.wikimedia.org/wikipedia/commons/7/75/Deezer_logo%2C_2023.svg"),
+                "apple_music": ("{}", "https://upload.wikimedia.org/wikipedia/commons/2/2a/Apple_Music_logo.svg"),
             }
 
             for key, (url_tpl, img_url) in logos.items():
-                val = meta.get(key)
+                if key == "deezer":
+                    val = meta.get("deezer_info", {}).get("link")
+                elif key == "apple_music":
+                    other_dbs = meta.get("mb_info", {}).get("relations", {}).get("other_databases", [])
+                    if other_dbs:
+                        if isinstance(other_dbs, list):
+                            urls = other_dbs
+                        else:
+                            urls = [u.strip() for u in other_dbs.split(",")]
+                        val = next((u for u in urls if "https://music.apple.com/" in u), None)
+                    else:
+                        val = None
+                else:
+                    val = meta.get(key)
                 if val:
                     url = url_tpl.format(val)
                     await descfile.write(center_img(img_url, link=url))

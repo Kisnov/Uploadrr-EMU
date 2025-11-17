@@ -1,7 +1,8 @@
 from .anilist import AniListHandler
-from .discogs import DiscogsAPI
+from .deezer import DeezerHandler
+from .discogs import DiscogsHandler
 from .imdb import IMDbHandler
-from .musicbrainz import MusicBrainzAPI
+from .musicbrainz import MusicBrainzHandler
 from .porndb import PornDbHandler
 from .srrdb import is_scene
 from .tmdb import TMDbHandler
@@ -9,9 +10,10 @@ from .tvmaze import search_tvmaze
 
 __all__ = [
     "AniListHandler",
-    "DiscogsAPI",
+    "DeezerHandler",
+    "DiscogsHandler",
     "IMDbHandler",
-    "MusicBrainzAPI",
+    "MusicBrainzHandler",
     "TMDbHandler",
     "is_scene",
     "search_tvmaze",

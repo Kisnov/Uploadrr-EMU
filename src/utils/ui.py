@@ -87,9 +87,14 @@ def build_db_info(meta: Dict) -> List[str]:
             f"[bold]Category[/bold]: {meta['category']}",
         ]
         if meta.get("mbid"):
-            db_info.append(f"\n[bold]MBID[/bold]: https://musicbrainz.org/release/{meta['mbid']}")
-        if meta.get("discogs_url"):
-            db_info.append(f"[bold]Discogs[/bold]: {meta['discogs_url']}")
+            db_info.append(f"\n[bold]MusicBrainz[/bold]: https://musicbrainz.org/release/{meta['mbid']}")
+        if meta.get("discogs_id"):
+            db_info.append(f"[bold]Discogs[/bold]: https://www.discogs.com/release/{meta['discogs_id']}")
+        elif meta.get("discogs_master"):
+            db_info.append(f"[bold]Discogs[/bold]: https://www.discogs.com/master/{meta['discogs_master']}")
+        if meta.get("deezer_info", {}).get("link"):
+            db_info.append(f"[bold]Deezer[/bold]: {meta['deezer_info']['link']}")
+
         return db_info
     elif meta.get("is_sports"):
         return [f"[bold]Title[/bold]: {meta['title']}", f"[bold]Category[/bold]: {meta['category']}"]

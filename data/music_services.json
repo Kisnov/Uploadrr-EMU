@@ -1,0 +1,12 @@
+{
+    "TIDAL": ["Tidal", "TDL"],
+    "QOBUZ": ["Qobuz", "QoBz", "QBZ"],
+    "SPOTIFY": ["Spotify", "SPFY", "SPTY"],
+    "APPLE": ["Apple Music", "iTunes", "Apple", "AM"],
+    "DEEZ": ["Deezer", "DZR", "DEEZ"],
+    "AMZN": ["Amazon Music", "AMZN", "Amazon"],
+    "YT": ["YouTube Music", "YTM", "YT", "YouTube"],
+    "GPLAY": ["Google Play Music", "Google Play", "GPM", "GPLAY"],
+    "SOUNDCLOUD": ["SoundCloud", "SC", "SNDC"],
+    "PANDORA": ["Pandora", "PNDR", "PAND"]
+}

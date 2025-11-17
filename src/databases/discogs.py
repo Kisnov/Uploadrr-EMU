@@ -5,15 +5,15 @@ import httpx
 from src.utils.console import log
 
 
-class DiscogsAPI:
-    BASE_URL = "https://api.discogs.com/releases/"
+class DiscogsHandler:
+    BASE_URL = "https://api.discogs.com"
 
     def __init__(self, user_agent: str):
         self.user_agent = user_agent
 
     async def fetch_discogs_release(self, discogs_id: str) -> Optional[Dict[str, Any]]:
         """Fetch release metadata from Discogs using the release ID."""
-        url = f"{self.BASE_URL}{discogs_id}"
+        url = f"{self.BASE_URL}/releases/{discogs_id}"
         headers = {"User-Agent": self.user_agent}
 
         try:
@@ -48,59 +48,9 @@ class DiscogsAPI:
         log.debug("No suitable barcode found")
         return None
 
-    def extract_metadata(self, release_data: Dict[str, Any], meta: Dict[str, Any]) -> None:
-        """Extract relevant metadata from Discogs release data and populate meta."""
-        genres = release_data.get("genres", [])
-        styles = release_data.get("styles", [])
-
-        new_keywords = ", ".join(genres + styles).replace(" & ", " ")
-        if new_keywords:
-            log.debug(f"Extracted keywords: {new_keywords}")
-            if meta.get("keywords"):
-                meta["keywords"] += ", " + new_keywords
-            else:
-                meta["keywords"] = new_keywords
-
-        if not meta.get("tracklist"):
-            tracklist = release_data.get("tracklist", [])
-            if tracklist:
-                meta["tracklist"] = {}
-                for track in tracklist:
-                    position = track.get("position", "")
-
-                    if "-" in position:
-                        disc_number, track_number = position.split("-", 1)
-                        disc_number = f"Disc {disc_number}"
-                    else:
-                        disc_number = "Disc 1"
-                        track_number = position
-
-                    if disc_number not in meta["tracklist"]:
-                        meta["tracklist"][disc_number] = {}
-
-                    track_title = track.get("title", "Unknown Track")
-                    duration = track.get("duration", "")
-                    padding = str(track_number).zfill(len(str(len(tracklist))))
-
-                    key = f"{padding}. {track_title}"
-                    meta["tracklist"][disc_number][key] = duration
-                log.debug(f"Extracted tracklist with {len(tracklist)} tracks")
-
-        if not meta.get("artist"):
-            meta["artist"] = ", ".join(artist.get("name", "") for artist in release_data.get("artists", []))
-
-        if not meta.get("album"):
-            meta["album"] = release_data.get("title", "")
-
-        if not meta.get("year"):
-            meta["year"] = release_data.get("year", None)
-
-        if not meta.get("discogs_id"):
-            meta["discogs_id"] = release_data.get("id", None)
-
     async def fetch_master_data(self, master_id: str) -> Optional[Dict[str, Any]]:
         """Fetch master release metadata from Discogs using the master ID."""
-        url = f"https://api.discogs.com/masters/{master_id}"
+        url = f"{self.BASE_URL}/masters/{master_id}"
         headers = {"User-Agent": self.user_agent}
 
         try:
@@ -115,3 +65,41 @@ class DiscogsAPI:
         except httpx.RequestError as e:
             log.error(f"Network error while fetching master {master_id}: {str(e)}")
             return None
+
+    async def search_releases(self, query: str, limit: int = 10) -> Dict[str, Any]:
+        """Search for releases on Discogs."""
+        url = f"{self.BASE_URL}/database/search"
+        params = {"q": query, "type": "release", "per_page": limit}
+        headers = {"User-Agent": self.user_agent}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                log.debug(f"Searching releases with query: {query}")
+                response = await client.get(url, params=params, headers=headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            log.error(f"Discogs API Error: {e.response.status_code}")
+            return {"results": []}
+        except httpx.RequestError as e:
+            log.error(f"Network error while searching releases: {str(e)}")
+            return {"results": []}
+
+    async def search_releases_filtered(self, query: str, track_count: int, limit: int = 10) -> Optional[Dict[str, Any]]:
+        """Search for releases and filter by track count, returning the best match."""
+        search = await self.search_releases(query, limit)
+        candidates = search.get("results", [])
+        if not candidates:
+            return None
+
+        best = None
+        for c in candidates:
+            if c.get("tracklist"):
+                if len(c["tracklist"]) == track_count:
+                    best = c
+                    break
+
+        if not best:
+            best = candidates[0]
+
+        return await self.fetch_discogs_release(best["id"])
