@@ -177,6 +177,12 @@ def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
         meta["auto_desc"] = True
         meta["auto_queue"] = meta["full_auto"]  # could be str (dir) or True
 
+    # --- Debug mode settings ---
+    if meta.get("debug") or meta.get("deep_debug"):
+        meta["qbit_cat"] = "DEBUG"
+        meta["qbit_tag"] = "DEBUG"
+        meta["rtorrent_label"] = "DEBUG"
+
     # --- TMDB post-processing: extract (category, id) → separate fields ---
     if "tmdb_manual" in meta and isinstance(meta["tmdb_manual"], tuple):
         cat, tid = meta["tmdb_manual"]
