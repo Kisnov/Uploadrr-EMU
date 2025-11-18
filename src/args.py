@@ -336,6 +336,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("-mal", "--mal", nargs="*", help="MyAnimeList ID")
     parser.add_argument("-mbid", "--mbid", type=_validate_mbid, dest="mbid_manual", help="MusicBrainz Release ID (UUID)")
     parser.add_argument("-discogs", "--discogs", nargs="*", dest="discogs_id", help="Discogs Release ID")
+    parser.add_argument("-deezer", "--deezer", type=int, dest="deezer_manual", help="Deezer Album ID")
     parser.add_argument("-tpdb", "--tpdb", type=_validate_porndb_id, dest="pdb_manual", help="ThePornDB ID or UUID")
 
     # --- Metadata ---

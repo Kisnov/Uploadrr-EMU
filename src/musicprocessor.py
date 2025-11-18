@@ -359,9 +359,11 @@ class MusicProcessor:
     async def _process_with_deezer(self, meta: Dict, temp_artist: str, temp_album: str, temp_barcode: str, track_count: int) -> None:
         """Query Deezer API asynchronously."""
         data = None
-        if temp_barcode:
+        if meta.get("deezer_manual"):
+            data = await self.dz.fetch_album(meta["deezer_manual"])
+        elif temp_barcode:
             data = await self.dz.fetch_album_by_upc(temp_barcode)
-        if not data and temp_artist and temp_album:
+        elif temp_artist and temp_album:
             query = f'artist:"{temp_artist}" album:"{temp_album}"'
             data = await self.dz.search_albums_filtered(query, track_count)
         if data:
@@ -570,22 +572,30 @@ class MusicProcessor:
             if cat:
                 meta["catalog_number"] = cat
 
-        # Tracklist (prefer MB > Discogs > Deezer)
+        # Tracklist (prefer Deezer > Discogs > MB)
         tracklist = None
-        if "mb_info" in meta:
+        if "deezer_info" in meta:
             tracklist = {}
-            for medium in meta["mb_info"].get("media", []):
-                disc = f"Disc {medium['disc']}"
+            tl = meta["deezer_info"].get("tracks", {"data": []})["data"]
+            disc_tracks = {}
+            for t in tl:
+                disc_num = t.get("disk_number", 1)
+                disc = f"Disc {disc_num}"
+                disc_tracks.setdefault(disc, []).append(t)
+            for disc, dtracks in disc_tracks.items():
                 tracklist[disc] = {}
-                tracks = medium.get("tracks", [])
-                pad_len = len(str(len(tracks))) if tracks else 1
-                for track in tracks:
-                    ms = track.get("duration_ms", 0)
-                    dur = timedelta(milliseconds=ms)
-                    m, s = divmod(dur.seconds, 60)
+                pad_len = len(str(len(dtracks)))
+                for idx, t in enumerate(dtracks):
+                    dur_sec = t.get("duration", 0)
+                    m = dur_sec // 60
+                    s = dur_sec % 60
                     time = f"{m:02}:{s:02}"
-                    pad = track["number"].zfill(pad_len)
-                    key = f"{pad}. {track['title']}"
+                    position = t.get("track_position") or (idx + 1)
+                    pad = str(position).zfill(pad_len)
+                    title = t["title"]
+                    if t.get("explicit_lyrics", False):
+                        title += " [Explicit]"
+                    key = f"{pad}. {title}"
                     tracklist[disc][key] = time
         elif "discogs_info" in meta:
             tracklist = {}
@@ -606,24 +616,20 @@ class MusicProcessor:
                 pad = str(tnum).zfill(pad_len)
                 key = f"{pad}. {title}"
                 tracklist[disc][key] = dur
-        elif "deezer_info" in meta:
+        elif "mb_info" in meta:
             tracklist = {}
-            tl = meta["deezer_info"].get("tracks", {"data": []})["data"]
-            disc_tracks = {}
-            for t in tl:
-                disc_num = t.get("disk_number", 1)
-                disc = f"Disc {disc_num}"
-                disc_tracks.setdefault(disc, []).append(t)
-            for disc, dtracks in disc_tracks.items():
+            for medium in meta["mb_info"].get("media", []):
+                disc = f"Disc {medium['disc']}"
                 tracklist[disc] = {}
-                pad_len = len(str(len(dtracks)))
-                for idx, t in enumerate(sorted(dtracks, key=lambda x: x["track_position"])):
-                    dur_sec = t.get("duration", 0)
-                    m = dur_sec // 60
-                    s = dur_sec % 60
+                tracks = medium.get("tracks", [])
+                pad_len = len(str(len(tracks))) if tracks else 1
+                for track in tracks:
+                    ms = track.get("duration_ms", 0)
+                    dur = timedelta(milliseconds=ms)
+                    m, s = divmod(dur.seconds, 60)
                     time = f"{m:02}:{s:02}"
-                    pad = str(t["track_position"]).zfill(pad_len)
-                    key = f"{pad}. {t['title']}"
+                    pad = track["number"].zfill(pad_len)
+                    key = f"{pad}. {track['title']}"
                     tracklist[disc][key] = time
         if tracklist:
             meta["tracklist"] = tracklist
