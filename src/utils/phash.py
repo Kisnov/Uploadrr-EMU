@@ -2,7 +2,6 @@ import io
 import math
 import subprocess
 
-import imagehash
 import numpy as np
 from PIL import Image
 
@@ -71,9 +70,7 @@ class PerceptualHash:
                 sprite.paste(img, (x, y))
 
             phash = self._phash(sprite)
-            phash2 = str(imagehash.phash(sprite, hash_size=8))
             log.debug(f"PHASH = {phash}")
-            log.debug(f"imagehash = {phash2}")
             return phash
 
         except Exception as e:
