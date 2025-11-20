@@ -148,7 +148,7 @@ class BBCODE:
             return ""
         return desc
 
-    def clean_unit3d_description(self, desc, site):
+    def clean_unit3d_description(self, desc, site):  # TODO REFRACTOR + USE when use_api
         # Unescape html
         desc = html.unescape(desc)
         # End my suffering
@@ -253,6 +253,8 @@ class BBCODE:
             "[img=120]https://upload.wikimedia.org/wikipedia/commons/6/66/Wikidata-logo-en.svg[/img][/url]", "WikiData"
         )
         desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/c/cd/Genius-Wordmark.svg[/img][/url]", "Genius")
+        desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/7/75/Deezer_logo%2C_2023.svg[/img]", "Deezer")
+        desc = desc.replace("[img=120]https://upload.wikimedia.org/wikipedia/commons/2/2a/Apple_Music_logo.svg[/img]", "Apple Music")
         desc = re.sub(r"\[img=\d+\]", "[img]", desc)
         # Clean BBCode within pre tags
         desc = self.extrac_n_clean_pre_content(desc)
@@ -391,7 +393,7 @@ class BBCODE:
                     desc = desc.replace(tag, spoil2comp)
         return desc
 
-    def gazelle_bbcode_bbcode(self, desc):
+    def gazelle_bbcode(self, desc):
         desc = desc.replace("[spoiler", "[hide").replace("[/spoiler]", "[/hide]")
         desc = desc.replace("[center]", "[align=center]").replace("[/center]", "[/align]")
         desc = desc.replace("[left]", "[align=left]").replace("[/left]", "[/align]")
