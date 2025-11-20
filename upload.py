@@ -238,7 +238,7 @@ class Uploadrr:
 
                 success, _ = await upload_to_trackers(
                     item_meta,
-                    trackers,
+                    viable_trackers,
                     tracker_registry,
                     successful,
                     skipped,

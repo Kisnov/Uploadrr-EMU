@@ -22,10 +22,10 @@ class LDU(Unit3d):
         adult = meta.get("adult", False)
         anime = meta.get("anime", False)
         edition = meta.get("edition", "")
-        genres = set([g.strip().lower() for g in meta.get("genres", "").split(",") if g.strip()])
+        genres = set([g.strip().lower() for g in (meta.get("genres") or "").split(",") if g.strip()])
         hc = meta.get("hardcoded_subs", False)
         is_silent = meta.get("is_silent", False)
-        keywords = set([k.strip().lower() for k in meta.get("keywords", "").split(",") if k.strip()])
+        keywords = set([k.strip().lower() for k in (meta.get("keywords") or "").split(",") if k.strip()])
         original_language = meta.get("original_language")
         xxx = meta.get("xxx")
 

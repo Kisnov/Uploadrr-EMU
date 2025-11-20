@@ -102,6 +102,8 @@ class NameGenerator:
                     break
             if redundant:
                 continue
+            if "mindgeek" in lval or "aylo" in lval:
+                continue
             if lval not in [p.lower() for p in parts]:
                 styled_val = NameGenerator._stylize(val)
                 parts.append(styled_val)
