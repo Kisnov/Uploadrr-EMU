@@ -60,6 +60,7 @@ class Unit3d:
             "WEBRIP": "5",
             "HDTV": "6",
             "ENCODE": "3",
+            "FLAC": "7"
         }.get(media_type, "0")
         return type_id
 
@@ -204,13 +205,20 @@ class Unit3d:
         headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
         params = {"api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip()}
 
+        extra_files_meta = await self.get_extra_files(meta)
+
         if meta.get("debug", False):
-            log.debug("[magenta]DATA 2 SEND[/magenta]:")
+            log.debug("[bright_magenta]DATA 2 SEND[/bright_magenta]:")
             console.print(Pretty(data))
+            log.debug("[bright_magenta]FILES 2 SEND[/bright_magenta]:")
+            files_info = {"torrent": torrent_path.name}
+            if nfo_file:
+                files_info["nfo"] = str(Path(nfo_file).name)
+            for field, (fname, path, mime) in extra_files_meta.items():
+                files_info[field] = str(Path(path).name)
+            console.print(Pretty(files_info))
             await edit_torrent(meta, None, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
             return "DEBUG"
-
-        extra_files_meta = await self.get_extra_files(meta)
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             files = {}
