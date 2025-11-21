@@ -104,6 +104,10 @@ TRACKERS:
     anon: false
     modq: false
 
+  BP:
+    api_key: "BLU_API_KEY"
+    anon: false
+
   CBR:
     api_key: "CBR_API_KEY"
     anon: false
@@ -158,6 +162,10 @@ TRACKERS:
 
   HUNO:
     api_key: "HUNO_API_KEY"
+    anon: false
+
+  IHD:
+    api_key: "IHD_API_KEY"
     anon: false
 
   ITA:
