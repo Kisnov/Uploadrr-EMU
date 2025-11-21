@@ -115,7 +115,7 @@ class NameGenerator:
         """Stylize the value with special cases and conditional title casing."""
         if not val:
             return ""
-        specials = {"onlyfans": "OnlyFans", "manyvids": "ManyVids"}
+        specials = {"clips4sale": "Clips4Sale", "faphouse": "FapHouse", "manyvids": "ManyVids", "onlyfans": "OnlyFans"}
         if ":" in val:
             subparts = val.split(":")
         else:

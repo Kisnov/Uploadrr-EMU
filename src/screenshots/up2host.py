@@ -118,7 +118,8 @@ class ScreenshotUploader:
             ]
 
         if not image_paths:
-            log.warning(f"No valid image paths found for {label}")
+            if "CS -" not in label:
+                log.warning(f"No valid image paths found for {label}")
             return []
 
         last_exc = None

@@ -115,8 +115,6 @@ class PornDbHandler:
                     await self._submit_hashes(client, endpoint, sid, hashes, filename, duration, meta)
 
             # ── extract data ───────────────────────────────────────────────────────
-            log.debug(f"Selected scene: {selected}")
-
             desc_text = selected.get("description", "")
             performers = [p["name"] for p in selected.get("performers", [])]
             tags = [t["name"] for t in selected.get("tags", [])]
@@ -451,7 +449,6 @@ class PornDbHandler:
                     if not data or "data" not in data:
                         log.error("Empty or invalid response for provided ID.")
                         continue
-                    log.debug(f"Received data: {data}")
                     self._update_meta_endpoint_flags(meta, endpoint)
                     # Submit hashes for confirmed match
                     await self._submit_hashes(client, endpoint, input_id, hashes, filename, duration, meta)

@@ -31,13 +31,13 @@ class BP(Unit3d):
             (['classic'], "14"),
             (['family', 'taboo', 'incest', 'stepcest', 'family roleplay'], "21"),
             (['pissing'], "41"),
-            (['gay', 'bisexual', 'homosexual', 'bb'], "27"),
-            (['lesbian', 'gg', 'all girl'], "33"),
+            (['gay', 'bisexual', 'homosexual', 'homo', 'bb', 'bareback', 'all guy', 'boy on boy', 'man on man'], "27"),
+            (['lesbian', 'gg', 'all girl', 'girl on girl'], "33"),
         ]
 
         for keywords, cat_id in prio_oder:
             for tag in tags:
-                if any(keyword in tag.lower() for keyword in keywords):
+                if any(keyword == tag.lower() for keyword in keywords):
                     return cat_id
 
         category_id = {

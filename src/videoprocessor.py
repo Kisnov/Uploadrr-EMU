@@ -47,7 +47,10 @@ class VideoProcessor:
         """Orchestrate video metadata processing."""
         pm = ProgressManager.get_instance()
         if pm:
-            pm.update("Processing video metadata...")
+            if meta["xxx"]:
+                pm.update("Processing your pr0n..", style="thistle1")
+            else:
+                pm.update("Processing video metadata...")
 
         meta["is_disc"], videoloc, bdinfo, meta["discs"] = await self._get_disc(meta)
         meta.update(bdinfo=bdinfo, video=None, is_sports=False, mediainfo=None)
