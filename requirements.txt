@@ -11,6 +11,7 @@ imdbinfo
 Jinja2
 langcodes
 nest_asyncio
+numpy
 packaging
 pillow
 psutil
