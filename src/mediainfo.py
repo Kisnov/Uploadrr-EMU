@@ -437,7 +437,7 @@ class MediaInfoHandler:
         fsx = format_settings_extra.get(format_settings, "")
         fsx = fsx if fsx == "EX" and chan == "5.1" else ""
 
-        audio_str = f"{codec} {fsx} {chan}{extra}".strip()
+        audio_str = " ".join(f"{codec} {fsx} {chan}{extra}".split())
         return lang, audio_str, chan, has_commentary, is_silent
 
     def get_hdr(self, uuid: str, bdinfo: Optional[dict] = None) -> str:

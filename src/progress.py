@@ -4,6 +4,7 @@ from typing import Optional
 from rich.console import Group
 from rich.live import Live
 from rich.spinner import Spinner
+from rich.text import Text
 
 
 class ProgressManager:
@@ -41,9 +42,13 @@ class ProgressManager:
             self.live.stop()
             self.live = None
 
-    def update(self, message: str) -> None:
-        """Update the progress widget text."""
-        self.progress_widget.text = message
+    def update(self, message: str, style: Optional[str] = None) -> None:
+        """Update the progress widget text with optional style."""
+        if style:
+            self.progress_widget.text = Text(message, style=style)
+        else:
+            self.progress_widget.text = Text(message)
+
         if self.live:
             self.live.update(self.progress_group)
 

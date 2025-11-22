@@ -106,7 +106,9 @@ async def dupe_check(dupes: Dict, meta: Dict, config: Dict, skipped_details: Lis
             return meta, True
 
         similarity = SequenceMatcher(None, cleaned_meta_name, re.sub(r"[^\w\s]", "", name.lower())).ratio()
-        if similarity >= similarity_threshold and abs(meta_size - size) <= size_tolerance * meta_size:
+        if (meta["xxx"] and abs(meta_size - size) <= size_tolerance * meta_size) or (
+            similarity >= similarity_threshold and abs(meta_size - size) <= size_tolerance * meta_size
+        ):
             with progress.pause_for_interaction():
                 if meta.get("unattended", False) or not Confirm.ask(" Upload anyways?"):
                     meta["upload"] = False
