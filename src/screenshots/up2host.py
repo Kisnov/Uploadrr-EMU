@@ -123,6 +123,7 @@ class ScreenshotUploader:
             return []
 
         last_exc = None
+        NO_API_KEY_HOSTS = {"imgbox", "pixhost", "fastpic"}
         if adult:
             adult_cfg = self.config.get("ADULT", {})
             adult_keys = adult_cfg.get("API_KEYS", {})
@@ -135,10 +136,9 @@ class ScreenshotUploader:
                 if host in adult_keys:
                     allowed.add(host)
                 elif not adult_host_only:
-                    # Allow fallback to SCREENS if host has key there
-                    if host in self.config["SCREENS"]["API_KEYS"]:
+                    if host in self.config["SCREENS"]["API_KEYS"] or host in NO_API_KEY_HOSTS:
                         allowed.add(host)
-                elif imgbox_only and host == "imgbox" and "imgbox" in self.config["SCREENS"]["API_KEYS"]:
+                elif imgbox_only and host == "imgbox":
                     allowed.add(host)
 
             viable_hosts = [h for h in viable_hosts if h in allowed]
@@ -148,7 +148,7 @@ class ScreenshotUploader:
                 return []
         else:
             screen_keys = self.config["SCREENS"]["API_KEYS"]
-            viable_hosts = [h for h in viable_hosts if h in screen_keys]
+            viable_hosts = [h for h in viable_hosts if h in screen_keys or h in NO_API_KEY_HOSTS]
 
         for host in viable_hosts:
             try:
