@@ -16,8 +16,8 @@ class BaseImageHost(ABC):
         pass
 
     @abstractmethod
-    async def upload_batch(self, client, image_path, title=None, adult=False):
-        """Upload a batch of images and return a dict with img_url, raw_url, and web_url."""
+    async def upload_batch(self, client, image_paths, title=None, adult=False):
+        """Upload a batch of images and return a list of dicts with img_url, raw_url, and web_url."""
         pass
 
     def _validate_response(self, response, host_name):
