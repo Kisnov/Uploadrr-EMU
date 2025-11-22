@@ -334,7 +334,8 @@ class VideoProcessor:
                 )
 
             if not meta.get("tmdb") and not meta.get("imdb"):
-                meta = await self.TMDb.get_tmdb_id(meta["filename"], meta["search_year"], meta, meta["category"], meta["filename"])
+                search_title = self._clean_title_for_search(meta["filename"])
+                meta = await self.TMDb.get_tmdb_id(search_title, meta["search_year"], meta, meta["category"], meta["filename"])
             elif meta.get("imdb") and not meta.get("tmdb_manual"):
                 meta["imdb_id"] = str(meta["imdb"]).replace("tt", "")
                 meta = await self.TMDb.get_tmdb_from_imdb(meta, meta["filename"])
@@ -475,6 +476,36 @@ class VideoProcessor:
             return "TV"  # 2
         else:
             return "MOVIE"
+
+    def _clean_title_for_search(self, title: str) -> str:
+        """Clean title by removing edition/cut keywords at the end for better TMDb search."""
+        if not title:
+            return title
+
+        # Patterns based on CUTS
+        CUTS_PATTERNS = [
+            r"(?:director'?s?\s*cut|\bdc)$",
+            r"international\s*cut$",
+            r"extended(?:\s+(?:edition|cut))?$",
+            r"special\s*edition$",
+            r"unrated$",
+            r"uncut$",
+            r"super\s*duper(?:\s+cut)?$",
+        ]
+
+        cleaned = title
+        for pattern in CUTS_PATTERNS:
+            cleaned = re.sub(r"\s*" + pattern, "", cleaned, flags=re.IGNORECASE)
+
+        # Clean up extra spaces
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+        # Safety: if cleaned title is too short or just articles, revert
+        words = cleaned.split()
+        if len(words) < 2 or all(word.lower() in ["the", "a", "an", "for", "in", "to"] for word in words):
+            return title
+
+        return cleaned
 
     def get_edition(self, title, video, bdinfo, filelist, manual_edition):
         def normalize_for_compare(s: str) -> str:
