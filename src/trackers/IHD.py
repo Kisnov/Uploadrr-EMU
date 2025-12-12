@@ -12,8 +12,14 @@ class IHD(Unit3d):
     banned_groups = [""]
 
     async def banned_content(self, meta: Dict[str, Any]) -> Tuple[bool, bool]:
-        if meta["category"] not in ("MOVIE", "TV"):
+        category = meta["category"]
+        resolution = meta.get("resolution")
+        sd = meta.get("sd", 0)
+        if category not in ("MOVIE", "TV"):
             console.print("Only Movie/TV/Anime Allowed on InfinityHD")
+            return True, True
+        if sd or resolution == "720p":
+            console.print("[bold yellow]Resolution must be atleast 1080p on InfinityHD.")
             return True, True
         return False, False
 
@@ -34,3 +40,9 @@ class IHD(Unit3d):
         }.get(category_name, "0")
         return category_id
     # fmt: on
+
+    async def edit_name(self, meta: Dict[str, Any]) -> str:
+        ihd_name = meta["name"]
+        ihd_name = ihd_name.replace("DUAL", "Dual-Audio").replace("MULTI", "Multi")
+        meta["ihd_name"] = ihd_name
+        return ihd_name
