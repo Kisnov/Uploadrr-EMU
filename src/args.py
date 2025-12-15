@@ -98,6 +98,8 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
         meta["category"] = meta["category"].upper()
 
     if meta.get("type"):
+        if meta.get("manual_type"):
+            meta["type"] = meta["manual_type"].upper().replace("-", "")
         meta["type"] = meta["type"].upper().replace("-", "")
 
     if meta.get("manual_source"):
@@ -317,7 +319,13 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
 
     # --- Choices ---
     parser.add_argument("-c", "--category", choices=["movie", "tv", "fanres", "sports", "music"], help="Content category")
-    parser.add_argument("-t", "--type", choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv"], help="Release type")
+    parser.add_argument(
+        "-t",
+        "--type",
+        dest="manual_type",
+        choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv"],
+        help="Release type",
+    )
     parser.add_argument(
         "--source", dest="manual_source", choices=["Blu-ray", "BluRay", "DVD", "HDDVD", "WEB", "HDTV", "UHDTV"], help="Source media"
     )

@@ -112,6 +112,9 @@ class VideoProcessor:
 
     async def _process_disc_type(self, meta: Dict, videoloc: Optional[Path]) -> Dict:
         """Handle video processing based on disc type and set initial metadata."""
+        manual_type = meta.get("manual_type")
+        if manual_type:
+            manual_type.upper().replace("-", "")
         guess = None
         manual_year = int(meta.get("manual_year"))
         if meta["is_disc"] == "BDMV":
@@ -134,7 +137,7 @@ class VideoProcessor:
                 meta["bdinfo"]["video"][0]["res"], self._cached_guessit(video), "OTHER", "p", "OTHER", 0
             )
             meta["filename"] = filename.split(" AKA ")[0] if " AKA " in filename.replace(".", " ") else filename
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
+            meta["type"] = manual_type if manual_type else self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
                 (
                     meta.get("category")
@@ -157,7 +160,7 @@ class VideoProcessor:
                 vob_path = f"{disc_path}/VTS_{title_set}_1.VOB"
                 await self.mihandle.exportInfo(media_path=vob_path, is_dir=False, uuid=meta["uuid"], export_text=True)
             meta["dvd_size"] = get_dvd_size(meta["discs"])
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
+            meta["type"] = manual_type if manual_type else self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
                 (
                     meta.get("category")
@@ -177,7 +180,7 @@ class VideoProcessor:
             meta["video"] = video
             if not meta.get("edit", False):
                 await self.mihandle.exportInfo(media_path=video, is_dir=False, uuid=meta["uuid"], export_text=False)
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
+            meta["type"] = manual_type if manual_type else self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
             meta["category"] = (
                 (
                     meta.get("category")
@@ -223,7 +226,7 @@ class VideoProcessor:
                 await self.mihandle.exportInfo(
                     media_path=videopath, is_dir=meta.get("is_dir", False), uuid=meta["uuid"], export_text=True
                 )
-            meta["type"] = self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
+            meta["type"] = manual_type if manual_type else self.get_type(meta["uuid"], meta["scene"], meta["is_disc"], meta["xxx"])
         if self.is_sports(meta["uuid"]):
             meta["is_sports"] = True
             meta["category"] = "SPORTS"

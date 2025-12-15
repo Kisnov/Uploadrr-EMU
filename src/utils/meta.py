@@ -32,10 +32,10 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "anon", "base_dir", "blu", "category", "client", "debug","deezer_manual", "desc",
         "descfile", "desclink", "draft", "dupe", "episode", "ffdebug", "freeleech", "full_dir",
         "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_name",
-        "manual_source", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
+        "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
         "nohash", "path", "personal_release", "ptp", "qbit_cat", "qbit_tag", "randomized", "rehash",
         "region", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation",
-        "trackers", "tmdb_manual", "type", "unattended", "webdv",
+        "trackers", "tmdb_manual", "unattended", "webdv",
         # XXX keys
          "jav", "pack", "pdb_manual", "user_cover", "user_banner", "user_trailer", "xmovies", "xscene", "xxx"
     ]
