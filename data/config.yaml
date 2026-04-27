@@ -1,0 +1,351 @@
+version: '2.1.0'
+
+# ------------------------------------------------------------------------------ #
+# FULL CONFIG OPTIONS @ https://codeberg.org/CvT/Uploadrr/wiki/Full-Config-Guide
+# ------------------------------------------------------------------------------ #
+
+DEFAULT:
+  tmdb: TMDB_API_KEY
+  add_trailer: true
+  add_logo: true
+  default_torrent_client: 'watch'
+  sfx_on_prompt: true
+  always_anon: false
+  # torrent_creation: mktorrent #default torf
+
+
+ADULT:
+  API_KEYS:
+    porndb: null
+    ptscreens:  null
+    hamster: null
+    imghost: null 
+  always_anon: true # makes all adult uploads anon
+  use_phash: true
+
+SCREENS:
+  API_KEYS:
+    imgbb: null
+    ptpimg: null
+    lensdump: null
+    ptscreens: null
+    onlyimage: null
+  img_hosts: [imgbox, ptpimg, ptscreens, onlyimage, hamster, imghost, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
+  screen_count: 6
+  per_episode: 3 # for tv will take x screens for every episode put them in spoiler
+  img_size: 500
+  deinterlace_method: yadif
+  tonemap_hdr: true
+  hdr_method: "reinhard:desat=0" # Other presets: "hable:desat=0" (color accurate but dark) or "mobius:desat=10" (more pop sometimes) , or try your own!
+  optimize: true # you can set 0-9 for compression lvl if desired.
+  use_oxipng: false
+  keyframes_only: true
+  frame_stats: false
+
+SIGNATURES:
+  use_global_sigs: default # Use custom per tracker, fallback to global (False, only use tracker sigs if avail / True, only use global, None, no sigs)
+  ### These signatures below are for GLOBAL or used as fallback if using default  >>> to adjust per tracker, simply add the same keys below tracker of choice ###
+  signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  anon_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
+  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  anon_pr_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
+
+AUTO:
+  description_folder: null # "Path/To/description/folder" see wiki for details
+  delay: 0
+  size_tolerance: 1
+  dupe_similarity: 80
+  always_aid: true
+  trusted_uploaders: [GME, Roronoa_Zoro, x64] # Add-in trusted uploaders here or change to "USE_ALL" (if everyones trusted, this is for api description snatching)
+
+TRACKERS:
+  default_trackers: "LDU, AITHER, BLU, HHD, LST, PSS, RF, FNP, SP"
+
+  ### NOTE: Any tracker can add any of the following options
+  ###    signature: ""#    anon_signature: ""#    pr_signature: ""#    anon_pr_signature: ""#
+  ###    qbit_tag: ""# <-- for qbit tagging
+  ###    modq: true# !! this can be added, but beware not all trackers support
+  ###    xanon: true# <== if you want anon only for xxx
+
+  ACM:
+    api_key: "ACM_API_KEY"
+    anon: false
+
+  AITHER:
+    api_key: "ATHER_API_KEY"
+    anon: false
+    modq: false
+
+  ANT:
+    PID: "Custom_Announce_URL"
+    api_key: "ANT_API_KEY"
+    anon: false
+
+  AR:
+    PID: "Custom_Announce_URL" # {Custom_Announce_URL}/announce
+    username: "username"
+    password: "password"
+
+  BHD:
+    PID: "Custom_Announce_URL"
+    api_key: "BHD_API_KEY"
+    draft_default: true
+    anon: false
+
+  BHDTV:
+    PID: "https://trackerr.bit-hdtv.com/announce" # {Custom_Announce_URL}
+    api_key: "found under https://www.bit-hdtv.com/my.php"
+    my_announce_url: "https://trackerr.bit-hdtv.com/passkey/announce"
+    anon: false
+
+  BLU:
+    useAPI: true
+    api_key: "BLU_API_KEY"
+    anon: false
+    modq: false
+
+  BP:
+    api_key: "BLU_API_KEY"
+    anon: false
+
+  CBR:
+    api_key: "CBR_API_KEY"
+    anon: false
+    modq: false
+
+  DARK:
+    api_key: "DARK_API_KEY"
+    anon: false
+
+  DC:
+    username: "username"
+    password: "password"
+    passkey: "passkey"
+    anon: false
+
+  EMU:
+    api_key: EMU_API_KEY
+    anon: false
+  FL:
+    PID: "Custom_Announce_URL"
+    username: "FL_Username"
+    password: "FL_Password"
+    uploader_name: ""
+    anon: false
+
+  FNP:
+    api_key: "FNP_API_KEY"
+    anon: false
+
+  HDB:
+    username: "HDB_Username"
+    PASS_KEY: "HDB_PASSKEY"
+    useAPI: false
+    anon: false
+
+  HDT:
+    PID: "Custom_Announce_URL" #get from https://hdts-announce.ru/announce.php
+    username: "username"
+    password: "password"
+    my_announce_url: "https://hdts-announce.ru/announce.php?pid=<PASS_KEY/PID>"
+    anon: false
+
+  HHD:
+    api_key: "HHD_API_KEY"
+    anon: false
+
+  HP:
+    PID: "Custom_Announce_URL"
+    api_key: "HP_API_KEY"
+    anon: false
+
+  HUNO:
+    api_key: "HUNO_API_KEY"
+    anon: false
+
+  IHD:
+    api_key: "IHD_API_KEY"
+    anon: false
+
+  ITA:
+    api_key: "ITA_API_KEY"
+    anon: false
+
+  LCD:
+    api_key: "LCD_API_KEY"
+    anon: false
+
+  LDU:
+    api_key: "LDU_API_KEY"
+    anon: false
+
+  LST:
+    api_key: "LST_API_KEY"
+    anon: false
+    modq: false
+
+  LT:
+    api_key: "LT_API_KEY"
+    anon: false
+
+  MANUAL:
+
+  MB:
+    api_key: "MB_API_KEY"
+    anon: false
+
+  MTV:
+    PID: "Custom_Announce_URL"
+    api_key: "Get_from_security_page"
+    username: "<USERNAME>"
+    password: "<PASSWORD>"
+    anon: false
+
+  NBL:
+    PID: "Custom_Announce_URL"
+    api_key: "NBL_API_KEY"
+    anon: false
+
+  OE:
+    api_key: "OE_API_KEY"
+    anon: false
+
+  OINK:
+    api_key: "OINK_API_KEY"
+    anon: false
+
+  OTW:
+    api_key: "OTW_API_KEY"
+    anon: false
+    modq: false
+
+  PTER:
+    passkey: "passkey"
+    img_rehost: false
+    username: ""
+    password: ""
+    ptgen_api: ""
+    anon: false
+
+  PTP:
+    PID: "Custom_Announce_URL"
+    useAPI: false
+    add_web_source_to_desc: true
+    ApiUser: "PTP_API_USER"
+    ApiKey: "PTP_API_KEY"
+    username: ""
+    password: ""
+
+  PTT:
+    api_key: "PTT_API_KEY"
+    anon: false
+
+  R4E:
+    PID: "Custom_Announce_URL"
+    api_key: "R4E_API_KEY"
+    anon: false
+
+  RF:
+    api_key: "RF_API_KEY"
+    anon: false
+
+  RHD:
+    api_key: "RHD_API_KEY"
+    anon: false
+
+  RTF:
+    PID: "Custom_Announce_URL" # From upload page
+    api_key: "get_it_by_running_/api/ _login_command_from_ https://retroflix.club/api/doc"
+    anon: false
+
+  SHRI:
+    api_key: "ShareIsland_API_KEY"
+    anon: false
+
+  SN:
+    PID: "Custom_Announce_URL" #{Custom_Announce_URL}/announce
+    api_key: "Swarmazon_API_KEY"
+    anon: false
+
+  SP:
+    api_key: "SeedPool_API_KEY"
+    anon: false
+
+  STC:
+    api_key: "SkipTheCommercials_API_KEY"
+    anon: false
+
+  TDC:
+    PID: "Custom_Announce_URL"
+    api_key: "TDC_API_KEY"
+    anon: false
+
+  THR:
+    PID: "Custom_Announce_URL" # passkey={Custom_Announce_URL}
+    username: "username"
+    password: "password"
+    img_api: "get_this_from_the_forum_post"
+    pronfo_api_key: "pronfo_API_KEY"
+    pronfo_theme: "pronfo theme code"
+    pronfo_rapi_id: "pronfo remote api id"
+    anon: false
+
+  TL:
+    announce_key: "Custom_Announce_URL"
+
+  TLZ:
+    api_key: "TLZ_API_KEY"
+    anon: false
+
+  TOCA:
+    api_key: "TOCA_API_KEY"
+    anon: false
+
+  TMG:
+    PID: "TMG_API_KEY"
+    anon: false
+
+  TTG:
+    username: "username"
+    password: "password"
+    login_question: "login_question"
+    login_answer: "login_answer"
+    user_id: "user_id"
+    annouce_key: "TTG_PassKey" # https://totheglory.im/announce/{announce_key}
+    anon : false
+
+  TTR:
+    api_key: "TTR_API_KEY"
+    anon: false
+
+  ULCX:
+    api_key: "ULCX_API_KEY"
+    anon: false
+    modq: false
+
+  UTP:
+    api_key: "UTP_API_KEY"
+    anon: false
+
+  YU:
+    api_key: "YU_API_KEY"
+    anon: false
+
+
+
+TORRENT_CLIENTS:
+  Client1: {'torrent_client': 'qbit', 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'qbit_username', 'qbit_pass': 'qbit_password'}
+  qbit: {'torrent_client': 'qbit', 'enable_search': True, 'qbit_url': 'http://127.0.0.1', 'qbit_port': '8080', 'qbit_user': 'qbit_username', 'qbit_pass': 'qbit_username', 'torrent_storage_dir': '/Users/example/Library/Application Support/qBittorrent/BT_backup', 'content_layout': 'Original', 'VERIFY_WEBUI_CERTIFICATE': False}
+  rtorrent: {'torrent_client': 'rtorrent', 'rtorrent_url': 'https://user:password@server.host.tld:443/username/rutorrent/plugins/httprpc/action.php'}
+  deluge: {'torrent_client': 'deluge', 'deluge_url': 'localhost', 'deluge_port': '8080', 'deluge_user': 'deluge_username', 'deluge_pass': 'deluge_password'}
+  transmission: {'torrent_client': 'transmission', 'transmission_url': 'http://localhost:9091', 'transmission_user': 'trans_username', 'transmission_pass': 'trans_password', 'torrent_storage_dir': '/.config/transmission-daemon/Torrents/', 'enable_search': True}
+  watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
+watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
+
+watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
+
+watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
+
+watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
+
+watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
