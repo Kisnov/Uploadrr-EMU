@@ -1,3 +1,4 @@
+import inspect
 import asyncio
 import contextlib
 import platform
@@ -140,7 +141,11 @@ class Unit3d:
         # Determine name: manual_name > edit_name (if method exists) > meta["name"]
         name = meta.get("manual_name")
         if not name and hasattr(self, "edit_name"):
-            name = await self.edit_name(meta)
+            result = self.edit_name(meta)
+            if inspect.isawaitable(result):
+                name = await result
+            else:
+                name = result
         name = name or meta["name"]
 
         performers = meta.get("porndb", {}).get("performers", "") or ""
