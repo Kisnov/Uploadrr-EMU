@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+import inspect
 
 import src.utils.imports  # noqa: F401
 from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args
