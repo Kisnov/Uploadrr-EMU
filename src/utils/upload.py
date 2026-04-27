@@ -15,6 +15,7 @@ from src.utils.descgen import DescGenerator
 from .meta import get_missing
 from .ui import build_db_info
 
+import inspect
 
 async def upload_to_trackers(
     meta: Dict,
@@ -196,7 +197,11 @@ async def get_confirmation(meta: Dict, trackers: Optional[List[str]], tracker_re
                 continue
             tracker_obj = tracker_class(config=config)
             if hasattr(tracker_obj, "edit_name"):
-                name = await tracker_obj.edit_name(meta)
+                result = tracker_obj.edit_name(meta)
+                if inspect.isawaitable(result):
+                    name = await result
+                else:
+                    name = result
                 if name:
                     display_names.append(f"[bold green1]{tracker}[/bold green1]: {name}")
                 else:
