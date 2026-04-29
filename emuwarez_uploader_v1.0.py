@@ -2057,11 +2057,12 @@ def bootstrap(preferred_python: Optional[str] = None, ask_system_update: bool = 
     status_kv(uploadrr_config().exists(), "Config YAML", uploadrr_config())
     status_kv(True, "Venv", venv_path())
 
+    if ask_system_update:
+        maybe_offer_system_update()
+    
     rule("Herramientas del sistema")
     ensure_system_tools(REQUIRED_SYSTEM_TOOLS, allow_install=allow_system_install)
 
-    if ask_system_update:
-        maybe_offer_system_update()
 
     rule("Entorno virtual")
     maybe_offer_python311_install()
@@ -2198,9 +2199,13 @@ def intro_config() -> None:
               {green('5.')} Subida: define anonimato en EMU, carpeta de hardlinks y tag/grupo.
               {green('6.')} Seguridad: guarda la configuración en claro o cifrada.
 
-            Durante la ejecución normal se restaura config.yaml desde config.yaml.bak,
-            se inyectan los valores necesarios de forma temporal y se vuelve a restaurar
-            al finalizar, si hay error o si se interrumpe con Ctrl+C.
+            Después de la configuración:
+            {green('1.')} Recibe una película, episodio o carpeta.
+            {green('2.')} Carga la configuración (si está encriptada pedirá la contraseña).
+            {green('3.')} Comprueba entorno, dependencias, APIs y Uploadrr.
+            {green('4.')} Busca y confirma el ID correcto en TMDb y analiza el contenido con MediaInfo.
+            {green('6.')} Propone nombres segun el formato de eMuwarez para torrent y archivo.
+            {green('7.')} Sube el torrent a eMuwarez con Uploadrr y muestra resultado, trailer detectado y log.
             """
         ).strip()
     )
