@@ -419,7 +419,7 @@ def yesno_with_help(text: str, help_text: str, default: bool = False) -> bool:
     print()
     print(cyan(text))
     explain(help_text)
-    suffix = "S/n" if default else "s/N"
+    suffix = "Y/n" if default else "y/N"
     value = input(f"{cyan('Respuesta')} {gray('[' + suffix + ']')}: ").strip().lower()
     if not value:
         return default
@@ -427,7 +427,7 @@ def yesno_with_help(text: str, help_text: str, default: bool = False) -> bool:
 
 
 def yesno(text: str, default: bool = False) -> bool:
-    suffix = "S/n" if default else "s/N"
+    suffix = "Y/n" if default else "y/N"
     print()
     value = input(f"{cyan(text)} {gray('[' + suffix + ']')}: ").strip().lower()
     if not value:
@@ -2200,12 +2200,12 @@ def intro_config() -> None:
               {green('6.')} Seguridad: guarda la configuración en claro o cifrada.
 
             Después de la configuración:
-            {green('1.')} Recibe una película, episodio o carpeta.
-            {green('2.')} Carga la configuración (si está encriptada pedirá la contraseña).
-            {green('3.')} Comprueba entorno, dependencias, APIs y Uploadrr.
-            {green('4.')} Busca y confirma el ID correcto en TMDb y analiza el contenido con MediaInfo.
-            {green('6.')} Propone nombres segun el formato de eMuwarez para torrent y archivo.
-            {green('7.')} Sube el torrent a eMuwarez con Uploadrr y muestra resultado, trailer detectado y log.
+              {green('1.')} Recibe una película, episodio o carpeta.
+              {green('2.')} Carga la configuración (si está encriptada pedirá la contraseña).
+              {green('3.')} Comprueba entorno, dependencias, APIs y Uploadrr.
+              {green('4.')} Busca y confirma el ID correcto en TMDb y analiza el contenido con MediaInfo.
+              {green('6.')} Propone nombres segun el formato de eMuwarez para torrent y archivo.
+              {green('7.')} Sube el torrent a eMuwarez con Uploadrr y muestra resultado, trailer detectado y log.
             """
         ).strip()
     )
