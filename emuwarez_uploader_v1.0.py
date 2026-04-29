@@ -2059,10 +2059,9 @@ def bootstrap(preferred_python: Optional[str] = None, ask_system_update: bool = 
 
     if ask_system_update:
         maybe_offer_system_update()
-    
+
     rule("Herramientas del sistema")
     ensure_system_tools(REQUIRED_SYSTEM_TOOLS, allow_install=allow_system_install)
-
 
     rule("Entorno virtual")
     maybe_offer_python311_install()
@@ -3251,7 +3250,10 @@ def build_plan(
         hardlink_folder = hardlink_folder / f"Season {season_guess}"
 
     file_plans: list[FilePlan] = []
-    for source_file in files:
+    total_files = len(files)
+    for index, source_file in enumerate(files, 1):
+        if season_pack:
+            action(f"Generando propuesta capítulo {index}/{total_files}: {source_file.name}")
         if source_file.suffix.lower() != ".mkv":
             warn(f"Archivo no MKV detectado: {source_file}")
             if not yesno("¿Continuar con este archivo?", False):
@@ -3281,6 +3283,8 @@ def build_plan(
                 episode=episode,
             )
         )
+        if season_pack:
+            ok(f"Título propuesto capítulo {index}/{total_files}: {title_spaces}")
 
     if not file_plans:
         die("No quedan archivos válidos para procesar.")
@@ -3422,6 +3426,20 @@ def show_detected_file(fp: FilePlan, plan: RunPlan) -> None:
         kv("Nombre usado", "—")
 
 
+def show_season_titles_summary(plan: RunPlan) -> None:
+    if not plan.season_pack:
+        return
+    rule("Resumen de títulos propuestos")
+    print(f"  {gray('Nº'.ljust(6))}{gray('Título en eMuwarez')}")
+    print("  " + gray("─" * 73))
+    for index, fp in enumerate(plan.files, 1):
+        print(f"  {index:>2}.   {fp.title_spaces}")
+    print()
+    print("  " + gray("Título de Temporada en eMuwarez:"))
+    print("    " + green(plan.torrent_title))
+    print()
+
+
 def show_plan(plan: RunPlan) -> None:
     box("EMUWAREZ AUTO UPLOAD", "Propuesta")
     kv("Archivos", len(plan.files))
@@ -3440,6 +3458,7 @@ def show_plan(plan: RunPlan) -> None:
         print(bold("Hardlink:"))
         print("  " + cyan(str(fp.hardlink)))
 
+    show_season_titles_summary(plan)
 
 
 def proposal_action() -> str:
