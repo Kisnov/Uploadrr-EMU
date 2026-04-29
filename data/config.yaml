@@ -5,10 +5,10 @@ version: '2.1.0'
 # ------------------------------------------------------------------------------ #
 
 DEFAULT:
-  tmdb: TMDB_API_KEY
+  tmdb: null
   add_trailer: true
   add_logo: true
-  default_torrent_client: 'watch'
+  default_torrent_client: watch
   sfx_on_prompt: true
   always_anon: false
   # torrent_creation: mktorrent #default torf
@@ -124,7 +124,7 @@ TRACKERS:
     anon: false
 
   EMU:
-    api_key: EMU_API_KEY
+    api_key: "EMU_API_KEY"
     anon: false
   FL:
     PID: "Custom_Announce_URL"
@@ -340,12 +340,3 @@ TORRENT_CLIENTS:
   deluge: {'torrent_client': 'deluge', 'deluge_url': 'localhost', 'deluge_port': '8080', 'deluge_user': 'deluge_username', 'deluge_pass': 'deluge_password'}
   transmission: {'torrent_client': 'transmission', 'transmission_url': 'http://localhost:9091', 'transmission_user': 'trans_username', 'transmission_pass': 'trans_password', 'torrent_storage_dir': '/.config/transmission-daemon/Torrents/', 'enable_search': True}
   watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
-watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
-
-watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
-
-watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
-
-watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
-
-watch: {'torrent_client': 'watch', 'watch_folder': '/home/orangepi/testtorrents'}
