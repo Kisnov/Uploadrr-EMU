@@ -46,6 +46,7 @@ import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 import venv
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -2651,12 +2652,36 @@ def tmdb_query_variants(primary: str, score_inputs: list[str]) -> list[str]:
 
     return variants[:8]
 
+def compact_for_match(value: str) -> str:
+    """Normaliza texto para comparar títulos ignorando espacios, símbolos y acentos."""
+    value = clean_title(value)
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = value.casefold()
+    return re.sub(r"[^a-z0-9]+", "", value)
+
+
+def similarity_detail(a: str, b: str) -> tuple[float, str]:
+    a_clean = clean_title(a).casefold()
+    b_clean = clean_title(b).casefold()
+    if not a_clean or not b_clean:
+        return 0.0, "normal"
+
+    normal_score = difflib.SequenceMatcher(None, a_clean, b_clean).ratio()
+
+    a_compact = compact_for_match(a)
+    b_compact = compact_for_match(b)
+    compact_score = 0.0
+    if a_compact and b_compact:
+        compact_score = difflib.SequenceMatcher(None, a_compact, b_compact).ratio()
+
+    if compact_score > normal_score:
+        return compact_score, "compacta"
+    return normal_score, "normal"
+
+
 def similarity(a: str, b: str) -> float:
-    a = clean_title(a).lower()
-    b = clean_title(b).lower()
-    if not a or not b:
-        return 0.0
-    return difflib.SequenceMatcher(None, a, b).ratio()
+    return similarity_detail(a, b)[0]
 
 
 def parse_tmdb_arg(value: str, default_kind: str) -> tuple[str, int]:
@@ -2719,9 +2744,18 @@ def choose_tmdb(
     for item in results:
         title, _ = result_title_year(item, kind)
         targets = [title, item.get("original_title") or "", item.get("original_name") or ""]
-        item["_emu_score"] = max(
-            [similarity(src, target) for src in score_inputs for target in targets if src and target] or [0.0]
-        )
+        best_score = 0.0
+        best_mode = "normal"
+        for src in score_inputs:
+            for target in targets:
+                if not src or not target:
+                    continue
+                score, mode = similarity_detail(src, target)
+                if score > best_score:
+                    best_score = score
+                    best_mode = mode
+        item["_emu_score"] = best_score
+        item["_emu_match_mode"] = best_mode
 
     results.sort(key=lambda x: (x.get("_emu_score", 0.0), x.get("popularity", 0.0)), reverse=True)
     candidates = results[:10]
@@ -2733,6 +2767,8 @@ def choose_tmdb(
         title, year = result_title_year(item, kind)
         score = round(float(item.get("_emu_score", 0.0)) * 100)
         print(f"  {cyan(str(i).rjust(2))}. {green((str(score)+'%').rjust(4))}  {bold(title)} {gray('(' + year + ')')} {gray(kind + '/' + str(item.get('id')))}")
+        mode = item.get("_emu_match_mode") or "normal"
+        print("      " + gray(f"Coincidencia: {mode}"))
         overview = (item.get("overview") or "").replace("\n", " ")[:100]
         if overview:
             print("      " + gray(overview + ("…" if len(overview) >= 100 else "")))
@@ -3130,6 +3166,15 @@ def parse_season_arg(value: Optional[str]) -> Optional[int]:
     return int(m.group())
 
 
+def parse_episode_arg(value: Optional[str]) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    m = re.search(r"(?:S\d{1,2})?E?(\d{1,3})", str(value), re.I)
+    if not m:
+        die("--episode debe ser un número, E05 o S01E05.")
+    return int(m.group(1))
+
+
 def safe_filename_from_title(title: str) -> str:
     clean = re.sub(r"[\\/?:%*|\"<>]", "", title)
     clean = clean.replace(":", "")
@@ -3249,9 +3294,10 @@ def build_plan(
     tmdb_id: int,
     tmdb_details: dict[str, Any],
     forced_season: Optional[int] = None,
+    forced_episode: Optional[int] = None,
 ) -> RunPlan:
     title, year = title_and_year(tmdb_details, tmdb_kind)
-    season_pack = media_type == "tv" and len(files) > 1
+    season_pack = media_type == "tv" and len(files) > 1 and forced_episode is None
 
     season_guess = forced_season or season_from_folder(root)
     if media_type == "tv" and not season_guess and files:
@@ -3306,6 +3352,7 @@ def build_plan(
         if media_type == "tv":
             season, episode = season_episode_from_name(source_file, root)
             season = season or season_guess
+            episode = forced_episode or episode
             if not episode:
                 episode = int(prompt(f"No detecté episodio para {source_file.name}. Número", "1"))
 
@@ -3443,7 +3490,13 @@ def show_hardlink_warnings(plan: RunPlan, fatal: bool = False) -> None:
 
 def show_detected_file(fp: FilePlan, plan: RunPlan) -> None:
     rule(f"Detectado: {fp.source.name}")
-    kv("Tipo", "Serie" if plan.media_type == "tv" else "Película")
+    if plan.media_type == "tv" and fp.episode and not plan.season_pack:
+        detected_type = "Episodio"
+    elif plan.media_type == "tv":
+        detected_type = "Serie"
+    else:
+        detected_type = "Película"
+    kv("Tipo", detected_type)
     kv("TMDb", plan.tmdb_arg)
     kv("Título", plan.title)
     kv("Año estreno", plan.year)
@@ -3516,7 +3569,13 @@ def show_plan(plan: RunPlan) -> None:
 
     box("EMUWAREZ AUTO UPLOAD", "Propuesta")
     kv("Archivos", len(plan.files))
-    kv("Modo Uploadrr", "Carpeta completa / temporada" if plan.season_pack else "Archivo individual")
+    if plan.season_pack:
+        upload_mode = "Carpeta completa / temporada"
+    elif plan.media_type == "tv" and any(fp.episode for fp in plan.files):
+        upload_mode = "Archivo individual / episodio"
+    else:
+        upload_mode = "Archivo individual"
+    kv("Modo Uploadrr", upload_mode)
 
     for fp in plan.files:
         show_file_proposal(fp, plan)
@@ -3699,6 +3758,7 @@ def show_uploadrr_command(cmd: list[str]) -> None:
     category = ""
     resolution = ""
     season = ""
+    episode = ""
     for i, arg in enumerate(cmd):
         if arg == "-mt" and i + 1 < len(cmd):
             title = cmd[i + 1]
@@ -3712,6 +3772,8 @@ def show_uploadrr_command(cmd: list[str]) -> None:
             resolution = cmd[i + 1]
         elif arg == "-season" and i + 1 < len(cmd):
             season = cmd[i + 1]
+        elif arg == "-episode" and i + 1 < len(cmd):
+            episode = cmd[i + 1]
     kv("Archivo", target)
     if title:
         kv("Título", title)
@@ -3724,6 +3786,8 @@ def show_uploadrr_command(cmd: list[str]) -> None:
         kv("Resolución", resolution)
     if season:
         kv("Season", season)
+    if episode:
+        kv("Episode", episode)
 
 
 def parse_uploadrr_progress(fragment: str) -> Optional[tuple[int, str, str, Optional[bool]]]:
@@ -4005,8 +4069,19 @@ def process_path(args: argparse.Namespace) -> None:
             die("No se encontraron vídeos en la ruta indicada.")
 
         forced_season = parse_season_arg(getattr(args, "season", None))
+        forced_episode = parse_episode_arg(getattr(args, "episode", None))
+        if forced_episode is not None and getattr(args, "season", None) is None:
+            die(
+                "El parámetro --episode requiere indicar también --season.\n\n"
+                "Ejemplo:\n"
+                "  python emuwarez_uploader_v1.0.py \"/ruta/episodio.mkv\" --season 1 --episode 3"
+            )
+        if forced_episode is not None and len(files) != 1:
+            die("--episode solo puede usarse con un archivo de vídeo individual.")
         season_forced = getattr(args, "season", None) is not None
-        media_type = infer_media_type(files, root, args.type, season_forced=season_forced)
+        media_type = infer_media_type(files, root, args.type, season_forced=season_forced or forced_episode is not None)
+        if forced_episode is not None:
+            media_type = "tv"
 
         if len(files) > 1 and media_type != "tv":
             warn("Se detectaron varios vídeos en la carpeta, pero no se ha detectado una temporada.")
@@ -4034,12 +4109,29 @@ def process_path(args: argparse.Namespace) -> None:
         query = query_candidates[0] if query_candidates else (clean_title(seed_name) or seed_name)
 
         box("EMUWAREZ AUTO UPLOAD", "Búsqueda TMDb")
-        kv("Tipo", "Serie" if media_type == "tv" else "Película")
-        kv("Búsqueda inicial", query)
+        if root.is_dir():
+            kv("Carpeta detectada", root)
+            kv("Archivo usado", files[0].name)
+        else:
+            kv("Archivo detectado", files[0].name)
+        kv("Título interno MKV", first_media.internal_title if first_media and first_media.internal_title else "No detectado")
+        kv("Nombre saneado", query)
+        if forced_episode is not None:
+            search_type_label = "Episodio"
+        elif media_type == "tv":
+            search_type_label = "Serie"
+        else:
+            search_type_label = "Película"
+        kv("Tipo de búsqueda", search_type_label)
+        if media_type == "tv" and forced_season:
+            kv("Temporada", f"S{forced_season:02d}")
+        if forced_episode is not None:
+            kv("Episodio", f"E{forced_episode:02d}")
         if len(query_candidates) > 1:
-            kv("Búsquedas alternativas", ", ".join(query_candidates[1:4]))
-        if first_media and first_media.internal_title:
-            kv("Título interno detectado", first_media.internal_title)
+            print()
+            print(gray("  Variantes consultadas:"))
+            for idx, item in enumerate(query_candidates[:5], 1):
+                print("  " + gray(f"{idx}. {item}"))
 
         key = cfg.tmdb_api_key or tmdb_api_key()
         if not key:
@@ -4058,7 +4150,17 @@ def process_path(args: argparse.Namespace) -> None:
             auto_select_first=auto_tmdb,
             auto_select_reason=auto_tmdb_reason,
         )
-        plan = build_plan(cfg, root, files, media_type, tmdb_kind, tmdb_id, details, forced_season=forced_season)
+        plan = build_plan(
+            cfg,
+            root,
+            files,
+            media_type,
+            tmdb_kind,
+            tmdb_id,
+            details,
+            forced_season=forced_season,
+            forced_episode=forced_episode,
+        )
 
         while True:
             show_plan(plan)
@@ -4216,6 +4318,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
               ./emuwarez_upload.py "/ruta/Pelicula"
               ./emuwarez_upload.py "/ruta/One Piece/Season 2"
               ./emuwarez_upload.py /ruta/One Piece/Season 2
+              ./emuwarez_upload.py "/ruta/Serie.S01E05.mkv" --season 1 --episode 5
 
             Simulación:
               ./emuwarez_upload.py "/ruta/Pelicula" --dry-run
@@ -4235,7 +4338,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Simula todo; no modifica nada")
     parser.add_argument("--yes", action="store_true", help="Aplica sin confirmación final")
     parser.add_argument("--no-upload", action="store_true", help="No ejecuta Uploadrr")
-    parser.add_argument("--season", nargs="?", const="auto", help="Forzar carpeta como temporada completa. Opcional: número, 2 o S02")
+    parser.add_argument("--season", nargs="?", const="auto", help="Forzar temporada. Opcional: número, 2 o S02")
+    parser.add_argument("--episode", help="Forzar modo episodio. Requiere --season. Ejemplo: 5, E05 o S01E05")
     parser.add_argument("--debug-uploadrr", "--uploader-debug", dest="debug_uploadrr", action="store_true", help="Mostrar salida original completa de Uploadrr")
     parser.add_argument("--tmdb", help="Forzar TMDb: movie/123, tv/123 o número")
     parser.add_argument("--type", choices=["movie", "tv"], help="Forzar tipo")
