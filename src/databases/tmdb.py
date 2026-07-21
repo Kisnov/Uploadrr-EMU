@@ -189,6 +189,11 @@ class TMDbHandler:
                 "api_key": self.api_key,
                 "append_to_response": "external_ids,videos,images,credits,keywords",
                 "include_adult": True,
+                # Widen the videos list beyond whatever TMDb returns by
+                # default (usually English-only) so a Spanish trailer is
+                # actually present in `results` when TMDb has one —
+                # _get_youtube_trailer() below picks it first if so.
+                "include_video_language": "es,en,null",
             },
         )
         response.raise_for_status()
@@ -323,11 +328,15 @@ class TMDbHandler:
         return str(int(imdb_id.replace("tt", ""))).zfill(7) if imdb_id and imdb_id != "0" else "0"
 
     def _get_youtube_trailer(self, data: Dict) -> Optional[str]:
-        """Extract YouTube trailer key from TMDb data."""
-        trailer = next(
-            (v["key"] for v in data.get("videos", {}).get("results", []) if v.get("site") == "YouTube" and v.get("type") == "Trailer"),
-            None,
-        )
+        """Extract YouTube trailer key from TMDb data — Spanish (Castellano)
+        first if TMDb has one (needs include_video_language=es,... on the
+        request, see _fetch_tmdb_metadata), otherwise whatever else TMDb
+        returned (usually English)."""
+        results = data.get("videos", {}).get("results", []) or []
+        is_trailer = lambda v: v.get("site") == "YouTube" and v.get("type") == "Trailer"  # noqa: E731
+        trailer = next((v["key"] for v in results if is_trailer(v) and v.get("iso_639_1") == "es"), None)
+        if not trailer:
+            trailer = next((v["key"] for v in results if is_trailer(v)), None)
         if not trailer:
             log.debug(f"No YouTube trailer found for TMDb ID {data.get('id')}")
         return trailer

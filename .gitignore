@@ -8,6 +8,7 @@ __pycache__/
 .wdm/
 *.lock
 venv/*
+.venv/
 
 # Project Specifics
 *.mkv

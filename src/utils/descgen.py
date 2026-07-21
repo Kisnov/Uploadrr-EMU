@@ -355,7 +355,12 @@ class DescGenerator:
     async def _write_media_elements(self, descfile, meta: Dict, tracker: str, control: DescControl):
         """Helper method to write trailer and logo based on control"""
         if control.include_trailer and tracker not in ("AITHER", "CBR", "OE", "TMG", "TL"):
-            if self.config["DEFAULT"].get("add_trailer", False) and meta.get("category") == "MOVIE":
+            # Originally MOVIE-only — TMDb has trailers for TV/anime too
+            # (confirmed: One Piece's own TMDb entry has one), the category
+            # gate was just never extended. meta["youtube"] is already
+            # resolved at the SERIES level for a season/series upload (its
+            # own tmdb id, not a per-episode one), so no extra lookup needed.
+            if self.config["DEFAULT"].get("add_trailer", False) and meta.get("category") in ("MOVIE", "TV"):
                 if key := meta.get("youtube"):
                     await descfile.write(f"[center][youtube]{key}[/youtube][/center]")
 
