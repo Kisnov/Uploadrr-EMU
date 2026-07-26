@@ -10,7 +10,7 @@ import psutil
 
 from src.screenshots.generator import ScreenshotGenerator
 from src.screenshots.rehoster import RehostManager
-from src.screenshots.up2host import ScreenshotUploader
+from src.screenshots.up2host import AllHostsFailedError, ScreenshotUploader
 from src.utils.console import log
 
 
@@ -31,6 +31,13 @@ class ScreenshotManager:
 
             # Handle Videos
             return await self._handle_video_content(meta, tracker_whitelists, task_widget)
+
+        except AllHostsFailedError:
+            # Every configured image host failed for a batch — unlike other
+            # screenshot issues (kept best-effort below), this means the
+            # upload has no images to show and should stop as a real error
+            # instead of silently continuing.
+            raise
 
         except Exception as e:
             log.exception(f"Error in handle_screenshots: {e}")

@@ -9,6 +9,12 @@ from src.progress import ProgressManager
 from src.utils.console import console, log
 
 
+class AllHostsFailedError(RuntimeError):
+    """Every configured image host failed for a batch — distinct from other
+    exceptions caught in ScreenshotManager.handle_screenshots() (which stays
+    best-effort for everything else, e.g. one corrupt local screenshot)."""
+
+
 class ScreenshotUploader:
     def __init__(self, config, base_dir):
         self.config = config
@@ -165,7 +171,7 @@ class ScreenshotUploader:
         if last_exc:
             err_msg += f": last error: {last_exc!r}"
         log.error(err_msg)
-        return []
+        raise AllHostsFailedError(err_msg)
 
     async def _upload_with_retries(self, host_name, images, image_paths, meta, title, max_images, adult=False, max_retries=3):
         pm = ProgressManager.get_instance()
