@@ -13,7 +13,7 @@ class PIXHOST(BaseImageHost):
             "max_th_size": (None, "350", "text/plain"),
             "img": (image_path, data, "image/png"),
         }
-        resp = await client.post("https://api.pixhost.to/images", files=files)
+        resp = await client.post("https://api.pixhost.cc/images", files=files)
         self._validate_response(resp, "pixhost")
 
         result = resp.json()
