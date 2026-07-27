@@ -23,6 +23,7 @@ class ProgressManager:
             self.live: Optional[Live] = None
             self.progress_widget = Spinner("dots", text="Initializing...", style="green1")
             self.progress_group = Group(self.progress_widget)
+            self._last_plain_message: Optional[str] = None
             self._initialized = True
 
     @classmethod
@@ -51,6 +52,16 @@ class ProgressManager:
 
         if self.live:
             self.live.update(self.progress_group)
+            # Live(transient=True) writes NOTHING at all when the console
+            # isn't a real terminal (e.g. piped into a log-capturing parent
+            # process, exactly how this runs when launched headlessly) — so
+            # every message routed only through here (hashing %, screenshot
+            # upload counts, etc.) would otherwise vanish from any captured
+            # log entirely. Deduped so a 10Hz refresh doesn't spam a line
+            # per tick — only print when the visible text actually changes.
+            if not self.console.is_terminal and message != self._last_plain_message:
+                self.console.print(message, style=style)
+                self._last_plain_message = message
 
     def screen_start(self, total_screenshots: int) -> None:
         """Initialize upload progress with the total number of screenshots."""
