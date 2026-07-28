@@ -257,7 +257,15 @@ class Unit3d:
                                 raw_url = response_json.get("data", "")
                                 if raw_url:
                                     async with httpx.AsyncClient(timeout=self.timeout) as client:
-                                        torrent_response = await client.get(raw_url)
+                                        # Same auth as the upload POST above — this GET was
+                                        # going out with neither the api_token param nor the
+                                        # User-Agent header, so a tracker that requires auth
+                                        # to download a torrent (eMuwarez does) 403s it. That
+                                        # silently skips writing [tracker]{name}.torrent, so
+                                        # add_to_client() later has nothing to hand qBittorrent
+                                        # even though the upload itself succeeded (observed in
+                                        # production on a real Chappie re-upload, 2026-07-28).
+                                        torrent_response = await client.get(raw_url, params=params, headers=headers)
                                         torrent_response.raise_for_status()
                                         torrent_data = torrent_response.content
                                         new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
