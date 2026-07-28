@@ -212,6 +212,28 @@ class VideoProcessor:
             default_result = guessit(re.sub("[^0-9a-zA-Z]+", " ", guess_name), {"excludes": ["country", "language"]})
             if not meta["xxx"]:
                 meta["filename"] = guess_result.get("title", default_result.get("title", ""))
+                if not meta["filename"] and meta["category"] == "TV":
+                    # meta["uuid"] is an opaque run id with no real title in
+                    # it — guessit finds nothing, leaving meta["filename"]
+                    # empty. generator.py then builds screenshot output names
+                    # as f"{filename}-{episode_id}.png", so an empty filename
+                    # produces a literal "-E07-3.png": ffmpeg's own arg parser
+                    # reads a leading "-" as an unrecognized option instead of
+                    # a filename, failing every screenshot for every episode
+                    # (real TV-pack upload, 2026-07-28). Fall back to the
+                    # actual primary video file's name — same source the
+                    # MOVIE branch above already uses successfully, and by
+                    # this point in a TV pack it's already been renamed to
+                    # the real release name, so guessit can extract a proper
+                    # series title from it just like it does for movies.
+                    fallback_name = Path(video).name.replace("-", " ")
+                    fallback_guess = self._cached_guessit(
+                        re.sub(r"[^0-9a-zA-Z\[\]]+", " ", fallback_name), EXCLUDE_COUNTRY_LANG
+                    )
+                    fallback_default = guessit(
+                        re.sub("[^0-9a-zA-Z]+", " ", fallback_name), {"excludes": ["country", "language"]}
+                    )
+                    meta["filename"] = fallback_guess.get("title", fallback_default.get("title", ""))
             else:
                 # guessit often thinks studio is title so we use episode_title if it exists else title
                 meta["filename"] = (
