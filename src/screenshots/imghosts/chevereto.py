@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from urllib.parse import quote
 
 import aiofiles
 
@@ -9,10 +10,15 @@ from .base import BaseImageHost
 
 
 class CheveretoTemplate(BaseImageHost):
-    def __init__(self, config, api_url, imghost):
+    def __init__(self, config, api_url, imghost, key_in_query=False):
         super().__init__(config)
         self.api_url = api_url
         self.host = imghost
+        # Chevereto authenticates with an X-API-Key header, but not every host
+        # behind this template does. imgbb only reads the ?key= query
+        # parameter and ignores the header outright, answering "Invalid API v1
+        # key" (code 100) for every upload no matter how valid the key is.
+        self.key_in_query = key_in_query
 
     async def upload(self, client, image_path, title=None, adult=False):
         """Upload an image to Chevereto and return a dict with img_url, raw_url, and web_url."""
@@ -48,7 +54,10 @@ class CheveretoTemplate(BaseImageHost):
             if title:
                 data["title"] = title
 
-            resp = await client.post(self.api_url, headers=headers, data=data)
+            url = self.api_url
+            if self.key_in_query:
+                url = f"{url}{'&' if '?' in url else '?'}key={quote(api_key, safe='')}"
+            resp = await client.post(url, headers=headers, data=data)
 
             content_type = resp.headers.get("content-type")
             text = await resp.aread()
