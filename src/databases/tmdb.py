@@ -194,6 +194,14 @@ class TMDbHandler:
                 # actually present in `results` when TMDb has one —
                 # _get_youtube_trailer() below picks it first if so.
                 "include_video_language": "es,en,null",
+                # Same reason, for artwork: without this TMDb only returns
+                # the images matching the request language (English by
+                # default), so a Spanish logo never even reaches
+                # _process_tmdb_images() and the description ends up carrying
+                # the original-language title (e.g. the POINT BREAK logo on a
+                # "Le llaman Bodhi" upload). "null" keeps textless artwork in
+                # the list, which is what a backdrop wants.
+                "include_image_language": "es,en,null",
             },
         )
         response.raise_for_status()
@@ -271,8 +279,28 @@ class TMDbHandler:
         logos = data.get("images", {}).get("logos", [])
         backdrops = data.get("images", {}).get("backdrops", [])
 
-        first_logo = next((logo for logo in logos if logo.get("iso_639_1") == "en"), None) or (logos[0] if logos else None)
-        first_backdrop = next((bd for bd in backdrops if bd.get("iso_639_1") == "en"), None) or (backdrops[0] if backdrops else None)
+        # Spanish first, English second, anything third. This is a Spanish
+        # tracker: a logo carries the title baked into the artwork, so taking
+        # the English one put the original title on the description of a film
+        # published under its Spanish one. Same order the trailer already
+        # uses (see _get_youtube_trailer).
+        def _by_language(images: list, *, prefer_textless: bool = False) -> Optional[Dict]:
+            if not images:
+                return None
+            order = ["es", None, "en"] if prefer_textless else ["es", "en"]
+            for lang in order:
+                match = next((i for i in images if i.get("iso_639_1") == lang), None)
+                if match:
+                    return match
+            return images[0]
+
+        first_logo = _by_language(logos)
+        # For a backdrop the order is Spanish, then textless (iso_639_1
+        # null), then English: a clean still beats one with the wrong
+        # language burned in, which is what this used to pick even though
+        # TMDb usually offers dozens of textless ones. Nothing reads
+        # meta["backdrop"] today, so this only matters the day something does.
+        first_backdrop = _by_language(backdrops, prefer_textless=True)
 
         return {
             "poster": f"https://image.tmdb.org/t/p/original{poster_path}" if poster_path else "",
