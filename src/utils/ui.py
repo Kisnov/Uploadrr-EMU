@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Dict, List, Tuple
 
 from rich.align import Align
@@ -10,6 +11,14 @@ from src.utils.console import console
 
 
 def print_banner() -> None:
+    # Solo en una terminal de verdad. Ejecutado desde otro programa la salida
+    # va por una tubería y acaba en un fichero de log, donde un dibujo de siete
+    # líneas es ruido delante de lo único que se va a leer ahí: qué pasó con la
+    # subida. Se comprueba la salida en vez de añadir un flag porque no hay
+    # ningún caso en que alguien quiera el dibujo dentro de un log.
+    if not sys.stdout.isatty():
+        return
+
     ascii_art = r"""
 ┌────────────────────────────────────────────────────────────────────────┐
 │  _____  __________ ______ _______ _______ ________ ________ ________   │
