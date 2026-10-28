@@ -14,7 +14,6 @@ import bencode
 import httpx
 import qbittorrentapi
 from deluge_client import DelugeRPCClient
-from pyrobase.parts import Bunch
 from torf import Torrent
 
 from src.utils.console import console, log
@@ -531,7 +530,7 @@ class Clients:
         single = files is None
         if single:
             datapath = str(Path(datapath) / metainfo["info"]["name"]) if Path(datapath).is_dir() else datapath
-            files = [Bunch(path=[datapath], length=metainfo["info"]["length"])]
+            files = [{"path": [datapath], "length": metainfo["info"]["length"]}]
 
         resume = metainfo.setdefault("libtorrent_resume", {})
         resume["bitfield"] = len(metainfo["info"]["pieces"]) // 20
