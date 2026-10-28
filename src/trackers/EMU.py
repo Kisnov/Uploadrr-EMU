@@ -6,7 +6,7 @@ from src.trackers.UNIT3D import Unit3d
 class EMU(Unit3d):
     tracker = "EMU"
     source_flag = "eMuwarez"
-    domain = "https://emuwarez.com"
+    domain = "https://emu-warez.com"
     allowed_imghosts = []
     banned_groups = [""]
 
