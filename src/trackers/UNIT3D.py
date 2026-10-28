@@ -255,6 +255,8 @@ class Unit3d:
             try:
                 response_json = response.json()
             except ValueError:
+                response_json = None
+            if not isinstance(response_json, dict):
                 log.error(f"Unexpected response:\n{response.text}")
                 return False
             if not response_json.get("success", False):
@@ -339,9 +341,9 @@ class Unit3d:
         except DupeSearchError as e:
             console.print(f"[red]{e}")
             return None
-        for item in items:
-            if item["attributes"]["name"] == name:
-                return item["attributes"].get("download_link")
+        for attributes in items:
+            if attributes["name"] == name:
+                return attributes.get("download_link")
         return None
 
     def _print_http_error(self, response: httpx.Response) -> None:
@@ -371,12 +373,12 @@ class Unit3d:
         else:
             console.print(f"[yellow]Searching for existing torrents on {self.tracker}...")
 
-        for item in await self._search(meta):
-            dupes[item["attributes"]["name"]] = item["attributes"]["size"]
+        for attributes in await self._search(meta):
+            dupes[attributes["name"]] = attributes["size"]
         return dupes
 
     async def _search(self, meta: Dict[str, Any], name: str = "") -> list:
-        """Todos los resultados de /api/torrents/filter, página a página.
+        """Los atributos de todos los resultados de /api/torrents/filter, página a página.
 
         Si alguna página falla no se sabe si ya está subido: DupeSearchError, nunca "nada encontrado".
         """
@@ -406,15 +408,22 @@ class Unit3d:
                     raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
                 try:
                     body = response.json()
-                    items.extend(body["data"])
+                    if not isinstance(body["data"], list):
+                        raise TypeError("data no es una lista")
+                    for entry in body["data"]:
+                        attributes = entry["attributes"]
+                        # Sin nombre y tamaño no se puede comparar con lo que se va a subir.
+                        if not isinstance(attributes["name"], str) or "size" not in attributes:
+                            raise TypeError("resultado sin nombre o tamaño")
+                        items.append(attributes)
                     next_url = (body.get("links") or {}).get("next")
-                except (ValueError, KeyError, TypeError, AttributeError) as e:
+                    if not next_url:
+                        return items
+                    # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría).
+                    url = httpx.URL(next_url)
+                except (ValueError, KeyError, TypeError, AttributeError, httpx.InvalidURL) as e:
                     raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió una respuesta inesperada") from e
-                if not next_url:
-                    return items
-                # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría); la API key solo va a
-                # su propio dominio.
-                url = httpx.URL(next_url)
+                # La API key solo va a su propio dominio.
                 if (url.scheme, url.host, url.port) != origin:
                     raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} pagina hacia otro dominio")
                 if "api_token" not in url.params:

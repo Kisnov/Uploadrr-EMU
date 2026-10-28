@@ -117,8 +117,17 @@ def test_search_other_resolutions_alone(tracker, emu, meta):
 
 @pytest.mark.parametrize(
     "second_page",
-    [(500, b"error"), (200, b"<html>login</html>"), (200, {"links": {"next": None}})],
-    ids=["http-500", "no-json", "sin-data"],
+    [
+        (500, b"error"),
+        (200, b"<html>login</html>"),
+        (200, {"links": {"next": None}}),
+        (200, {"data": "abc", "links": {"next": None}}),
+        (200, {"data": [{"id": 2}], "links": {"next": None}}),
+        (200, {"data": [{"attributes": {"name": "B"}}], "links": {"next": None}}),
+        (200, {"data": [], "links": {"next": 5}}),
+        (200, {"data": [], "links": {"next": "http://[::1"}}),
+    ],
+    ids=["http-500", "no-json", "sin-data", "data-texto", "sin-attributes", "sin-size", "next-numero", "next-invalido"],
 )
 def test_search_failed_page_raises(tracker, emu, meta, second_page):
     def search(query):
@@ -273,6 +282,12 @@ def test_upload_rejected_name_on_first_try_is_a_failure(tracker, emu, upload_met
     tracker.routes[("POST", UPLOAD)] = lambda q: (404, {"success": False, "data": {"name": ["The name has already been taken."]}})
     assert run(emu.upload(upload_meta)) is False
     assert tracker.calls("GET", SEARCH) == []
+
+
+@pytest.mark.parametrize("body", [b"<html></html>", b"[1, 2]"], ids=["html", "json-lista"])
+def test_upload_unexpected_body_fails(tracker, emu, upload_meta, body):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, body)
+    assert run(emu.upload(upload_meta)) is False
 
 
 def test_upload_forbidden_is_not_retried(tracker, emu, upload_meta):
