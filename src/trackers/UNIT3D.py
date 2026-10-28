@@ -258,6 +258,10 @@ class Unit3d:
                         if success:
                             try:
                                 raw_url = response_json.get("data", "")
+                                torrent_id = re.search(r"/(\d+)\.", raw_url or "")
+                                if torrent_id:
+                                    # Línea fija para quien lanza esto: la ficha del torrent subido.
+                                    print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
                                 if raw_url:
                                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                                         # Same auth as the upload POST above — this GET was
