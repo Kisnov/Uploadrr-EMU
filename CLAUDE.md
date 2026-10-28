@@ -8,6 +8,9 @@ into its Docker image at `/opt/Uploadrr` and runs it unattended:
 
 with stdin closed and `HOME=/` when the container has no user.
 
+Only the EMU path matters. The other trackers (BLU, ACM, AITHER, PTP…) are inherited code: don't fix, review
+or report their errors unless they break an eMuwarez upload.
+
 ## Workflow
 
 - Sole maintainer: Gabriel (Kisnov). Main repo `Kisnov/Uploadrr-EMU`, base `main`. Branch and PR, grouped
