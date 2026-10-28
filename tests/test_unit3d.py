@@ -206,8 +206,9 @@ class FakeDesc:
 
 
 @pytest.fixture
-def upload_meta(tmp_path, monkeypatch, meta):
+def upload_meta(tmp_path, monkeypatch, meta, tracker):
     monkeypatch.setattr(unit3d, "DescGenerator", FakeDesc)
+    tracker.routes[("GET", SEARCH)] = lambda q: (200, {"data": [], "links": {"next": None}})
     work = tmp_path / "tmp" / "u"
     work.mkdir(parents=True)
     (work / "MEDIAINFO.txt").write_text("mediainfo")
@@ -343,7 +344,39 @@ def test_upload_without_answer_and_not_on_tracker_fails(tracker, emu, upload_met
 def test_upload_rejected_name_on_first_try_is_a_failure(tracker, emu, upload_meta):
     tracker.routes[("POST", UPLOAD)] = lambda q: (404, {"success": False, "data": {"name": ["The name has already been taken."]}})
     assert run(emu.upload(upload_meta)) is False
-    assert tracker.calls("GET", SEARCH) == []
+    assert len(tracker.calls("GET", SEARCH)) == 1  # solo la foto de antes de subir
+
+
+def test_upload_never_recovers_an_older_torrent_with_the_same_name(tracker, emu, upload_meta):
+    emu.timeout = httpx.Timeout(0.2)
+    old = item(NAME, download_link=f"{tracker.url}/torrent/download/7.rsskey")
+
+    def upload(query):
+        time.sleep(0.5)  # no entra, y además no contesta
+        return 500, b""
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (200, {"data": [old], "links": {"next": None}})
+
+    assert run(emu.upload(upload_meta)) is False
+    assert tracker.calls("GET", "/torrent/download/7.rsskey") == []
+
+
+def test_upload_without_previous_snapshot_is_not_recovered(tracker, emu, upload_meta):
+    emu.timeout = httpx.Timeout(0.5)
+    landed = []
+
+    def upload(query):
+        landed.append(NAME)
+        time.sleep(1)
+        return 200, {"success": True, "data": download_url(tracker)}
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        (500, b"") if not landed else (200, {"data": [item(NAME, download_link=download_url(tracker))], "links": {"next": None}})
+    )
+
+    assert run(emu.upload(upload_meta)) is False
 
 
 @pytest.mark.parametrize("body", [b"<html></html>", b"[1, 2]"], ids=["html", "json-lista"])

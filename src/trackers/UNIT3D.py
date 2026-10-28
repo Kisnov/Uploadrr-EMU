@@ -236,13 +236,17 @@ class Unit3d:
             await edit_torrent(meta, None, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
             return "DEBUG"
 
+        # Lo que ya hay con este nombre: si luego hay que buscar la subida, solo cuenta un torrent nuevo.
+        previous = await self._links_named(meta, name)
         response, attempts = await self._post_upload(data, torrent_path, nfo_file, extra_files_meta, headers, params)
 
         raw_url = None
         # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco por nombre antes de darlo por
         # fallido. El siguiente intento, en cambio, choca con el nombre ya usado.
         if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
-            raw_url = await self._find_uploaded(meta, name)
+            current = await self._links_named(meta, name) if previous is not None else None
+            new = sorted(current - previous) if current is not None else []
+            raw_url = new[0] if new else None
             if raw_url:
                 console.print(f"[yellow]{self.tracker}: un intento anterior ya había subido el torrent")
             elif response is None:
@@ -337,18 +341,14 @@ class Unit3d:
                     await asyncio.sleep(delay)
         return None, error
 
-    async def _find_uploaded(self, meta: Dict[str, Any], name: str) -> Optional[str]:
-        """Enlace de descarga del torrent llamado exactamente name, o None."""
+    async def _links_named(self, meta: Dict[str, Any], name: str) -> Optional[set]:
+        """Enlaces de descarga de los torrents llamados exactamente name, o None si no se puede buscar."""
         try:
             items = await self._search(meta, name=name)
-        except DupeSearchError as e:
-            console.print(f"[red]{e}")
+        except DupeSearchError:
             return None
-        for attributes in items:
-            link = attributes.get("download_link")
-            if attributes["name"] == name and isinstance(link, str) and link:
-                return link
-        return None
+        links = (attributes.get("download_link") for attributes in items if attributes["name"] == name)
+        return {link for link in links if isinstance(link, str) and link}
 
     def _print_http_error(self, response: httpx.Response) -> None:
         if response.status_code == 302:
