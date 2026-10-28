@@ -1,5 +1,4 @@
 import inspect
-import asyncio
 import contextlib
 import platform
 import re
@@ -13,6 +12,10 @@ from rich.pretty import Pretty
 from src.utils.console import console, log
 from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
+
+
+class DupeSearchError(RuntimeError):
+    """No se pudo comprobar si el contenido ya está en el tracker."""
 
 
 class Unit3d:
@@ -255,6 +258,10 @@ class Unit3d:
                         if success:
                             try:
                                 raw_url = response_json.get("data", "")
+                                torrent_id = re.search(r"/(\d+)\.", raw_url or "")
+                                if torrent_id:
+                                    # Línea fija para quien lanza esto: la ficha del torrent subido.
+                                    print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
                                 if raw_url:
                                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                                         # Same auth as the upload POST above — this GET was
@@ -326,21 +333,16 @@ class Unit3d:
             "name": meta.get("edition", ""),
         }
 
+        # Si la búsqueda falla no se sabe si ya está subido: antes devolvía {} y
+        # el dupe check decía "No dupes found" y subía a ciegas.
+        headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
-                response = await client.get(self.search_url, params=params)
-                if response.status_code == 200:
-                    response_json = response.json()
-                    for item in response_json.get("data", []):
-                        name = item["attributes"]["name"]
-                        size = item["attributes"]["size"]
-                        dupes[name] = size
-                else:
-                    console.print(f"[red]Failed to search: HTTP {response.status_code}[/red]")
-            except Exception as e:
-                if self.tracker in ("LCD", "LT", "TTR"):
-                    console.print(f"[red]No se pudo buscar torrents existentes: {e}[/red]")
-                else:
-                    console.print(f"[red]Unable to search for existing torrents: {e}[/red]")
-                await asyncio.sleep(5)
+                response = await client.get(self.search_url, params=params, headers=headers)
+            except httpx.HTTPError as e:
+                raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
+        if response.status_code != 200:
+            raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
+        for item in response.json()["data"]:
+            dupes[item["attributes"]["name"]] = item["attributes"]["size"]
         return dupes

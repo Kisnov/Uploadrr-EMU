@@ -6,6 +6,7 @@ from rich.prompt import Confirm
 
 from src.progress import ProgressManager
 from src.trackers.COMMON import COMMON
+from src.trackers.UNIT3D import DupeSearchError
 from src.utils.console import console
 
 
@@ -47,7 +48,13 @@ async def pre_upload_checks(
                 continue
 
         if not meta.get("skip_dupe_check", False):
-            dupes = await tracker_instance.search_existing(meta)
+            try:
+                dupes = await tracker_instance.search_existing(meta)
+            except DupeSearchError as e:
+                console.print(f"[red]{e}")
+                skipped_details.append((path, f"Dupe search failed on {tracker}"))
+                tracker_upload_ok[tracker] = False
+                continue
             if not meta.get("is_music", False) and not meta["xxx"]:
                 dupes = await common.filter_dupes(dupes, meta)
             meta, skipped = await dupe_check(dupes, meta, config, skipped_details, path)

@@ -263,6 +263,10 @@ class Uploadrr:
             progress.stop()
 
         print_summary(total, successful, skipped, skipped_details, skipped_tmdb)
+        # Con un duplicado, un rechazo o sin TMDb se salía con 0, y quien lanza
+        # esto (emuwarez-uploadrr) lo daba por subido.
+        if successful < total:
+            sys.exit(1)
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""
@@ -282,7 +286,9 @@ async def main() -> None:
     config = load_yaml_config(config_path)
     redactor.load_from_config(config)
     redactor.add_rule(str(base_dir), "Uploadrr")
-    redactor.add_rule(str(Path.home()), "HOME")
+    # Con HOME=/ (contenedor sin usuario) cada / de la salida acababa en <HOME>.
+    if str(Path.home()) != "/":
+        redactor.add_rule(str(Path.home()), "HOME")
     if sys.platform == "win32":
         winbase = str(base_dir.as_posix())
         winhome = str(Path.home().as_posix())
