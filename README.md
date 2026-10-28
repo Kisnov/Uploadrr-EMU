@@ -1,5 +1,10 @@
 # Uploadrr-EMU
 
+[![CI](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml/badge.svg)](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+[![Lint: ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
+[![Licencia: GPL-3.0](https://img.shields.io/github/license/Kisnov/Uploadrr-EMU)](LICENSE)
+
 Fork de [Uploadrr](https://codeberg.org/CvT/Uploadrr) dedicado a subir a **[eMuwarez](https://emu-warez.com)**, un
 tracker UNIT3D (clave `EMU`). Prepara la subida (mediainfo, capturas, descripción, `.torrent`), busca duplicados,
 sube y añade el torrent firmado a qBittorrent para sembrarlo.
