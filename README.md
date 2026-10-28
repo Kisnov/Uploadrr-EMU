@@ -83,7 +83,7 @@ Para series, `-c tv` y además `-season S01` (y `-episode E01` si es un episodio
 | `-mt` | Nombre del torrent, en lugar del que generaría Uploadrr |
 | `-tmdb` | ID de TMDb |
 | `-ua` | Sin preguntas. Ante un posible duplicado o un grupo vetado, no sube |
-| `-c` | Categoría: `movie` o `tv` |
+| `-c` | Categoría: `movie` o `tv`. También acepta `fanres`, `sports` y `music`, heredadas de Uploadrr |
 | `-res` | Resolución: `2160p`, `1080p`, `1080i`, `720p`, `576p`, `576i`, `480p`, `480i`, `4320p`, `8640p` u `other` |
 
 `python upload.py --help` lista todas las opciones.
