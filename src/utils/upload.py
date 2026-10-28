@@ -137,7 +137,12 @@ async def upload_to_tracker(
     result = await tracker_instance.upload(meta)
     if result is True:
         if client:
-            await client.add_to_client(meta, tracker_name)
+            # El torrent ya está en el tracker: si falla el cliente no es una
+            # subida fallida, y reintentarla la duplicaría.
+            try:
+                await client.add_to_client(meta, tracker_name)
+            except Exception as e:
+                console.print(f"[red]Subido, pero no se pudo añadir al cliente de torrents: {e}[/red]")
         return True, skipped_files
     else:
         if client and result == "DEBUG":
