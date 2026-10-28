@@ -9,7 +9,7 @@ guessit
 httpx
 imdbinfo
 Jinja2
-langcodes
+langcodes[data]
 nest_asyncio
 numpy
 packaging
