@@ -522,7 +522,7 @@ class Clients:
         tracker: str,
     ) -> None:
         """Copy torrent to watch folder."""
-        shutil.copy(torrent_path, Path(client["watch_folder"]))
+        shutil.copy(torrent_path, Path(client["watch_folder"]).expanduser())
 
     def add_fast_resume(self, metainfo: dict, datapath: str, torrent: Torrent) -> dict:
         """Add fast resume data to a metafile dict."""

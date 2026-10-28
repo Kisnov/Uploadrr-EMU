@@ -126,6 +126,7 @@ TRACKERS:
   EMU:
     api_key: "EMU_API_KEY"
     anon: false
+
   FL:
     PID: "Custom_Announce_URL"
     username: "FL_Username"

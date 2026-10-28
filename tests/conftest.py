@@ -20,7 +20,10 @@ def _bloquear(*_args, **_kwargs):
 @pytest.fixture(autouse=True)
 def sin_red_ni_procesos(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _bloquear)
+    monkeypatch.setattr(socket.socket, "connect_ex", _bloquear)
+    monkeypatch.setattr(socket.socket, "sendto", _bloquear)
     monkeypatch.setattr(socket, "create_connection", _bloquear)
+    monkeypatch.setattr(socket, "getaddrinfo", _bloquear)
     monkeypatch.setattr(subprocess, "Popen", _bloquear)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _bloquear)
     monkeypatch.setattr(asyncio, "create_subprocess_shell", _bloquear)
