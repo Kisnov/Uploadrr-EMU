@@ -45,6 +45,8 @@ Uploadrr uses a YAML configuration file located at `data/config.yaml`. It is not
 cp data/backup/example_config.yaml data/config.yaml
 ```
 
+The example's default torrent client is `watch`, which copies each `.torrent` into `TORRENT_CLIENTS.watch.watch_folder` (`~/testtorrents`). Create that folder before the first upload, or point `default_torrent_client` at your real client.
+
 ### Key Configuration Sections
 
 >[!IMPORTANT]  
