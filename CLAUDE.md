@@ -4,7 +4,7 @@ Fork of Uploadrr (public upstream: codeberg.org/ccx94/Uploadrr-EMU) used only to
 UNIT3D tracker (key `EMU`, https://emu-warez.com). Its one caller is emuwarez-uploadrr, which clones `main`
 into its Docker image at `/opt/Uploadrr` and runs it unattended:
 
-`python upload.py <path> -tk EMU -mt <name> -tmdb <id> -ua -c movie|tv -res <res> [-season Sxx -episode Exx]`
+`python upload.py PATH -tk EMU -mt NAME -tmdb ID -ua -c movie -res RES` (series: `-c tv`, plus `-season SXX -episode EXX`)
 
 with stdin closed and `HOME=/` when the container has no user.
 
@@ -35,7 +35,8 @@ or report their errors unless they break an eMuwarez upload.
 
 ## Verify
 
-- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins. There is no test suite:
+- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins; running `upload.py` also needs
+  `ffmpeg` and `mediainfo` (the `Dockerfile` installs them). There is no test suite:
   check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
 - The redactor rewrites config secrets in all Rich output.
 - CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`) and `compileall` on every PR.
@@ -48,5 +49,5 @@ or report their errors unless they break an eMuwarez upload.
   machine-read lines that hold no secrets.
 - Re-downloading the signed `.torrent` after upload (`src/trackers/UNIT3D.py`) must send the same `params`
   and `User-Agent` as the upload POST, or eMuwarez answers 403 and `[EMU]<name>.torrent` is never written.
-- `data/config.yaml`, `config.yaml.bak` and `tags.json` are tracked even though `.gitignore` lists them.
+- `data/config.yaml`, `data/config.yaml.bak` and `data/tags.json` are tracked (`.gitignore` lists the first and last).
   They hold placeholders only: never commit real keys.
