@@ -35,7 +35,9 @@ or report their errors unless they break an eMuwarez upload.
 
 ## Verify
 
-- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins; running `upload.py` also needs
+- `requirements.txt` pins exact versions of the direct dependencies, bumped only by Dependabot PRs. Transitive ones
+  stay free on purpose: the app installs this file into the same environment as its own FastAPI stack.
+  `pip install -r requirements.txt` on `python:3.12-slim` needs nothing else; running `upload.py` also needs
   `ffmpeg` and `mediainfo` (the `Dockerfile` installs them).
 - Tests: `pip install pytest`, then `python -m pytest tests -q -p no:cacheprovider` (in Docker; ~10 s). `tests/test_unit3d.py`
   runs the dupe search and the upload against a fake UNIT3D tracker on localhost. Anything else: focused scripts in
