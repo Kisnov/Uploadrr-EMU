@@ -1,0 +1,19 @@
+# requirements.txt casi no fija versiones, así que aquí Dependabot sirve sobre todo
+# para los avisos de seguridad y las acciones de GitHub.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
