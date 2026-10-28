@@ -12,7 +12,7 @@ from rich.pretty import Pretty
 
 from src.utils.console import console, log
 from src.utils.descgen import DescGenerator
-from src.utils.torrentman import edit_torrent
+from src.utils.torrentman import edit_torrent, extract_size_from_torrent
 
 # Segundos de espera antes de cada reintento.
 UPLOAD_RETRY_DELAYS = (5, 15)
@@ -241,11 +241,13 @@ class Unit3d:
         response, attempts = await self._post_upload(data, torrent_path, nfo_file, extra_files_meta, headers, params)
 
         raw_url = None
-        # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco por nombre antes de darlo por
-        # fallido. El siguiente intento, en cambio, choca con el nombre ya usado.
+        # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco antes de darlo por fallido. El
+        # siguiente intento, en cambio, choca con el nombre ya usado. El tracker reescribe el .torrent y no da un
+        # id de la subida, así que solo vale uno nuevo con este nombre y exactamente los bytes que se subían.
         if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
-            current = await self._links_named(meta, name) if previous is not None else None
-            new = sorted(current - previous) if current is not None else []
+            size = extract_size_from_torrent(meta["base_dir"], meta["uuid"])
+            current = await self._links_named(meta, name) if previous is not None and size else None
+            new = sorted(link for link, found in current - previous if found == size) if current is not None else []
             raw_url = new[0] if new else None
             if raw_url:
                 console.print(f"[yellow]{self.tracker}: un intento anterior ya había subido el torrent")
@@ -326,7 +328,7 @@ class Unit3d:
             for attempt in range(1, attempts + 1):
                 try:
                     response = await client.get(url, params=params, headers=headers)
-                except httpx.HTTPError as e:
+                except (httpx.HTTPError, httpx.InvalidURL) as e:
                     error = type(e).__name__
                 else:
                     if response.status_code != 200:
@@ -342,13 +344,13 @@ class Unit3d:
         return None, error
 
     async def _links_named(self, meta: Dict[str, Any], name: str) -> Optional[set]:
-        """Enlaces de descarga de los torrents llamados exactamente name, o None si no se puede buscar."""
+        """(enlace de descarga, tamaño) de los torrents llamados exactamente name, o None si no se puede buscar."""
         try:
             items = await self._search(meta, name=name)
         except DupeSearchError:
             return None
-        links = (attributes.get("download_link") for attributes in items if attributes["name"] == name)
-        return {link for link in links if isinstance(link, str) and link}
+        found = ((attributes.get("download_link"), attributes["size"]) for attributes in items if attributes["name"] == name)
+        return {(link, size) for link, size in found if isinstance(link, str) and link}
 
     def _print_http_error(self, response: httpx.Response) -> None:
         if response.status_code == 302:
@@ -421,7 +423,10 @@ class Unit3d:
                             raise TypeError("resultado sin nombre o tamaño")
                         items.append(attributes)
                     # Solo null (o no venir) cierra la paginación; cualquier otro valor tiene que ser una URL.
-                    next_url = (body.get("links") or {}).get("next")
+                    links = body.get("links", {})
+                    if links is not None and not isinstance(links, dict):
+                        raise TypeError("links no es un objeto")
+                    next_url = (links or {}).get("next")
                     if next_url is None:
                         return items
                     # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría).

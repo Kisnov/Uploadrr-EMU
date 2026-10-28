@@ -22,6 +22,7 @@ TOKEN = "clave-de-prueba"
 SEARCH = "/api/torrents/filter"
 UPLOAD = "/api/torrents/upload"
 NAME = "Peli 2020 1080p WEB-DL DUAL-GRP"
+SIZE = 1000  # bytes del contenido del torrent de prueba
 _connect = socket.socket.connect
 
 
@@ -152,6 +153,8 @@ def test_search_other_resolutions_alone(tracker, emu, meta):
         (200, {"data": [], "links": {"next": False}}),
         (200, {"data": [], "links": {"next": []}}),
         (200, {"data": [], "links": {"next": "http://[::1"}}),
+        (200, {"data": [], "links": False}),
+        (200, {"data": [], "links": []}),
     ],
     ids=[
         "http-500",
@@ -166,6 +169,8 @@ def test_search_other_resolutions_alone(tracker, emu, meta):
         "next-false",
         "next-lista",
         "next-invalido",
+        "links-false",
+        "links-lista",
     ],
 )
 def test_search_failed_page_raises(tracker, emu, meta, second_page):
@@ -206,14 +211,14 @@ class FakeDesc:
 
 
 @pytest.fixture
-def upload_meta(tmp_path, monkeypatch, meta, tracker):
+def upload_meta(tmp_path, monkeypatch, meta, tracker, signed_torrent):
     monkeypatch.setattr(unit3d, "DescGenerator", FakeDesc)
     tracker.routes[("GET", SEARCH)] = lambda q: (200, {"data": [], "links": {"next": None}})
     work = tmp_path / "tmp" / "u"
     work.mkdir(parents=True)
     (work / "MEDIAINFO.txt").write_text("mediainfo")
     (work / "[EMU]DESCRIPTION.txt").write_text("descripción")
-    (work / "BASE.torrent").write_bytes(b"d4:infod4:name1:xee")
+    (work / "BASE.torrent").write_bytes(signed_torrent)
     return {
         **meta,
         "base_dir": str(tmp_path),
@@ -232,7 +237,7 @@ def upload_meta(tmp_path, monkeypatch, meta, tracker):
 @pytest.fixture
 def signed_torrent(tmp_path):
     content = tmp_path / "x.bin"
-    content.write_bytes(b"x" * 1000)
+    content.write_bytes(b"x" * SIZE)
     torrent = torf.Torrent(path=content, private=True)
     torrent.generate()
     return torrent.dump()
@@ -295,7 +300,7 @@ def test_upload_timeout_that_landed_is_recovered(tracker, emu, upload_meta, sign
     tracker.routes[("POST", UPLOAD)] = upload
     tracker.routes[("GET", SEARCH)] = lambda q: (
         200,
-        {"data": [item(n, download_link=download_url(tracker)) for n in landed if n == q["name"][0]], "links": {"next": None}},
+        {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed if n == q["name"][0]], "links": {"next": None}},
     )
     serve_download(tracker, signed_torrent)
 
@@ -318,7 +323,7 @@ def test_upload_timeout_that_landed_then_5xx_is_recovered(tracker, emu, upload_m
     tracker.routes[("POST", UPLOAD)] = upload
     tracker.routes[("GET", SEARCH)] = lambda q: (
         200,
-        {"data": [item(n, download_link=download_url(tracker)) for n in landed], "links": {"next": None}},
+        {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed], "links": {"next": None}},
     )
     serve_download(tracker, signed_torrent)
 
@@ -373,10 +378,34 @@ def test_upload_without_previous_snapshot_is_not_recovered(tracker, emu, upload_
 
     tracker.routes[("POST", UPLOAD)] = upload
     tracker.routes[("GET", SEARCH)] = lambda q: (
-        (500, b"") if not landed else (200, {"data": [item(NAME, download_link=download_url(tracker))], "links": {"next": None}})
+        (500, b"") if not landed else (200, {"data": [item(NAME, SIZE, download_link=download_url(tracker))], "links": {"next": None}})
     )
 
     assert run(emu.upload(upload_meta)) is False
+
+
+def test_upload_never_recovers_a_new_torrent_of_another_size(tracker, emu, upload_meta):
+    emu.timeout = httpx.Timeout(0.2)
+    landed = []
+
+    def upload(query):
+        landed.append(NAME)  # otro sube un torrent con el mismo nombre mientras el nuestro no contesta
+        time.sleep(0.5)
+        return 500, b""
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        200,
+        {"data": [item(n, SIZE + 1, download_link=download_url(tracker)) for n in landed[:1]], "links": {"next": None}},
+    )
+
+    assert run(emu.upload(upload_meta)) is False
+
+
+def test_upload_ok_with_invalid_link_counts_as_uploaded(tracker, emu, upload_meta, capsys):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": "http://[::1"})
+    assert run(emu.upload(upload_meta)) is True
+    assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("body", [b"<html></html>", b"[1, 2]"], ids=["html", "json-lista"])
