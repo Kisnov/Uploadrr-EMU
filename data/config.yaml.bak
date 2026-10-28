@@ -99,7 +99,7 @@ TRACKERS:
     anon: false
 
   BLU:
-    useAPI: true
+    useAPI: false
     api_key: "BLU_API_KEY"
     anon: false
     modq: false
