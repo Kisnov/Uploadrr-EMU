@@ -38,3 +38,15 @@ or report their errors unless they break an eMuwarez upload.
 - `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins. There is no test suite:
   check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
 - The redactor rewrites config secrets in all Rich output.
+- CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`) and `compileall` on every PR.
+  Style is left to CodeRabbit on changed lines.
+
+## Secrets and auth
+
+- The tracker API key travels as the `api_token` query param. Never print `params`, full request URLs or
+  `http_err.request.url`. Plain `print` and raw `logging` handlers skip the redactor: keep them for
+  machine-read lines that hold no secrets.
+- Re-downloading the signed `.torrent` after upload (`src/trackers/UNIT3D.py`) must send the same `params`
+  and `User-Agent` as the upload POST, or eMuwarez answers 403 and `[EMU]<name>.torrent` is never written.
+- `data/config.yaml`, `config.yaml.bak` and `tags.json` are tracked even though `.gitignore` lists them.
+  They hold placeholders only: never commit real keys.
