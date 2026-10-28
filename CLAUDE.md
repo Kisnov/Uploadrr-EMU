@@ -1,0 +1,37 @@
+# Uploadrr-EMU
+
+Fork of Uploadrr (public upstream: codeberg.org/ccx94/Uploadrr-EMU) used only to upload to eMuwarez, a
+UNIT3D tracker (key `EMU`, https://emu-warez.com). Its one caller is emuwarez-uploadrr, which clones `main`
+into its Docker image at `/opt/Uploadrr` and runs it unattended:
+
+`python upload.py <path> -tk EMU -mt <name> -tmdb <id> -ua -c movie|tv -res <res> [-season Sxx -episode Exx]`
+
+with stdin closed and `HOME=/` when the container has no user.
+
+## Workflow
+
+- Sole maintainer: Gabriel (Kisnov). Main repo `Kisnov/Uploadrr-EMU`, base `main`. Branch and PR, grouped
+  (no PR per one-line fix), non-draft so CodeRabbit reviews. Conventional Commits with a Spanish summary.
+- Merged changes reach the app only when its image is rebuilt.
+
+## Contract with emuwarez-uploadrr (change both repos together)
+
+- Exit code: 0 only if something was uploaded. Duplicates, tracker rejections, TMDb misses and missing video
+  exit 1. Any unhandled exception exits 1 too.
+- Fail closed: a dupe search that cannot run raises `DupeSearchError`. Never turn a failed request into
+  "nothing found".
+- After a successful upload it prints `Torrent URL: https://emu-warez.com/torrents/<id>` with plain `print`.
+  Rich wraps at 80 columns on a pipe, so machine-read lines must not go through `console.print`.
+- The app parses output lines verbatim (`uploadrr_progress.py`, `upload_result_parser.py` in the app). Don't
+  reword `Searching for existing torrents`, `No dupes found`, `Uploading to EMU`,
+  `Torrent uploaded successfully`, `Adding and rechecking torrent`, `Added to:`,
+  `INCORRECT QBIT LOGIN CREDENTIALS`, `Torrent upload succeeded, but failed to`, `Hashing with torf`,
+  `Uploading screenshots:` without updating the app.
+- `config.yaml` keys the app stages before each run and restores afterwards: `DEFAULT.tmdb`,
+  `DEFAULT.add_logo`, `TRACKERS.EMU.api_key`, `SCREENS.img_hosts`, `SCREENS.API_KEYS`, `TORRENT_CLIENTS.qbit.*`.
+
+## Verify
+
+- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins. There is no test suite:
+  check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
+- The redactor rewrites config secrets in all Rich output.
