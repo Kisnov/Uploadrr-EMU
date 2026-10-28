@@ -239,8 +239,9 @@ class Unit3d:
         response, attempts = await self._post_upload(data, torrent_path, nfo_file, extra_files_meta, headers, params)
 
         raw_url = None
-        # Un intento sin respuesta pudo entrar igualmente: el siguiente choca con el nombre ya usado.
-        if response is None or (attempts > 1 and "has already been taken" in response.text):
+        # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco por nombre antes de darlo por
+        # fallido. El siguiente intento, en cambio, choca con el nombre ya usado.
+        if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
             raw_url = await self._find_uploaded(meta, name)
             if raw_url:
                 console.print(f"[yellow]{self.tracker}: un intento anterior ya había subido el torrent")
@@ -265,29 +266,31 @@ class Unit3d:
                 if "data" in response_json:
                     console.print(f"[cyan]Error details:[/cyan] {response_json['data']}")
                 return False
-            raw_url = response_json.get("data", "")
+            raw_url = response_json.get("data")
+            if not isinstance(raw_url, str) or not raw_url:
+                console.print("[yellow]Torrent upload succeeded, but failed to download the torrent file: no hay enlace[/yellow]")
+                return True
 
-        torrent_id = re.search(r"/(\d+)\.", raw_url or "")
+        torrent_id = re.search(r"/(\d+)\.", raw_url)
         if torrent_id:
             # Línea fija para quien lanza esto: la ficha del torrent subido.
             print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
-        if raw_url:
-            # El tracker firma el .torrent: el que se le da al cliente es el que se descarga aquí,
-            # con la misma autenticación que la subida (eMuwarez da 403 sin ella).
-            content, error = await self._download_torrent(raw_url, params, headers)
-            if error:
-                console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
-                return True
-            try:
-                new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
-                new_torrent.write_bytes(content)
-                url = raw_url.replace("/download", "s")
-                url = re.sub(r"/(\d+)\..*$", r"/\1", url)
-                await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
-            except Exception as e:
-                console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
-                return True
-            console.print("[bold green]Torrent uploaded successfully!")
+        # El tracker firma el .torrent: el que se le da al cliente es el que se descarga aquí,
+        # con la misma autenticación que la subida (eMuwarez da 403 sin ella).
+        content, error = await self._download_torrent(raw_url, params, headers)
+        if error:
+            console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
+            return True
+        try:
+            new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
+            new_torrent.write_bytes(content)
+            url = raw_url.replace("/download", "s")
+            url = re.sub(r"/(\d+)\..*$", r"/\1", url)
+            await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
+        except Exception as e:
+            console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
+            return True
+        console.print("[bold green]Torrent uploaded successfully!")
         return True
 
     async def _post_upload(self, data, torrent_path, nfo_file, extra_files_meta, headers, params):
@@ -342,8 +345,9 @@ class Unit3d:
             console.print(f"[red]{e}")
             return None
         for attributes in items:
-            if attributes["name"] == name:
-                return attributes.get("download_link")
+            link = attributes.get("download_link")
+            if attributes["name"] == name and isinstance(link, str) and link:
+                return link
         return None
 
     def _print_http_error(self, response: httpx.Response) -> None:
@@ -413,11 +417,12 @@ class Unit3d:
                     for entry in body["data"]:
                         attributes = entry["attributes"]
                         # Sin nombre y tamaño no se puede comparar con lo que se va a subir.
-                        if not isinstance(attributes["name"], str) or "size" not in attributes:
+                        if not isinstance(attributes["name"], str) or not isinstance(attributes["size"], (int, float)):
                             raise TypeError("resultado sin nombre o tamaño")
                         items.append(attributes)
+                    # Solo null (o no venir) cierra la paginación; cualquier otro valor tiene que ser una URL.
                     next_url = (body.get("links") or {}).get("next")
-                    if not next_url:
+                    if next_url is None:
                         return items
                     # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría).
                     url = httpx.URL(next_url)

@@ -146,10 +146,27 @@ def test_search_other_resolutions_alone(tracker, emu, meta):
         (200, {"data": "abc", "links": {"next": None}}),
         (200, {"data": [{"id": 2}], "links": {"next": None}}),
         (200, {"data": [{"attributes": {"name": "B"}}], "links": {"next": None}}),
+        (200, {"data": [{"attributes": {"name": "B", "size": "mucho"}}], "links": {"next": None}}),
         (200, {"data": [], "links": {"next": 5}}),
+        (200, {"data": [], "links": {"next": 0}}),
+        (200, {"data": [], "links": {"next": False}}),
+        (200, {"data": [], "links": {"next": []}}),
         (200, {"data": [], "links": {"next": "http://[::1"}}),
     ],
-    ids=["http-500", "no-json", "sin-data", "data-texto", "sin-attributes", "sin-size", "next-numero", "next-invalido"],
+    ids=[
+        "http-500",
+        "no-json",
+        "sin-data",
+        "data-texto",
+        "sin-attributes",
+        "sin-size",
+        "size-texto",
+        "next-numero",
+        "next-cero",
+        "next-false",
+        "next-lista",
+        "next-invalido",
+    ],
 )
 def test_search_failed_page_raises(tracker, emu, meta, second_page):
     def search(query):
@@ -286,6 +303,29 @@ def test_upload_timeout_that_landed_is_recovered(tracker, emu, upload_meta, sign
     assert "Torrent uploaded successfully" in capsys.readouterr().out
 
 
+def test_upload_timeout_that_landed_then_5xx_is_recovered(tracker, emu, upload_meta, signed_torrent):
+    emu.timeout = httpx.Timeout(0.5)
+    landed = []
+
+    def upload(query):
+        if not landed:
+            landed.append(NAME)
+            time.sleep(1)
+            return 200, {"success": True, "data": download_url(tracker)}
+        return 502, b"bad gateway"
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        200,
+        {"data": [item(n, download_link=download_url(tracker)) for n in landed], "links": {"next": None}},
+    )
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload(upload_meta)) is True
+    assert saved_torrent(upload_meta).exists()
+    assert len(tracker.calls("POST", UPLOAD)) == 3
+
+
 def test_upload_without_answer_and_not_on_tracker_fails(tracker, emu, upload_meta):
     emu.timeout = httpx.Timeout(0.2)
 
@@ -310,6 +350,13 @@ def test_upload_rejected_name_on_first_try_is_a_failure(tracker, emu, upload_met
 def test_upload_unexpected_body_fails(tracker, emu, upload_meta, body):
     tracker.routes[("POST", UPLOAD)] = lambda q: (200, body)
     assert run(emu.upload(upload_meta)) is False
+
+
+@pytest.mark.parametrize("data", [123, "", None], ids=["numero", "vacio", "null"])
+def test_upload_ok_without_link_counts_as_uploaded(tracker, emu, upload_meta, data, capsys):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": data})
+    assert run(emu.upload(upload_meta)) is True
+    assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
 
 
 def test_upload_forbidden_is_not_retried(tracker, emu, upload_meta):
