@@ -286,7 +286,9 @@ async def main() -> None:
     config = load_yaml_config(config_path)
     redactor.load_from_config(config)
     redactor.add_rule(str(base_dir), "Uploadrr")
-    redactor.add_rule(str(Path.home()), "HOME")
+    # Con HOME=/ (contenedor sin usuario) cada / de la salida acababa en <HOME>.
+    if str(Path.home()) != "/":
+        redactor.add_rule(str(Path.home()), "HOME")
     if sys.platform == "win32":
         winbase = str(base_dir.as_posix())
         winhome = str(Path.home().as_posix())
