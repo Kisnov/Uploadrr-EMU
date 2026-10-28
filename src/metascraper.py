@@ -28,7 +28,7 @@ class MetaScraper:
         tasks = []
         if meta.get("ptp") and self.config["TRACKERS"].get("PTP", {}).get("useAPI", False):
             tasks.append(self._fetch_ptp(meta))
-        if meta.get("blu") or self.config["TRACKERS"].get("BLU", {}).get("useAPI", False):
+        if self.config["TRACKERS"].get("BLU", {}).get("useAPI", False):
             tasks.append(self._fetch_blu(meta))
         if meta.get("hdb"):
             tasks.append(self._fetch_hdb(meta))
