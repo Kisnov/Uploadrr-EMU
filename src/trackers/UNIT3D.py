@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import inspect
+import io
 import platform
 import re
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import bs4
 import httpx
+import torf
 from rich.pretty import Pretty
 
 from src.utils.console import console, log
@@ -24,6 +26,16 @@ MAX_SEARCH_PAGES = 20
 
 class DupeSearchError(RuntimeError):
     """No se pudo comprobar si el contenido ya está en el tracker."""
+
+
+def _same_content(downloaded: bytes, base: Path) -> bool:
+    """Si el .torrent descargado describe los mismos ficheros y piezas que base (el tracker solo cambia el infohash)."""
+    try:
+        theirs = torf.Torrent.read_stream(io.BytesIO(downloaded), validate=False).metainfo["info"]
+        ours = torf.Torrent.read(base, validate=False).metainfo["info"]
+    except (torf.TorfError, KeyError):
+        return False
+    return all(theirs.get(key) == ours.get(key) for key in ("name", "piece length", "pieces", "length", "files"))
 
 
 class Unit3d:
@@ -240,15 +252,19 @@ class Unit3d:
         previous = await self._links_named(meta, name)
         response, attempts = await self._post_upload(data, torrent_path, nfo_file, extra_files_meta, headers, params)
 
-        raw_url = None
+        raw_url = content = None
         # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco antes de darlo por fallido. El
         # siguiente intento, en cambio, choca con el nombre ya usado. El tracker reescribe el .torrent y no da un
-        # id de la subida, así que solo vale uno nuevo con este nombre y exactamente los bytes que se subían.
+        # id de la subida, así que solo vale uno nuevo con este nombre, este tamaño y las mismas piezas.
         if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
             size = extract_size_from_torrent(meta["base_dir"], meta["uuid"])
             current = await self._links_named(meta, name) if previous is not None and size else None
             new = sorted(link for link, found in current - previous if found == size) if current is not None else []
-            raw_url = new[0] if new else None
+            for link in new:
+                candidate, _ = await self._download_torrent(link, params, headers)
+                if candidate is not None and _same_content(candidate, torrent_path):
+                    raw_url, content = link, candidate
+                    break
             if raw_url:
                 console.print(f"[yellow]{self.tracker}: un intento anterior ya había subido el torrent")
             elif response is None:
@@ -283,10 +299,11 @@ class Unit3d:
             print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
         # El tracker firma el .torrent: el que se le da al cliente es el que se descarga aquí,
         # con la misma autenticación que la subida (eMuwarez da 403 sin ella).
-        content, error = await self._download_torrent(raw_url, params, headers)
-        if error:
-            console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
-            return True
+        if content is None:
+            content, error = await self._download_torrent(raw_url, params, headers)
+            if error:
+                console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
+                return True
         try:
             new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
             new_torrent.write_bytes(content)

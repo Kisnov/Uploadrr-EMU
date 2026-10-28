@@ -1,6 +1,7 @@
 """Búsqueda de duplicados y subida de UNIT3D contra un tracker falso en local."""
 
 import asyncio
+import io
 import json
 import socket
 import subprocess
@@ -243,6 +244,13 @@ def signed_torrent(tmp_path):
     return torrent.dump()
 
 
+def resigned(torrent_bytes):
+    """Como lo devuelve el tracker: mismo contenido, otro infohash."""
+    torrent = torf.Torrent.read_stream(io.BytesIO(torrent_bytes), validate=False)
+    torrent.source = "eMuwarez"
+    return torrent.dump(validate=False)
+
+
 def download_url(tracker):
     return f"{tracker.url}/torrent/download/42.rsskey"
 
@@ -302,11 +310,36 @@ def test_upload_timeout_that_landed_is_recovered(tracker, emu, upload_meta, sign
         200,
         {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed if n == q["name"][0]], "links": {"next": None}},
     )
-    serve_download(tracker, signed_torrent)
+    serve_download(tracker, resigned(signed_torrent))
 
     assert run(emu.upload(upload_meta)) is True
     assert saved_torrent(upload_meta).exists()
     assert "Torrent uploaded successfully" in capsys.readouterr().out
+
+
+def test_upload_never_recovers_same_name_and_size_with_other_pieces(tracker, emu, upload_meta, tmp_path):
+    emu.timeout = httpx.Timeout(0.2)
+    landed = []
+    other = tmp_path / "otro" / "x.bin"
+    other.parent.mkdir()
+    other.write_bytes(b"y" * SIZE)
+    other_torrent = torf.Torrent(path=other, private=True)
+    other_torrent.generate()
+
+    def upload(query):
+        landed.append(NAME)
+        time.sleep(0.5)
+        return 500, b""
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        200,
+        {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed[:1]], "links": {"next": None}},
+    )
+    serve_download(tracker, other_torrent.dump())
+
+    assert run(emu.upload(upload_meta)) is False
+    assert not saved_torrent(upload_meta).exists()
 
 
 def test_upload_timeout_that_landed_then_5xx_is_recovered(tracker, emu, upload_meta, signed_torrent):
