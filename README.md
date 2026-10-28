@@ -89,7 +89,8 @@ Para series, `-c tv` y además `-season S01` (y `-episode E01` si es un episodio
 `python upload.py --help` lista todas las opciones.
 
 **Código de salida:** `0` solo si se ha subido. Un duplicado, un rechazo del tracker, un ID de TMDb sin ficha, una
-carpeta sin vídeo o cualquier error salen con `1`.
+carpeta sin vídeo o cualquier error que impida la subida salen con `1`. Un fallo de qBittorrent después de subir
+no cambia el `0`.
 
 ## Desarrollo
 
