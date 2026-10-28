@@ -263,6 +263,10 @@ class Uploadrr:
             progress.stop()
 
         print_summary(total, successful, skipped, skipped_details, skipped_tmdb)
+        # Con un duplicado, un rechazo o sin TMDb se salía con 0, y quien lanza
+        # esto (emuwarez-uploadrr) lo daba por subido.
+        if successful < total:
+            sys.exit(1)
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""

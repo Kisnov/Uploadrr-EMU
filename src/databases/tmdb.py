@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Dict, Optional, Tuple
@@ -331,7 +332,7 @@ class TMDbHandler:
             log.error(f"Failed to find TMDb entry: {str(e)}")
             if meta.get("mode", "discord") == "cli":
                 console.print("[bold red]Unable to find TMDb entry. Exiting.")
-                exit()
+                sys.exit(1)
             else:
                 console.print("[bold red]Unable to find TMDb entry")
         return meta

@@ -2,6 +2,7 @@ import asyncio
 import functools
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Union
 
@@ -287,7 +288,7 @@ class VideoProcessor:
         if not video_files:
             console.print(f"[red]No video files found in {videoloc}")
             if mode == "cli":
-                exit()
+                sys.exit(1)
             return None, []
 
         # Sort to prioritize non-bonus files
