@@ -13,6 +13,8 @@ from src.utils.console import console, log
 from src.utils.descgen import DescGenerator
 from src.utils.torrentman import edit_torrent
 
+MAX_SEARCH_PAGES = 20
+
 
 class DupeSearchError(RuntimeError):
     """No se pudo comprobar si el contenido ya está en el tracker."""
@@ -324,25 +326,53 @@ class Unit3d:
         else:
             console.print(f"[yellow]Searching for existing torrents on {self.tracker}...")
 
+        for item in await self._search(meta):
+            dupes[item["attributes"]["name"]] = item["attributes"]["size"]
+        return dupes
+
+    async def _search(self, meta: Dict[str, Any], name: str = "") -> list:
+        """Todos los resultados de /api/torrents/filter, página a página.
+
+        Si alguna página falla no se sabe si ya está subido: DupeSearchError, nunca "nada encontrado".
+        """
+        token = self.config["TRACKERS"][self.tracker]["api_key"].strip()
+        resolution_id = await self.get_res_id(meta)
         params = {
-            "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
+            "api_token": token,
             "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
-            "resolutions[]": await self.get_res_id(meta),
-            "name": meta.get("edition", ""),
+            # 1080p y 1080i compiten por el mismo hueco.
+            "resolutions[]": ["3", "4"] if resolution_id in ("3", "4") else resolution_id,
+            "name": name,
+            "perPage": 100,
         }
-
-        # Si la búsqueda falla no se sabe si ya está subido: antes devolvía {} y
-        # el dupe check decía "No dupes found" y subía a ciegas.
+        url = httpx.URL(self.search_url)
+        origin = (url.scheme, url.host, url.port)
+        items = []
         headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(self.search_url, params=params, headers=headers)
-            except httpx.HTTPError as e:
-                raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
-        if response.status_code != 200:
-            raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
-        for item in response.json()["data"]:
-            dupes[item["attributes"]["name"]] = item["attributes"]["size"]
-        return dupes
+            for _ in range(MAX_SEARCH_PAGES):
+                try:
+                    response = await client.get(url, params=params, headers=headers)
+                except httpx.HTTPError as e:
+                    raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
+                if response.status_code != 200:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
+                try:
+                    body = response.json()
+                    items.extend(body["data"])
+                    next_url = (body.get("links") or {}).get("next")
+                except (ValueError, KeyError, TypeError, AttributeError) as e:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió una respuesta inesperada") from e
+                if not next_url:
+                    return items
+                # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría); la API key solo va a
+                # su propio dominio.
+                url = httpx.URL(next_url)
+                if (url.scheme, url.host, url.port) != origin:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} pagina hacia otro dominio")
+                if "api_token" not in url.params:
+                    url = url.copy_add_param("api_token", token)
+                params = None
+        raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} tiene más de {MAX_SEARCH_PAGES} páginas")
