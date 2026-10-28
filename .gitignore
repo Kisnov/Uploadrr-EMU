@@ -9,6 +9,9 @@ __pycache__/
 *.lock
 venv/*
 .venv/
+.pytest_cache/
+.coverage
+coverage.xml
 
 # Project Specifics
 *.mkv
