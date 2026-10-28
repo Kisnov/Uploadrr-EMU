@@ -35,7 +35,8 @@ or report their errors unless they break an eMuwarez upload.
 
 ## Verify
 
-- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins; running `upload.py` also needs
+- `requirements.txt` pins exact versions, bumped only by Dependabot PRs; the app image installs it as is.
+  `pip install -r requirements.txt` on `python:3.12-slim` needs nothing else; running `upload.py` also needs
   `ffmpeg` and `mediainfo` (the `Dockerfile` installs them). There is no test suite:
   check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
 - The redactor rewrites config secrets in all Rich output.

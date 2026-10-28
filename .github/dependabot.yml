@@ -1,5 +1,4 @@
-# requirements.txt casi no fija versiones, así que aquí Dependabot sirve sobre todo
-# para los avisos de seguridad y las acciones de GitHub.
+# requirements.txt fija versiones exactas: las subidas de versión llegan solo por estos PR.
 version: 2
 updates:
   - package-ecosystem: pip
