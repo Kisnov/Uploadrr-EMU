@@ -336,7 +336,7 @@ class Unit3d:
         # Si la búsqueda falla no se sabe si ya está subido: antes devolvía {} y
         # el dupe check decía "No dupes found" y subía a ciegas.
         headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 response = await client.get(self.search_url, params=params, headers=headers)
             except httpx.HTTPError as e:
