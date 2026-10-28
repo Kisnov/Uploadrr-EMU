@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.17.3
+      # Solo errores que rompen en ejecución (sintaxis, nombres sin definir).
+      # El estilo lo revisa CodeRabbit sobre las líneas cambiadas.
+      - run: ruff check --select E9,F63,F7,F82 --output-format github .
+      - run: python -m compileall -q .
