@@ -49,5 +49,5 @@ or report their errors unless they break an eMuwarez upload.
   machine-read lines that hold no secrets.
 - Re-downloading the signed `.torrent` after upload (`src/trackers/UNIT3D.py`) must send the same `params`
   and `User-Agent` as the upload POST, or eMuwarez answers 403 and `[EMU]<name>.torrent` is never written.
-- `data/config.yaml`, `data/config.yaml.bak` and `data/tags.json` are tracked (`.gitignore` lists the first and last).
-  They hold placeholders only: never commit real keys.
+- `data/config.yaml` and `data/config.yaml.bak` are not tracked: the fork's defaults live in
+  `data/backup/example_config.yaml`. `data/tags.json` is tracked although `.gitignore` lists it: placeholders only.

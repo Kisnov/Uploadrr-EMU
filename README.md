@@ -39,7 +39,7 @@ This project is a fork of [Upload-Assistant](https://github.com/L4GSP1KE/Upload-
 
 ## Configuration
 
-Uploadrr uses a YAML configuration file located at `data/config.yaml`. Copy the example configuration and customize it for your needs:
+Uploadrr uses a YAML configuration file located at `data/config.yaml`. It is not tracked by git, so it never holds anything but your own keys. Copy the example configuration (it already carries this fork's defaults: signature, Spanish trailer, imgbox first) and customize it for your needs:
 
 ```bash
 cp data/backup/example_config.yaml data/config.yaml
