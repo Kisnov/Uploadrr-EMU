@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import socket
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +22,26 @@ TOKEN = "clave-de-prueba"
 SEARCH = "/api/torrents/filter"
 UPLOAD = "/api/torrents/upload"
 NAME = "Peli 2020 1080p WEB-DL DUAL-GRP"
+_connect = socket.socket.connect
+
+
+def _solo_local(sock, address):
+    if address[0] not in ("127.0.0.1", "::1"):
+        raise RuntimeError(f"los tests solo pueden conectar con el tracker falso, no con {address[0]}")
+    return _connect(sock, address)
+
+
+def _sin_procesos(*_args, **_kwargs):
+    raise RuntimeError("los tests no pueden lanzar procesos")
+
+
+@pytest.fixture(autouse=True)
+def sin_red_ni_procesos(monkeypatch):
+    """Sustituye al de conftest: aquí el tracker falso escucha en localhost y es lo único a lo que se conecta."""
+    monkeypatch.setattr(socket.socket, "connect", _solo_local)
+    monkeypatch.setattr(subprocess, "Popen", _sin_procesos)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _sin_procesos)
+    monkeypatch.setattr(asyncio, "create_subprocess_shell", _sin_procesos)
 
 
 class FakeTracker:
