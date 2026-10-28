@@ -1,4 +1,4 @@
-# requirements.txt fija versiones exactas: las subidas de versión llegan solo por estos PR.
+# requirements.txt fija las dependencias directas: sus subidas de versión llegan solo por estos PR.
 version: 2
 updates:
   - package-ecosystem: pip

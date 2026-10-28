@@ -35,7 +35,8 @@ or report their errors unless they break an eMuwarez upload.
 
 ## Verify
 
-- `requirements.txt` pins exact versions, bumped only by Dependabot PRs; the app image installs it as is.
+- `requirements.txt` pins exact versions of the direct dependencies, bumped only by Dependabot PRs. Transitive ones
+  stay free on purpose: the app installs this file into the same environment as its own FastAPI stack.
   `pip install -r requirements.txt` on `python:3.12-slim` needs nothing else; running `upload.py` also needs
   `ffmpeg` and `mediainfo` (the `Dockerfile` installs them). There is no test suite:
   check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
