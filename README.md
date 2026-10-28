@@ -43,7 +43,12 @@ pip install -r requirements.txt
 
 ## Configuración
 
-Todo está en `data/config.yaml`. El del repositorio solo lleva valores de ejemplo: no subas nunca tus claves.
+Todo está en `data/config.yaml`. Para empezar, copia el ejemplo y rellena tus claves (no las subas nunca a git):
+
+```bash
+cp data/backup/example_config.yaml data/config.yaml
+```
+
 Para eMuwarez hace falta:
 
 | Clave | Qué es |
