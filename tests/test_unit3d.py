@@ -435,15 +435,36 @@ def test_upload_never_recovers_a_new_torrent_of_another_size(tracker, emu, uploa
     assert run(emu.upload(upload_meta)) is False
 
 
-@pytest.mark.parametrize(
-    "link",
-    ["http://[::1", "https://otro.invalid/torrent/download/42.rsskey", "https://localhost/torrent/download/42.rsskey"],
-    ids=["invalido", "otro-dominio", "otro-esquema"],
-)
-def test_upload_ok_with_unusable_link_counts_as_uploaded(tracker, emu, upload_meta, capsys, link):
-    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": link})
+def test_upload_ok_with_invalid_link_counts_as_uploaded(tracker, emu, upload_meta, capsys):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": "http://[::1"})
     assert run(emu.upload(upload_meta)) is True
     assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        lambda port: f"http://otro.invalid:{port}/torrent/download/42.rsskey",
+        lambda port: f"https://localhost:{port}/torrent/download/42.rsskey",
+        lambda port: f"http://localhost:{port + 1}/torrent/download/42.rsskey",
+    ],
+    ids=["otro-host", "otro-esquema", "otro-puerto"],
+)
+def test_upload_never_sends_the_key_to_another_origin(tracker, emu, upload_meta, capsys, monkeypatch, link):
+    requested = []
+    real_get = httpx.AsyncClient.get
+
+    async def spy(self, url, *args, **kwargs):
+        requested.append(str(url))
+        return await real_get(self, url, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", spy)
+    url = link(tracker.server.server_address[1])
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": url})
+
+    assert run(emu.upload(upload_meta)) is True
+    assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
+    assert not [r for r in requested if "/torrent/download/" in r]
 
 
 @pytest.mark.parametrize("body", [b"<html></html>", b"[1, 2]"], ids=["html", "json-lista"])
