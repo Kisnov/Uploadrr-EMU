@@ -299,18 +299,38 @@ class TorrentMaker:
         process = await asyncio.create_subprocess_exec(*args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         running_subprocesses.add(process)
         last = None
+        output = bytearray()
         try:
             while chunk := await process.stdout.read(4096):
+                output += chunk
                 found = re.findall(rb"(\d{1,3})%", chunk)
                 if found and found[-1] != last:
                     last = found[-1]
                     progress.update(f"Hashing with mkbrr: {int(last):.1f}%")
-            return await process.wait()
+            returncode = await process.wait()
         finally:
             if process.returncode is None:
                 process.kill()
                 await process.wait()
             running_subprocesses.discard(process)
+        warning = self._season_pack_warning(output.decode(errors="replace"))
+        if warning:
+            # Línea fija para quien lanza esto: la app la convierte en aviso.
+            print(warning, flush=True)
+        return returncode
+
+    @staticmethod
+    def _season_pack_warning(output: str) -> Optional[str]:
+        """El aviso de mkbrr de pack de temporada incompleto, en una línea; None si no lo hay."""
+        text = re.sub(r"\x1b\[[0-9;]*m", "", output)
+        if "incomplete season pack" not in text:
+            return None
+        season = re.search(r"Season number:\s*(\d+)", text)
+        warning = f"Incomplete season pack: season {season.group(1) if season else '?'}"
+        missing = re.search(r"Missing:\s*(.+)", text)
+        if missing:
+            warning += ", missing episodes " + ", ".join(re.findall(r"\d+", missing.group(1)))
+        return warning
 
     @staticmethod
     def _same_files(output_path: Path, torrent: Torrent) -> bool:

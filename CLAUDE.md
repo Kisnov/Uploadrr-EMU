@@ -29,9 +29,10 @@ or report their errors unless they break an eMuwarez upload.
   reword `Searching for existing torrents`, `No dupes found`, `Uploading to EMU`,
   `Torrent uploaded successfully`, `Adding and rechecking torrent`, `Added to:`,
   `INCORRECT QBIT LOGIN CREDENTIALS`, `Torrent upload succeeded, but failed to`, `Hashing with <tool>: X%`,
-  `Uploading screenshots:` without updating the app.
+  `Uploading screenshots:`, `Incomplete season pack:` without updating the app.
 - The `.torrent` is hashed with mkbrr when it is on `PATH` (the app image installs a pinned one), torf otherwise.
-  The mkbrr result must list exactly the files torf would pick, or it is rebuilt with torf.
+  The mkbrr result must list exactly the files torf would pick, or it is rebuilt with torf. When mkbrr warns of
+  an incomplete season pack, `print` writes `Incomplete season pack: season N, missing episodes A, B`.
 - `config.yaml` keys the app stages before each run and restores afterwards: `DEFAULT.tmdb`,
   `DEFAULT.add_logo`, `TRACKERS.EMU.api_key`, `SCREENS.img_hosts`, `SCREENS.API_KEYS`, `TORRENT_CLIENTS.qbit.*`.
 

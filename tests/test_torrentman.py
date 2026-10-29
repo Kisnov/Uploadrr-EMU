@@ -177,3 +177,33 @@ def test_el_porcentaje_de_mkbrr_llega_como_linea_de_progreso(monkeypatch, mensaj
         "Hashing with mkbrr: 72.0%",
         "Hashing with mkbrr: 100.0%",
     ]
+
+
+AVISO_MKBRR = (
+    b"\n\x1b[33mWarning: Possible incomplete season pack detected\x1b[0m\n"
+    b"  Season number: 1\n"
+    b"  Highest episode number found: 6\n"
+    b"  Episodes found: 4\n"
+    b"  Missing:      episode 3, episode 5\n"
+    b"This may be an incomplete season pack. Check files before uploading.\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("salida", "linea"),
+    [
+        (AVISO_MKBRR, "Incomplete season pack: season 1, missing episodes 3, 5"),
+        (AVISO_MKBRR.replace(b"  Missing:      episode 3, episode 5\n", b""), "Incomplete season pack: season 1"),
+        (b"Files being hashed:\n", None),
+    ],
+    ids=["con-episodios", "sin-lista", "sin-aviso"],
+)
+def test_el_aviso_de_pack_incompleto_sale_en_una_linea(monkeypatch, mensajes, capsys, salida, linea):
+    async def lanzar(*args, **kwargs):
+        return _Proceso([salida, b"\r 100% [======]\n"])
+
+    monkeypatch.setattr(torrentman.asyncio, "create_subprocess_exec", lanzar)
+
+    assert asyncio.run(TorrentMaker({})._run_mkbrr(["mkbrr", "create"])) == 0
+    impreso = capsys.readouterr().out.splitlines()
+    assert [ln for ln in impreso if ln.startswith("Incomplete season pack")] == ([linea] if linea else [])
