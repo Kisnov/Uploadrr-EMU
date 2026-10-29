@@ -1,132 +1,114 @@
->[!WARNING]  
-> Branches recently changed where `v2` is the default and now `main`  
-> The old default `master` branch is now `legacy`  
-> **To update your local repo:**
-> ```bash  
->git checkout v2
->git branch -m main
->git branch -u origin/main main
->```
-> To keep using legacy do the same just swap `v2` -> `master` and `main` -> `legacy`
+# Uploadrr-EMU
 
+[![CI](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml/badge.svg)](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
+[![Lint: ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
+[![Licencia: GPL-3.0](https://img.shields.io/github/license/Kisnov/Uploadrr-EMU)](LICENSE)
 
-# Uploadrr
+Fork de [Uploadrr](https://codeberg.org/CvT/Uploadrr) dedicado a subir a **[eMuwarez](https://emu-warez.com)**, un
+tracker UNIT3D (clave `EMU`). Prepara la subida (mediainfo, capturas, descripción, `.torrent`), busca duplicados,
+sube y añade el torrent firmado a qBittorrent para sembrarlo.
 
-Uploadrr is a tool for preping and uploading torrents for Movies, TV Shows, Music & Adult Content. It automates metadata gathering, screenshot generation, torrent creation, and uploading to various private trackers.
+Lo usa **emuwarez-uploadrr**, un servicio web autoalojado que cruza la biblioteca de Radarr/Sonarr con eMuwarez y
+lanza este script sin intervención en cada subida. También se puede usar a mano desde la terminal.
 
-This project is a fork of [Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) by L4G, with the goal of giving users more control over the upload process.
+> [!NOTE]
+> Solo se mantiene la ruta de eMuwarez. Los demás trackers, la música y el contenido adulto vienen heredados de
+> Uploadrr y no se revisan ni se prueban.
 
-## Installation
+## Qué cambia respecto a Uploadrr
 
-### Requirements
+- **No sube a ciegas.** Si la búsqueda de duplicados falla (error de red, HTTP distinto de 200, redirección al login,
+  respuesta mal formada), no se sube. La búsqueda recorre todas las páginas de resultados y trata 1080p y 1080i como
+  la misma resolución.
+- **Subida robusta.** Repite el envío ante cortes y errores 5xx sin duplicar el torrent, y descarga el `.torrent`
+  firmado por eMuwarez con la misma autenticación que la subida, reintentando mientras el tracker lo prepara.
+- **Salida pensada para otro programa.** Sale con `0` solo si ha subido algo. Tras una subida imprime
+  `Torrent URL: https://emu-warez.com/torrents/<id>` en su propia línea, y muestra el progreso (hash, capturas)
+  aunque la salida no sea una terminal.
+- **En español.** Prefiere el tráiler en español (también en series y anime) y el logo de la ficha en español cuando
+  TMDb lo tiene. Firma propia en la descripción.
+- **Arreglos de hosts de imágenes.** pixhost (migró a `.cc`) e imgbb. Si ningún host acepta las capturas, la subida
+  falla en vez de salir sin imágenes.
+- Si qBittorrent falla después de subir, la subida no cuenta como fallida.
+- Dependencias directas con versión fija en `requirements.txt`.
 
-- **Python 3.9+** (for Python 3.7/8 try [legacy branch](https://codeberg.org/CvT/Uploadrr/src/branch/legacy))
-- **FFmpeg** (video processing and screenshots)
-- **Mediainfo** (metadata)
-- **[Mono](https://www.mono-project.com/)** is **required** on Linux or MacOS for BDInfo. (Not needed if you never plan on doing Full BluRay Discs)
-### Clone + Install Modules
+## Requisitos
 
-1. Clone the repository:
-   ```bash
-   git clone https://codeberg.org/CvT/Uploadrr.git
-   cd Uploadrr
-   ```
+- Python 3.12 (es la versión que se prueba).
+- `ffmpeg` y `mediainfo`.
+- Opcional: `mktorrent` para crear el `.torrent` más rápido (`DEFAULT.torrent_creation: mktorrent`).
+- Solo para discos Blu-ray completos en Linux o macOS: [Mono](https://www.mono-project.com/), para BDInfo.
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+git clone https://github.com/Kisnov/Uploadrr-EMU.git
+cd Uploadrr-EMU
+pip install -r requirements.txt
+```
 
-## Configuration
+## Configuración
 
-Uploadrr uses a YAML configuration file located at `data/config.yaml`. Copy the example configuration and customize it for your needs:
+Todo está en `data/config.yaml`. Para empezar, copia el ejemplo y rellena tus claves (no las subas nunca a git):
 
 ```bash
 cp data/backup/example_config.yaml data/config.yaml
 ```
 
-### Key Configuration Sections
+Para eMuwarez hace falta:
 
->[!IMPORTANT]  
-> For Movies/TV/Anime you need a TMDb API (v3) key from **[TMDb](https://developer.themoviedb.org/docs/getting-started)**
-> For Adult Content you should have a TPDb key from **[TPDb](https://theporndb.net/user/api-tokens)**
+| Clave | Qué es |
+|---|---|
+| `DEFAULT.tmdb` | API key de [TMDb](https://developer.themoviedb.org/docs/getting-started) (v3) |
+| `TRACKERS.EMU.api_key` | API key de tu cuenta de eMuwarez |
+| `SCREENS.img_hosts`, `SCREENS.API_KEYS` | Hosts de imágenes para las capturas, en orden de preferencia, y sus claves |
+| `TORRENT_CLIENTS.qbit` | qBittorrent al que se añade el torrent para sembrarlo |
 
-- **DEFAULT**: Basic settings like TMDb API key, default torrent client, and anonymity preferences
-- **ADULT**: This is your adult config, TPDb key, seperate screen api keys if desired, adult anon override, contactsheet settings etc.
-- **SCREENS**: Screenshot generation settings, including API keys for image hosting services
-- **SIGNATURES**: Custom signatures for uploads (global and per-tracker)
-- **AUTO**: Automation settings like delay between uploads and duplicate detection
-- **TRACKERS**: Configuration for supported private trackers (API keys, usernames, etc.)
-- **TORRENT_CLIENTS**: Settings for torrent clients (qBittorrent, Deluge, etc.)
+Con emuwarez-uploadrr no hace falta tocarlo a mano: la aplicación escribe estas claves antes de cada subida y las
+restaura después. El resto de opciones están en `data/backup/example_config.yaml` y en la
+[guía de configuración de Uploadrr](https://codeberg.org/CvT/Uploadrr/wiki/Full-Config-Guide).
 
->[!TIP] 
->See the __[Full Config Guide](https://codeberg.org/CvT/Uploadrr/wiki/Full-Config-Guide)__ for detailed options and supported trackers.
+## Uso
 
-## Usage
-
-Run Uploadrr from the project directory:
+Así lo lanza emuwarez-uploadrr para una película:
 
 ```bash
-python upload.py [options] <path_to_media>
+python upload.py "/ruta/a/la/película" -tk EMU -mt "Nombre del torrent" -tmdb 603 -ua -c movie -res 1080p
 ```
 
-### Command Line Options
+Para series, `-c tv` y además `-season S01` (y `-episode E01` si es un episodio suelto).
 
-- `--help`: Show available options
-- `--debug`: Enable debug logging
-- `--unattended`: Skip confirmation prompts
-- `--screens <number>`: Number of screenshots to generate
-- `--trackers <list>`: list of trackers to upload to
+| Opción | Qué hace |
+|---|---|
+| `-tk EMU` | Tracker al que se sube |
+| `-mt` | Nombre del torrent, en lugar del que generaría Uploadrr |
+| `-tmdb` | ID de TMDb |
+| `-ua` | Sin preguntas. Ante un posible duplicado o un grupo vetado, no sube |
+| `-c` | Categoría: `movie` o `tv`. También acepta `fanres`, `sports` y `music`, heredadas de Uploadrr |
+| `-res` | Resolución: `2160p`, `1080p`, `1080i`, `720p`, `576p`, `576i`, `480p`, `480i`, `4320p`, `8640p` u `other` |
 
-### Examples
+`python upload.py --help` lista todas las opciones.
 
-Upload a movie to default trackers:
+**Código de salida:** `0` solo si se ha subido. Un duplicado, un rechazo del tracker, un ID de TMDb sin ficha, una
+carpeta sin vídeo o cualquier error que impida la subida salen con `1`. Un fallo de qBittorrent después de subir
+no cambia el `0`.
+
+## Desarrollo
+
 ```bash
-python upload.py /path/to/movie.mkv
+pip install pytest
+python -m pytest tests -q -p no:cacheprovider
 ```
 
-Upload TV show with custom screenshots:
-```bash
-python upload.py --screens 8 --trackers BLU HDB /path/to/tv_show/
-```
+Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local. El CI pasa las
+reglas graves de `ruff` y `compileall` en cada PR. `CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas
+de la salida lee y qué claves de la configuración toca): si cambias una de ellas, hay que cambiar la aplicación a la
+vez.
 
-Upload some music:
-```bash
-python upload.py /path/to/album
-```
+## Origen y créditos
 
->[!NOTE]
-> For adult content one of `--xxx`, `--xscene` , `--xmovie`, `-jav` or `--pack` is necessary.  
-> For best results be specific.
+[Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) de L4G →
+[Uploadrr](https://codeberg.org/CvT/Uploadrr) de CvT →
+[Uploadrr-EMU](https://codeberg.org/ccx94/Uploadrr-EMU) de ccx94, que añadió eMuwarez → este fork.
 
-Upload some adult scene:
-```bash
-python upload.py --xxx /path/to/adultscene.mp4
-```
-
-Upload adult movie split scene:
-```bash
-python upload.py -xm /path/to/adult_movie2000
-```
-
-
-## Features
-
-- Automatic metadata gathering from TMDb/IMDb or MusizBrainz/Discogs or TPDb
-- Screenshot generation with customizable settings (tonempaping, frame stats, contact sheets etc)
-- Torrent creation with multiple client support
-- Support for numerous private trackers
-- Batch processing capabilities
-- Duplicate detection and prevention
-- Customizable signatures and description handling
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues, feature requests, or pull requests.
-
-## Acknowledgments
-
-All credit for the original codebase goes to [L4G](https://github.com/L4GSP1KE) and contributors to the [Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) project.
-
-Many hands make light work - thank you to everyone who has contributed!
-Specific shoutouts to @LustWorks (Adult-Support),  @Lokilicious (RHD Support), and @evaporate (Misc Fixes)
+Todo el código de base es de L4G, CvT y quienes contribuyeron a esos proyectos. Licencia GPL-3.0, ver
+[LICENSE](LICENSE).
