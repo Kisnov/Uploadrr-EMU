@@ -340,8 +340,15 @@ class Unit3d:
 
     async def _download_torrent(self, url, params, headers) -> Tuple[Optional[bytes], Optional[str]]:
         """Descarga el .torrent, reintentando mientras el tracker lo prepara. Devuelve (contenido, error)."""
+        # La API key solo va al dominio del tracker, y sin seguir redirecciones.
+        try:
+            target, origin = httpx.URL(url), httpx.URL(self.upload_url)
+        except httpx.InvalidURL as e:
+            return None, type(e).__name__
+        if (target.scheme, target.host, target.port) != (origin.scheme, origin.host, origin.port):
+            return None, "el enlace apunta a otro dominio"
         attempts = len(DOWNLOAD_RETRY_DELAYS) + 1
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
             for attempt in range(1, attempts + 1):
                 try:
                     response = await client.get(url, params=params, headers=headers)
