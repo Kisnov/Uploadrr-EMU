@@ -1,21 +1,41 @@
-import inspect
+import asyncio
 import contextlib
+import inspect
+import io
 import platform
 import re
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import bs4
 import httpx
+import torf
 from rich.pretty import Pretty
 
 from src.utils.console import console, log
 from src.utils.descgen import DescGenerator
-from src.utils.torrentman import edit_torrent
+from src.utils.torrentman import edit_torrent, extract_size_from_torrent
+
+# Segundos de espera antes de cada reintento.
+UPLOAD_RETRY_DELAYS = (5, 15)
+DOWNLOAD_RETRY_DELAYS = (5, 15, 30)
+# Errores del servidor o de Cloudflare en los que la subida se repite.
+RETRY_STATUSES = {500, 502, 503, 504, 520, 521, 522, 523, 524}
+MAX_SEARCH_PAGES = 20
 
 
 class DupeSearchError(RuntimeError):
     """No se pudo comprobar si el contenido ya está en el tracker."""
+
+
+def _same_content(downloaded: bytes, base: Path) -> bool:
+    """Si el .torrent descargado describe los mismos ficheros y piezas que base (el tracker solo cambia el infohash)."""
+    try:
+        theirs = torf.Torrent.read_stream(io.BytesIO(downloaded), validate=False).metainfo["info"]
+        ours = torf.Torrent.read(base, validate=False).metainfo["info"]
+    except (torf.TorfError, KeyError):
+        return False
+    return all(theirs.get(key) == ours.get(key) for key in ("name", "piece length", "pieces", "length", "files"))
 
 
 class Unit3d:
@@ -228,94 +248,153 @@ class Unit3d:
             await edit_torrent(meta, None, self.tracker, "DEBUG", "https://UNIT3D.CHANGES/INFOHASH/DEBUG-ONLY", "Uploadrr DEBUG-MODE")
             return "DEBUG"
 
+        # Lo que ya hay con este nombre: si luego hay que buscar la subida, solo cuenta un torrent nuevo.
+        previous = await self._links_named(meta, name)
+        response, attempts = await self._post_upload(data, torrent_path, nfo_file, extra_files_meta, headers, params)
+
+        raw_url = content = None
+        # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco antes de darlo por fallido. El
+        # siguiente intento, en cambio, choca con el nombre ya usado. El tracker reescribe el .torrent y no da un
+        # id de la subida, así que solo vale uno nuevo con este nombre, este tamaño y las mismas piezas.
+        if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
+            size = extract_size_from_torrent(meta["base_dir"], meta["uuid"])
+            current = await self._links_named(meta, name) if previous is not None and size else None
+            new = sorted(link for link, found in current - previous if found == size) if current is not None else []
+            for link in new:
+                candidate, _ = await self._download_torrent(link, params, headers)
+                if candidate is not None and _same_content(candidate, torrent_path):
+                    raw_url, content = link, candidate
+                    break
+            if raw_url:
+                console.print(f"[yellow]{self.tracker}: un intento anterior ya había subido el torrent")
+            elif response is None:
+                console.print(f"[red]Upload failed: {self.tracker} no ha respondido tras {attempts} intentos")
+                return False
+
+        if raw_url is None:
+            if not 200 <= response.status_code < 300:
+                self._print_http_error(response)
+                return False
+            try:
+                response_json = response.json()
+            except ValueError:
+                response_json = None
+            if not isinstance(response_json, dict):
+                log.error(f"Unexpected response:\n{response.text}")
+                return False
+            if not response_json.get("success", False):
+                message = response_json.get("message", "No message provided")
+                console.print(f"[red]Upload failed: {message}[/red]")
+                if "data" in response_json:
+                    console.print(f"[cyan]Error details:[/cyan] {response_json['data']}")
+                return False
+            raw_url = response_json.get("data")
+            if not isinstance(raw_url, str) or not raw_url:
+                console.print("[yellow]Torrent upload succeeded, but failed to download the torrent file: no hay enlace[/yellow]")
+                return True
+
+        torrent_id = re.search(r"/(\d+)\.", raw_url)
+        if torrent_id:
+            # Línea fija para quien lanza esto: la ficha del torrent subido.
+            print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
+        # El tracker firma el .torrent: el que se le da al cliente es el que se descarga aquí,
+        # con la misma autenticación que la subida (eMuwarez da 403 sin ella).
+        if content is None:
+            content, error = await self._download_torrent(raw_url, params, headers)
+            if error:
+                console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
+                return True
+        try:
+            new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
+            new_torrent.write_bytes(content)
+            url = raw_url.replace("/download", "s")
+            url = re.sub(r"/(\d+)\..*$", r"/\1", url)
+            await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
+        except Exception as e:
+            console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
+            return True
+        console.print("[bold green]Torrent uploaded successfully!")
+        return True
+
+    async def _post_upload(self, data, torrent_path, nfo_file, extra_files_meta, headers, params):
+        """POST de la subida, repetido ante cortes y errores 5xx. Devuelve (respuesta o None, intentos)."""
+        attempts = len(UPLOAD_RETRY_DELAYS) + 1
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            files = {}
-            with contextlib.ExitStack() as stack:
-                torrent_file = stack.enter_context(open(torrent_path, "rb"))
-                files["torrent"] = ("torrent.torrent", torrent_file, "application/x-bittorrent")
+            for attempt in range(1, attempts + 1):
+                with contextlib.ExitStack() as stack:
+                    files = {"torrent": ("torrent.torrent", stack.enter_context(open(torrent_path, "rb")), "application/x-bittorrent")}
+                    if nfo_file:
+                        files["nfo"] = ("nfo.nfo", stack.enter_context(open(nfo_file, "rb")), "application/octet-stream")
+                    for field, (fname, path, mime) in extra_files_meta.items():
+                        files[field] = (fname, stack.enter_context(open(path, "rb")), mime)
+                    try:
+                        response = await client.post(self.upload_url, data=data, files=files, headers=headers, params=params)
+                        error = f"HTTP {response.status_code}" if response.status_code in RETRY_STATUSES else None
+                    except httpx.HTTPError as e:
+                        response, error = None, type(e).__name__
+                if error is None or attempt == attempts:
+                    return response, attempt
+                delay = UPLOAD_RETRY_DELAYS[attempt - 1]
+                console.print(f"[yellow]{self.tracker}: {error} al subir, reintento en {delay}s ({attempt}/{attempts})")
+                await asyncio.sleep(delay)
 
-                if nfo_file:
-                    nfo_content = stack.enter_context(open(nfo_file, "rb"))
-                    files["nfo"] = ("nfo.nfo", nfo_content, "application/octet-stream")
-
-                # extra_files_meta
-                for field, (fname, path, mime) in extra_files_meta.items():
-                    f = stack.enter_context(open(path, "rb"))
-                    files[field] = (fname, f, mime)
-
+    async def _download_torrent(self, url, params, headers) -> Tuple[Optional[bytes], Optional[str]]:
+        """Descarga el .torrent, reintentando mientras el tracker lo prepara. Devuelve (contenido, error)."""
+        # La API key solo va al dominio del tracker, y sin seguir redirecciones.
+        try:
+            target, origin = httpx.URL(url), httpx.URL(self.upload_url)
+        except httpx.InvalidURL as e:
+            return None, type(e).__name__
+        if (target.scheme, target.host, target.port) != (origin.scheme, origin.host, origin.port):
+            return None, "el enlace apunta a otro dominio"
+        attempts = len(DOWNLOAD_RETRY_DELAYS) + 1
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(1, attempts + 1):
                 try:
-                    response = await client.post(
-                        self.upload_url, data=data, files=files if files else None, headers=headers, params=params
-                    )
-                    response.raise_for_status()
-                    if 200 <= response.status_code < 300:
-                        try:
-                            response_json = response.json()
-                        except ValueError:
-                            log.error(f"Unexpected response:\n{response.text}")
-                            return False
-                        success = response_json.get("success", False)
-                        if success:
-                            try:
-                                raw_url = response_json.get("data", "")
-                                torrent_id = re.search(r"/(\d+)\.", raw_url or "")
-                                if torrent_id:
-                                    # Línea fija para quien lanza esto: la ficha del torrent subido.
-                                    print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
-                                if raw_url:
-                                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                                        # Same auth as the upload POST above — this GET was
-                                        # going out with neither the api_token param nor the
-                                        # User-Agent header, so a tracker that requires auth
-                                        # to download a torrent (eMuwarez does) 403s it. That
-                                        # silently skips writing [tracker]{name}.torrent, so
-                                        # add_to_client() later has nothing to hand qBittorrent
-                                        # even though the upload itself succeeded (observed in
-                                        # production on a real Chappie re-upload, 2026-07-28).
-                                        torrent_response = await client.get(raw_url, params=params, headers=headers)
-                                        torrent_response.raise_for_status()
-                                        torrent_data = torrent_response.content
-                                        new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
-                                        new_torrent.write_bytes(torrent_data)
-                                        url = raw_url.replace("/download", "s")
-                                        url = re.sub(r"/(\d+)\..*$", r"/\1", url)
-                                        comment = f"Made by Uploadrr for: {url}"
-                                        await edit_torrent(torrent_path=new_torrent, comment=comment)
-                                        console.print("[bold green]Torrent uploaded successfully!")
-                            except httpx.HTTPStatusError as http_err:
-                                console.print(
-                                    f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {http_err}[/yellow]"
-                                )
-                                return True
-                            except Exception as e:
-                                console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
-                                return True
-                        else:
-                            message = response_json.get("message", "No message provided")
-                            console.print(f"[red]Upload failed: {message}[/red]")
-                            if "data" in response_json:
-                                console.print(f"[cyan]Error details:[/cyan] {response_json['data']}")
-                        return success
-                except httpx.HTTPStatusError as http_err:
-                    if http_err.response.status_code in (404, 500):
-                        soup = bs4.BeautifulSoup(http_err.response.text, "html.parser")
-                        error_heading = soup.select_one("h1.error__heading")
-                        error_body = soup.select_one("div.error__body")
-
-                        if error_heading:
-                            log.error(error_heading.text.strip())
-                        if error_body:
-                            log.error(error_body.text.strip())
-                        if not error_heading and not error_body:
-                            console.print(f"[blue]Raw Response:[/blue] {http_err.response.text}")
-                        return False
+                    response = await client.get(url, params=params, headers=headers)
+                except (httpx.HTTPError, httpx.InvalidURL) as e:
+                    error = type(e).__name__
+                else:
+                    if response.status_code != 200:
+                        error = f"HTTP {response.status_code}"
+                    elif not response.content.startswith(b"d"):
+                        error = "la respuesta no es un .torrent"
                     else:
-                        log.warning(f"[yellow]Unexpected Status Code ({http_err.response.status_code}):[/yellow]")
-                        console.print(http_err.response.text)
-                        return False
-                except Exception:
-                    console.print_exception()
-                    return False
+                        return response.content, None
+                if attempt < attempts:
+                    delay = DOWNLOAD_RETRY_DELAYS[attempt - 1]
+                    console.print(f"[yellow]{self.tracker}: {error} al descargar el .torrent, reintento en {delay}s")
+                    await asyncio.sleep(delay)
+        return None, error
+
+    async def _links_named(self, meta: Dict[str, Any], name: str) -> Optional[set]:
+        """(enlace de descarga, tamaño) de los torrents llamados exactamente name, o None si no se puede buscar."""
+        try:
+            items = await self._search(meta, name=name)
+        except DupeSearchError:
+            return None
+        found = ((attributes.get("download_link"), attributes["size"]) for attributes in items if attributes["name"] == name)
+        return {(link, size) for link, size in found if isinstance(link, str) and link}
+
+    def _print_http_error(self, response: httpx.Response) -> None:
+        if response.status_code == 302:
+            log.error("Redirect (302): la API key no parece válida")
+        elif response.status_code == 403:
+            log.error("Forbidden (403): la cuenta no tiene permiso de subida o Cloudflare ha bloqueado la petición")
+        elif response.status_code in (404, 500):
+            soup = bs4.BeautifulSoup(response.text, "html.parser")
+            error_heading = soup.select_one("h1.error__heading")
+            error_body = soup.select_one("div.error__body")
+
+            if error_heading:
+                log.error(error_heading.text.strip())
+            if error_body:
+                log.error(error_body.text.strip())
+            if not error_heading and not error_body:
+                console.print(f"[blue]Raw Response:[/blue] {response.text}")
+        else:
+            log.warning(f"[yellow]Unexpected Status Code ({response.status_code}):[/yellow]")
+            console.print(response.text)
 
     async def search_existing(self, meta: Dict[str, Any]) -> Dict[str, Any]:
         dupes: Dict[str, Any] = {}
@@ -324,25 +403,64 @@ class Unit3d:
         else:
             console.print(f"[yellow]Searching for existing torrents on {self.tracker}...")
 
+        for attributes in await self._search(meta):
+            dupes[attributes["name"]] = attributes["size"]
+        return dupes
+
+    async def _search(self, meta: Dict[str, Any], name: str = "") -> list:
+        """Los atributos de todos los resultados de /api/torrents/filter, página a página.
+
+        Si alguna página falla no se sabe si ya está subido: DupeSearchError, nunca "nada encontrado".
+        """
+        token = self.config["TRACKERS"][self.tracker]["api_key"].strip()
+        resolution_id = await self.get_res_id(meta)
         params = {
-            "api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip(),
+            "api_token": token,
             "tmdbId": meta.get("tmdb", 0),
             "categories[]": await self.get_cat_id(meta),
             "types[]": await self.get_type_id(meta),
-            "resolutions[]": await self.get_res_id(meta),
-            "name": meta.get("edition", ""),
+            # 1080p y 1080i compiten por el mismo hueco.
+            "resolutions[]": ["3", "4"] if resolution_id in ("3", "4") else resolution_id,
+            "name": name,
+            "perPage": 100,
         }
-
-        # Si la búsqueda falla no se sabe si ya está subido: antes devolvía {} y
-        # el dupe check decía "No dupes found" y subía a ciegas.
+        url = httpx.URL(self.search_url)
+        origin = (url.scheme, url.host, url.port)
+        items = []
         headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(self.search_url, params=params, headers=headers)
-            except httpx.HTTPError as e:
-                raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
-        if response.status_code != 200:
-            raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
-        for item in response.json()["data"]:
-            dupes[item["attributes"]["name"]] = item["attributes"]["size"]
-        return dupes
+            for _ in range(MAX_SEARCH_PAGES):
+                try:
+                    response = await client.get(url, params=params, headers=headers)
+                except httpx.HTTPError as e:
+                    raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
+                if response.status_code != 200:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
+                try:
+                    body = response.json()
+                    if not isinstance(body["data"], list):
+                        raise TypeError("data no es una lista")
+                    for entry in body["data"]:
+                        attributes = entry["attributes"]
+                        # Sin nombre y tamaño no se puede comparar con lo que se va a subir.
+                        if not isinstance(attributes["name"], str) or not isinstance(attributes["size"], (int, float)):
+                            raise TypeError("resultado sin nombre o tamaño")
+                        items.append(attributes)
+                    # Solo null (o no venir) cierra la paginación; cualquier otro valor tiene que ser una URL.
+                    links = body.get("links", {})
+                    if links is not None and not isinstance(links, dict):
+                        raise TypeError("links no es un objeto")
+                    next_url = (links or {}).get("next")
+                    if next_url is None:
+                        return items
+                    # El enlace de la página siguiente ya lleva los filtros (params lo vaciaría).
+                    url = httpx.URL(next_url)
+                except (ValueError, KeyError, TypeError, AttributeError, httpx.InvalidURL) as e:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió una respuesta inesperada") from e
+                # La API key solo va a su propio dominio.
+                if (url.scheme, url.host, url.port) != origin:
+                    raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} pagina hacia otro dominio")
+                if "api_token" not in url.params:
+                    url = url.copy_add_param("api_token", token)
+                params = None
+        raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} tiene más de {MAX_SEARCH_PAGES} páginas")
