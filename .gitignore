@@ -9,6 +9,9 @@ __pycache__/
 *.lock
 venv/*
 .venv/
+.pytest_cache/
+.coverage
+coverage.xml
 
 # Project Specifics
 *.mkv
@@ -24,6 +27,7 @@ data/cookies/*.txt
 data/config.json
 data/config.py
 data/config.yaml
+data/config.yaml.bak
 data/tags.json
 /src/old_trackers/*
 tmp/*

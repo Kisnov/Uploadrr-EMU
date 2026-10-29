@@ -39,11 +39,13 @@ or report their errors unless they break an eMuwarez upload.
   stay free on purpose: the app installs this file into the same environment as its own FastAPI stack.
   `pip install -r requirements.txt` on `python:3.12-slim` needs nothing else; running `upload.py` also needs
   `ffmpeg` and `mediainfo` (the `Dockerfile` installs them).
-- Tests: `pip install pytest`, then `python -m pytest tests -q -p no:cacheprovider` (in Docker; ~10 s). `tests/test_unit3d.py`
+- Tests: `pip install pytest pytest-cov`, then `python -m pytest tests -q -p no:cacheprovider` (in Docker; ~10 s).
+  `tests/conftest.py` blocks network, DNS and subprocesses; known bugs are `xfail`. `tests/test_unit3d.py`
   runs the dupe search and the upload against a fake UNIT3D tracker on localhost. Anything else: focused scripts in
   Docker (`upload.py` on a test folder, exit code).
 - The redactor rewrites config secrets in all Rich output.
-- CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`) and `compileall` on every PR.
+- CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`), `compileall` and pytest with coverage on
+  every PR, and uploads it to Codecov (informational only, `codecov.yml`).
   Style is left to CodeRabbit on changed lines.
 
 ## Secrets and auth
@@ -53,5 +55,5 @@ or report their errors unless they break an eMuwarez upload.
   machine-read lines that hold no secrets.
 - Re-downloading the signed `.torrent` after upload (`src/trackers/UNIT3D.py`) must send the same `params`
   and `User-Agent` as the upload POST, or eMuwarez answers 403 and `[EMU]<name>.torrent` is never written.
-- `data/config.yaml`, `data/config.yaml.bak` and `data/tags.json` are tracked (`.gitignore` lists the first and last).
-  They hold placeholders only: never commit real keys.
+- `data/config.yaml` and `data/config.yaml.bak` are not tracked: the fork's defaults live in
+  `data/backup/example_config.yaml`. `data/tags.json` is tracked although `.gitignore` lists it: placeholders only.

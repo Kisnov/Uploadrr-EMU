@@ -5,10 +5,10 @@ version: '2.1.0'
 # ------------------------------------------------------------------------------ #
 
 DEFAULT:
-  tmdb: TMDB_API_KEY
-  add_trailer: false
+  tmdb: null
+  add_trailer: true
   add_logo: true
-  default_torrent_client: Client1
+  default_torrent_client: watch
   sfx_on_prompt: true
   always_anon: false
   # torrent_creation: mktorrent #default torf
@@ -30,7 +30,7 @@ SCREENS:
     lensdump: null
     ptscreens: null
     onlyimage: null
-  img_hosts: [ptpimg, ptscreens, onlyimage, hamster, imghost, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
+  img_hosts: [imgbox, ptpimg, ptscreens, onlyimage, hamster, imghost, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
   per_episode: 3 # for tv will take x screens for every episode put them in spoiler
   img_size: 500
@@ -43,11 +43,11 @@ SCREENS:
   frame_stats: false
 
 SIGNATURES:
-  use_global_sigs: default # Use custom per tracker, fallback to global (False, only use tracker sigs if avail / True, only use global, None, no sigs)
+  use_global_sigs: default # Firma propia de eMuwarez Uploadrr (icono holográfico animado), no la de marca de Uploadrr. Valores: default (la del tracker si tiene, si no la global), true (solo la global), false (solo la del tracker), null (ninguna)
   ### These signatures below are for GLOBAL or used as fallback if using default  >>> to adjust per tracker, simply add the same keys below tracker of choice ###
-  signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  signature: "\n[center][img=400]https://i.ibb.co/5gt00Zv4/uploadrr-signature.webp[/img][/center]"
   anon_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
-  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][url=https://codeberg.org/CvT/Uploadrr][img=400]https://i.ibb.co/2NVWb0c/uploadrr.webp[/img][/url][/center]"
+  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][img=400]https://i.ibb.co/5gt00Zv4/uploadrr-signature.webp[/img][/center]"
   anon_pr_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
 
 AUTO:
@@ -99,7 +99,7 @@ TRACKERS:
     anon: false
 
   BLU:
-    useAPI: true
+    useAPI: false
     api_key: "BLU_API_KEY"
     anon: false
     modq: false
@@ -340,4 +340,4 @@ TORRENT_CLIENTS:
   rtorrent: {'torrent_client': 'rtorrent', 'rtorrent_url': 'https://user:password@server.host.tld:443/username/rutorrent/plugins/httprpc/action.php'}
   deluge: {'torrent_client': 'deluge', 'deluge_url': 'localhost', 'deluge_port': '8080', 'deluge_user': 'deluge_username', 'deluge_pass': 'deluge_password'}
   transmission: {'torrent_client': 'transmission', 'transmission_url': 'http://localhost:9091', 'transmission_user': 'trans_username', 'transmission_pass': 'trans_password', 'torrent_storage_dir': '/.config/transmission-daemon/Torrents/', 'enable_search': True}
-  watch: {'torrent_client': 'watch', 'watch_folder': '/Path/To/Watch/Folder'}
+  watch: {'torrent_client': 'watch', 'watch_folder': '~/testtorrents'}

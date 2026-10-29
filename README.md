@@ -54,6 +54,8 @@ Todo está en `data/config.yaml`. Para empezar, copia el ejemplo y rellena tus c
 cp data/backup/example_config.yaml data/config.yaml
 ```
 
+El cliente de torrents por defecto del ejemplo es `watch`, que copia cada `.torrent` en `TORRENT_CLIENTS.watch.watch_folder` (`~/testtorrents`): crea esa carpeta antes de la primera subida, o cambia `default_torrent_client` por tu cliente real.
+
 Para eMuwarez hace falta:
 
 | Clave | Qué es |

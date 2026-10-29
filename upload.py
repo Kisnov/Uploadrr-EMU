@@ -281,7 +281,7 @@ async def main() -> None:
             log.error("Legacy Config detected, please create a new yaml config, thank you!")
             sys.exit(1)
         else:
-            log.error("No Config detected, please setup config before starting, thank you!")
+            log.error(f"No Config detected at {config_path}: copy data/backup/example_config.yaml to data/config.yaml and fill in your keys.")
             sys.exit(1)
     config = load_yaml_config(config_path)
     redactor.load_from_config(config)
