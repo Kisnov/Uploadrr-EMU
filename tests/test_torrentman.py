@@ -49,12 +49,14 @@ def _crear(maker, torrent, path, salida):
     asyncio.run(maker._use_mkbrr(torrent, path, salida, 15, None))
 
 
-def _mkbrr_falso(monkeypatch, recibidos, include=("*.mkv",), codigo=0):
+def _mkbrr_falso(monkeypatch, recibidos, include=("*.mkv",), codigo=0, enlaces=None):
     """mkbrr simulado: guarda lo que recibe y escribe el .torrent del árbol que le dan."""
 
     async def ejecutar(self, args):
         objetivo = Path(args[2])
         recibidos.append(sorted(p.relative_to(objetivo).as_posix() for p in objetivo.rglob("*") if p.is_file()))
+        if enlaces is not None:
+            enlaces.extend(p.readlink() for p in objetivo.rglob("*") if p.is_symlink())
         if codigo == 0:
             hecho = Torrent(path=objetivo, private=True, include_globs=list(include), exclude_globs=["*.*"])
             hecho.generate()
@@ -64,14 +66,21 @@ def _mkbrr_falso(monkeypatch, recibidos, include=("*.mkv",), codigo=0):
     monkeypatch.setattr(TorrentMaker, "_run_mkbrr", ejecutar)
 
 
-def test_mkbrr_solo_ve_los_ficheros_que_elige_torf(monkeypatch, mensajes, pack, tmp_path):
+@pytest.mark.parametrize("relativo", [False, True], ids=["absoluto", "relativo"])
+def test_mkbrr_solo_ve_los_ficheros_que_elige_torf(monkeypatch, mensajes, pack, tmp_path, relativo):
+    if relativo:
+        monkeypatch.chdir(tmp_path)
+        pack = pack.relative_to(tmp_path)
     recibidos = []
-    _mkbrr_falso(monkeypatch, recibidos)
+    enlaces = []
+    _mkbrr_falso(monkeypatch, recibidos, enlaces=enlaces)
     salida = tmp_path / "BASE.torrent"
+    torrent = _torf(pack)
 
-    _crear(TorrentMaker({}), _torf(pack), pack, salida)
+    _crear(TorrentMaker({}), torrent, pack, salida)
 
     assert recibidos == [["Serie S01E01.mkv", "Serie S01E02.mkv"]]
+    assert sorted(enlaces) == sorted(Path(p).resolve() for p in torrent.filepaths)
     assert [str(f) for f in Torrent.read(salida).files] == ["Serie S01/Serie S01E01.mkv", "Serie S01/Serie S01E02.mkv"]
     assert "mkbrr hashing complete" in mensajes.vistos
     assert not any("torf" in m for m in mensajes.vistos)
@@ -102,6 +111,79 @@ def test_si_mkbrr_falla_se_rehace_con_torf(monkeypatch, mensajes, pack, tmp_path
 
     assert Torrent.read(salida).files
     assert "Torf hashing complete" in mensajes.vistos
+
+
+@pytest.mark.parametrize("operacion", ["temporal", "directorio", "enlace"])
+def test_si_falla_la_preparacion_se_rehace_con_torf(monkeypatch, mensajes, pack, tmp_path, operacion):
+    torrent = _torf(pack)
+    salida = tmp_path / "BASE.torrent"
+    salida.write_bytes(b"torrent anterior")
+
+    def fallar(*args, **kwargs):
+        raise OSError("fallo de staging")
+
+    async def no_ejecutar(self, args):
+        pytest.fail("mkbrr no debe lanzarse si falla la preparacion")
+
+    monkeypatch.setattr(TorrentMaker, "_run_mkbrr", no_ejecutar)
+    with monkeypatch.context() as staging:
+        if operacion == "temporal":
+            staging.setattr(torrentman.tempfile, "TemporaryDirectory", fallar)
+        elif operacion == "directorio":
+            staging.setattr(Path, "mkdir", fallar)
+        else:
+            staging.setattr(Path, "symlink_to", fallar)
+        _crear(TorrentMaker({}), torrent, pack, salida)
+
+    assert Torrent.read(salida).files == torrent.files
+    assert "Torf hashing complete" in mensajes.vistos
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
+def test_si_mkbrr_no_arranca_se_rehace_con_torf(monkeypatch, mensajes, pack, tmp_path, error):
+    async def lanzar(*args, **kwargs):
+        raise error("mkbrr no puede arrancar")
+
+    monkeypatch.setattr(torrentman.asyncio, "create_subprocess_exec", lanzar)
+    torrent = _torf(pack)
+    salida = tmp_path / "BASE.torrent"
+
+    _crear(TorrentMaker({}), torrent, pack, salida)
+
+    assert Torrent.read(salida).files == torrent.files
+    assert "Torf hashing complete" in mensajes.vistos
+    assert not torrentman.running_subprocesses
+
+
+def test_si_se_cancela_mkbrr_no_se_usa_torf(monkeypatch, mensajes, pack, tmp_path):
+    async def lanzar(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(torrentman.asyncio, "create_subprocess_exec", lanzar)
+
+    with pytest.raises(asyncio.CancelledError):
+        _crear(TorrentMaker({}), _torf(pack), pack, tmp_path / "BASE.torrent")
+
+    assert not any("torf" in m for m in mensajes.vistos)
+
+
+def test_si_no_se_puede_borrar_la_salida_no_se_usa_torf(monkeypatch, mensajes, pack, tmp_path):
+    salida = tmp_path / "BASE.torrent"
+    salida.write_bytes(b"torrent anterior")
+    unlink = Path.unlink
+
+    def borrar(path, *args, **kwargs):
+        if path == salida:
+            raise PermissionError("salida bloqueada")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", borrar)
+
+    with pytest.raises(PermissionError, match="salida bloqueada"):
+        _crear(TorrentMaker({}), _torf(pack), pack, salida)
+
+    assert salida.read_bytes() == b"torrent anterior"
+    assert not any("torf" in m for m in mensajes.vistos)
 
 
 def test_un_fichero_suelto_va_tal_cual(monkeypatch, mensajes, tmp_path):

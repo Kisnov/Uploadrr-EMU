@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
@@ -256,15 +257,21 @@ class TorrentMaker:
 
     async def _use_mkbrr(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int, threads) -> None:
         """mkbrr sobre los mismos ficheros que elegiría torf; si su .torrent no lista esos ficheros, torf."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            target = Path(path)
-            if target.is_dir():
-                # Los filtros los aplica torf: mkbrr hashea un árbol de enlaces con solo los ficheros elegidos.
-                target = Path(temp_dir) / target.name
-                for filepath in torrent.filepaths:
-                    link = target / Path(filepath).relative_to(path)
-                    link.parent.mkdir(parents=True, exist_ok=True)
-                    link.symlink_to(filepath)
+        with ExitStack() as stack:
+            try:
+                temp_dir = stack.enter_context(tempfile.TemporaryDirectory())
+                target = Path(path)
+                if target.is_dir():
+                    # Los filtros los aplica torf: mkbrr hashea un árbol de enlaces con solo los ficheros elegidos.
+                    target = Path(temp_dir) / target.name
+                    for filepath in torrent.filepaths:
+                        link = target / Path(filepath).relative_to(path)
+                        link.parent.mkdir(parents=True, exist_ok=True)
+                        link.symlink_to(Path(filepath).resolve())
+            except OSError as e:
+                log.warning(f"mkbrr staging failed ({e}), falling back to torf...")
+                await self.use_torf(torrent, path, output_path, piece_size)
+                return
             args = [
                 "mkbrr",
                 "create",
@@ -285,7 +292,12 @@ class TorrentMaker:
             if threads:
                 args.extend(["--workers", str(threads)])
             output_path.unlink(missing_ok=True)
-            returncode = await self._run_mkbrr(args)
+            try:
+                returncode = await self._run_mkbrr(args)
+            except OSError as e:
+                log.warning(f"mkbrr could not run ({e}), falling back to torf...")
+                await self.use_torf(torrent, path, output_path, piece_size)
+                return
         if returncode == 0 and self._same_files(output_path, torrent):
             ProgressManager.get_instance().update("mkbrr hashing complete")
             return
