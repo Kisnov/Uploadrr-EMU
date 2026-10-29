@@ -35,11 +35,17 @@ or report their errors unless they break an eMuwarez upload.
 
 ## Verify
 
-- `pip install -r requirements.txt` on `python:3.12-slim` needs no extras or pins; running `upload.py` also needs
-  `ffmpeg` and `mediainfo` (the `Dockerfile` installs them). There is no test suite:
-  check changes with focused scripts in Docker (fake tracker server, `upload.py` on a test folder, exit code).
+- `requirements.txt` pins exact versions of the direct dependencies, bumped only by Dependabot PRs. Transitive ones
+  stay free on purpose: the app installs this file into the same environment as its own FastAPI stack.
+  `pip install -r requirements.txt` on `python:3.12-slim` needs nothing else; running `upload.py` also needs
+  `ffmpeg` and `mediainfo` (the `Dockerfile` installs them).
+- Tests: `pip install pytest pytest-cov`, then `python -m pytest tests -q -p no:cacheprovider` (in Docker; ~10 s).
+  `tests/conftest.py` blocks network, DNS and subprocesses; known bugs are `xfail`. `tests/test_unit3d.py`
+  runs the dupe search and the upload against a fake UNIT3D tracker on localhost. Anything else: focused scripts in
+  Docker (`upload.py` on a test folder, exit code).
 - The redactor rewrites config secrets in all Rich output.
-- CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`) and `compileall` on every PR.
+- CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`), `compileall` and pytest with coverage on
+  every PR, and uploads it to Codecov (informational only, `codecov.yml`).
   Style is left to CodeRabbit on changed lines.
 
 ## Secrets and auth
