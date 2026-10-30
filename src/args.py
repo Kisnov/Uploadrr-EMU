@@ -332,7 +332,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument(
         "-res",
         "--resolution",
-        choices=["2160p", "1080p", "1080i", "720p", "576p", "576i", "480p", "480i", "8640p", "4320p", "other"],
+        choices=["2160p", "1080p", "1080i", "720p", "576p", "576i", "540p", "480p", "480i", "8640p", "4320p", "other"],
         help="Video resolution",
     )
     parser.add_argument("-ps", "--piece-size-max", type=int, choices=[1, 2, 4, 8, 16], help="Max piece size (MiB)")

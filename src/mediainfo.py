@@ -204,8 +204,9 @@ class MediaInfoHandler:
             720: {"p": "576p", "i": "576i"},
         }
 
-        if actual_height == 540:
-            return "OTHER"
+        # eMuwarez tiene 540p. Un 1280x540 es un 720p recortado: lo resuelve el mapa.
+        if actual_height == 540 and width < 1280:
+            return "540p"
 
         resolution = RESOLUTION_MAP.get(res, res if res in RESOLUTION_MAP.values() else None)
         if resolution:

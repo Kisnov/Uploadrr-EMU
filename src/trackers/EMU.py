@@ -10,6 +10,24 @@ class EMU(Unit3d):
     allowed_imghosts = []
     banned_groups = [""]
 
+    # Los del formulario de subida: el 7 es 540p (no 576i) y no hay 480i. El SD entrelazado va como el progresivo.
+    resolution_ids = {
+        "4320p": "1",
+        "2160p": "2",
+        "1440p": "3",
+        "1080p": "3",
+        "1080i": "4",
+        "720p": "5",
+        "576p": "6",
+        "576i": "6",
+        "540p": "7",
+        "480p": "8",
+        "480i": "8",
+    }
+
+    async def get_res_id(self, meta: Dict[str, Any]) -> str:
+        return self.resolution_ids.get(meta["resolution"], "10")
+
     def edit_name(self, meta: Dict[str, Any]) -> str:
         built_name = meta["name"]
         title = meta.get("title", "")
