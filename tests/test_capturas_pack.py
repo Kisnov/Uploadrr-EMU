@@ -1,6 +1,7 @@
 """Capturas de un pack de temporada (src/screenshots/generator.py y manager.py)."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,7 @@ from src.mediainfo import MediaInfoHandler
 from src.screenshots import manager as man
 from src.screenshots.generator import ScreenshotGenerator
 from src.screenshots.manager import ScreenshotManager
+from src.utils.descgen import DescGenerator
 
 
 def _pack(*capitulos):
@@ -59,7 +61,7 @@ def test_con_per_episode_0_solo_se_captura_el_primer_capitulo(tmp_path, monkeypa
     resultado, capturados = _generar(tmp_path, monkeypatch, 0, filelist)
 
     assert capturados == ["/pack/Serie.S01E01.1080p.mkv"]
-    assert [i["local_file"] for i in resultado["main"]] == [f"Serie-E01-{n}.png" for n in range(6)]
+    assert [i["local_file"] for i in resultado["main"]] == [f"Serie-S01E01-{n}.png" for n in range(6)]
     assert resultado["episodes"] == {}
 
 
@@ -74,8 +76,8 @@ def test_con_per_episode_se_captura_cada_capitulo(tmp_path, monkeypatch):
     resultado, capturados = _generar(tmp_path, monkeypatch, 3, _pack("S01E13", "S01E14", "S01E15"))
 
     assert len(capturados) == 3
-    assert [i["local_file"] for i in resultado["main"]] == [f"Serie-E13-{n}.png" for n in range(6)]
-    assert {ep: len(imgs) for ep, imgs in resultado["episodes"].items()} == {"E13": 6, "E14": 3, "E15": 3}
+    assert [i["local_file"] for i in resultado["main"]] == [f"Serie-S01E13-{n}.png" for n in range(6)]
+    assert {ep: len(imgs) for ep, imgs in resultado["episodes"].items()} == {"S01E13": 6, "S01E14": 3, "S01E15": 3}
 
 
 def test_con_per_episode_0_solo_se_suben_las_principales(tmp_path, monkeypatch):
@@ -107,7 +109,7 @@ def test_las_capturas_que_quedan_de_otro_capitulo_no_sirven_de_principales(tmp_p
     gestor = ScreenshotManager(config, tmp_path)
     (tmp_path / "tmp" / "u").mkdir(parents=True)
     for n in range(6):
-        (tmp_path / "tmp" / "u" / f"Serie-E01-{n}.png").write_bytes(b"x" * 2000)
+        (tmp_path / "tmp" / "u" / f"Serie-S00E01-{n}.png").write_bytes(b"x" * 2000)
     generadas = []
 
     async def generar(meta, filename, uuid):
@@ -115,7 +117,7 @@ def test_las_capturas_que_quedan_de_otro_capitulo_no_sirven_de_principales(tmp_p
         return {"main": [], "episodes": {}}
 
     monkeypatch.setattr(gestor.generator, "generate_screenshots", generar)
-    meta = {"uuid": "u", "filename": "Serie", "screens": 6, "tv_pack": 1, "filelist": _pack("S01E13", "S01E14")}
+    meta = {"uuid": "u", "filename": "Serie", "screens": 6, "tv_pack": 1, "filelist": _pack("S00E01", "S01E01", "S01E02")}
     meta["skip_imghost_upload"] = True
 
     asyncio.run(gestor._handle_video_content(meta, {}))
@@ -133,3 +135,19 @@ def test_cada_contenido_vuelve_a_probar_primero_el_host_caido(tmp_path, monkeypa
     asyncio.run(gestor.handle_screenshots({"uuid": "u"}, {}))
 
     assert gestor.uploader.failed_hosts == set()
+
+
+def test_la_descripcion_no_repite_el_primer_capitulo_y_nombra_cada_uno_con_su_temporada(fichero):
+    def capturas(ep):
+        return [{"local_file": f"Serie-{ep}-{n}.png", "img_url": "i", "raw_url": f"r-{ep}", "web_url": "w"} for n in range(3)]
+
+    config = {"DEFAULT": {"img_size": 500}, "SCREENS": {"per_episode": 3}, "TRACKERS": {}}
+    meta = {
+        "screens": 3,
+        "tv_pack": 1,
+        "image_list": {"main": capturas("S01E01"), "episodes": {e: capturas(e) for e in ("S01E01", "S00E01", "S01E02")}},
+    }
+    asyncio.run(DescGenerator(config, Path("."))._write_images(fichero, meta, "EMU"))
+
+    assert "[spoiler=S01E01]" not in fichero.texto
+    assert "[spoiler=S00E01]" in fichero.texto and "[spoiler=S01E02]" in fichero.texto

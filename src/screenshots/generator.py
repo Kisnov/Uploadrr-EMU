@@ -684,8 +684,9 @@ class ScreenshotGenerator:
         return str(largest), duration
 
     def _get_episode_identifier(self, path):
-        match = re.search(r"S\d{2}E(\d{2})", str(path), re.IGNORECASE)
-        return f"E{match.group(1)}" if match else Path(path).stem.split(".")[-1]
+        # Con la temporada: S00E01 y S01E01 no comparten capturas.
+        match = re.search(r"S(\d+)E(\d+)", str(path), re.IGNORECASE)
+        return f"S{match.group(1)}E{match.group(2)}".upper() if match else Path(path).stem.split(".")[-1]
 
     def _first_episode(self, filelist):
         """El capítulo de número más bajo; los especiales (S00) solo si el pack no trae otra temporada."""
@@ -720,8 +721,7 @@ class ScreenshotGenerator:
                 ]
                 return sum(float(ffmpeg.probe(vob)["format"]["duration"]) for vob in vobs)
             elif meta.get("tv_pack") == 1:
-                filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
-                first_ep = next((p for p in filelist if self._is_video_file(p)), None)
+                first_ep = self._first_episode(meta.get("filelist", []))
                 if first_ep:
                     return float(ffmpeg.probe(first_ep)["format"]["duration"])
                 return 0
