@@ -535,11 +535,11 @@ class DescGenerator:
         # Write episode images
         if meta.get("tv_pack") and meta.get("per_episode_screens", True) and images["episodes"]:
             await descfile.write("\n[center][spoiler=Episode Screens]")
+            main_files = {image.get("local_file") for image in images["main"]}
             for ep_name, ep_images in images["episodes"].items():
-                if ep_name.upper() == "E01":
-                    continue  # E01 was already included in main images
-                display_name = "OVA" if ep_name == "OVA" else f"Episode {int(ep_name[1:])}"
-                await descfile.write(f"\n[spoiler={display_name}][center]")
+                if main_files & {image.get("local_file") for image in ep_images}:
+                    continue  # el primer capítulo ya va en las principales
+                await descfile.write(f"\n[spoiler={ep_name}][center]")
                 for i, image in enumerate(ep_images):
                     try:
                         img_tag = f"[img={img_size}]" if img_size else "[img]"

@@ -192,7 +192,12 @@ class ScreenshotGenerator:
     async def _generate_tv_pack_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for TV pack, reusing valid existing ones per episode."""
         per_episode = self.screens.get("per_episode", 3)
-        filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
+        first_ep = self._first_episode(meta.get("filelist", []))
+        # Con per_episode a 0 solo se captura el primer capítulo.
+        if per_episode:
+            filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
+        else:
+            filelist = [first_ep] if first_ep else []
         result = {"main": [], "episodes": {}}
 
         ss_time_map_main = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
@@ -203,7 +208,7 @@ class ScreenshotGenerator:
                 continue
             ep_name = self._get_episode_identifier(ep_path)
             ep_filename = f"{filename}-{ep_name}"
-            num_needed = max(screens, contact_screens) if ep_name == "E01" else per_episode
+            num_needed = max(screens, contact_screens) if ep_path == first_ep else per_episode
 
             # -- VALIDATION -- #
             pattern = f"{ep_filename}-*.png"
@@ -229,9 +234,10 @@ class ScreenshotGenerator:
                     for img in existing_screenshots
                 ]
 
-            if ep_name == "E01":
+            if ep_path == first_ep:
                 result["main"] = ep_screens[:screens]
-            result["episodes"][ep_name] = ep_screens[:num_needed]
+            if per_episode:
+                result["episodes"][ep_name] = ep_screens[:num_needed]
 
         return result
 
@@ -296,15 +302,9 @@ class ScreenshotGenerator:
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
-        png_files = self.tmp_dir.glob(f"{filename}-*.png")
-        indices = []
-        for p in png_files:
-            match = re.search(r"\d+", p.name)
-            if match:
-                indices.append(int(match.group()))
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = [
-            self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
+            self._take_screenshot(file, f"{filename}-{start_idx + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
             for i, t in enumerate(ss_times)
         ]
         results = await asyncio.gather(*tasks)
@@ -323,8 +323,7 @@ class ScreenshotGenerator:
         total_length = sum(vob["duration"] for vob in vobs)
         screens_per_vob = max(1, num_screens // len(vobs))
         extra_screens = num_screens % len(vobs)
-        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = []
         for vob_idx, vob in enumerate(vobs):
             num = screens_per_vob + (1 if vob_idx < extra_screens else 0)
@@ -333,7 +332,7 @@ class ScreenshotGenerator:
                 tasks.append(
                     self._take_screenshot(
                         vob["file"],
-                        f"{filename}-{max_idx + 1 + vob_idx * screens_per_vob + i}.png",
+                        f"{filename}-{start_idx + vob_idx * screens_per_vob + i}.png",
                         t,
                         "none",
                         self.ffdebug,
@@ -422,12 +421,11 @@ class ScreenshotGenerator:
         else:
             adjusted_ss_times = ss_times
 
-        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = [
             self._take_screenshot(
                 file_path,
-                f"{filename}-{max_idx + 1 + i}.png",
+                f"{filename}-{start_idx + i}.png",
                 t,
                 keyframe,
                 self.ffdebug,
@@ -537,6 +535,11 @@ class ScreenshotGenerator:
 
         return None
 
+    def _next_index(self, filename):
+        """El primer número libre tras las capturas que ya hay de `filename`."""
+        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
+        return max(indices, default=-1) + 1
+
     async def _validate_and_retry(self, meta, results, file, filename, length, keyframe, num_screens, vobs=None):
         """Validate screenshots and retry missing ones"""
 
@@ -550,7 +553,7 @@ class ScreenshotGenerator:
         if missing > 0:
             used_times = {t for _, t in valid}
             new_times = self._generate_valid_ss_times(length, missing, avoid_times=used_times)
-            start_idx = len(valid) + 1
+            start_idx = self._next_index(filename)
             tasks = [
                 self._take_screenshot(
                     file, f"{filename}-{start_idx + i}.png", t, keyframe, self.ffdebug, vobs=vobs, hdr=meta.get("hdr")
@@ -678,8 +681,21 @@ class ScreenshotGenerator:
         return str(largest), duration
 
     def _get_episode_identifier(self, path):
-        match = re.search(r"S\d{2}E(\d{2})", str(path), re.IGNORECASE)
-        return f"E{match.group(1)}" if match else Path(path).stem.split(".")[-1]
+        # Con la temporada: S00E01 y S01E01 no comparten capturas.
+        match = re.search(r"S(\d+)E(\d+)", Path(path).name, re.IGNORECASE)
+        return f"S{match.group(1)}E{match.group(2)}".upper() if match else Path(path).stem.split(".")[-1]
+
+    def _first_episode(self, filelist):
+        """El capítulo de número más bajo; los especiales (S00) solo si el pack no trae otra temporada."""
+
+        def orden(path):
+            match = re.search(r"S(\d+)E(\d+)", Path(path).name, re.IGNORECASE)
+            if not match:
+                return (2, 0, 0, str(path))
+            season, episode = int(match.group(1)), int(match.group(2))
+            return (1 if season == 0 else 0, season, episode, str(path))
+
+        return min((p for p in filelist if self._is_video_file(p)), key=orden, default=None)
 
     def _is_video_file(self, path):
         return Path(path).suffix.lower() in {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm"}
@@ -702,8 +718,7 @@ class ScreenshotGenerator:
                 ]
                 return sum(float(ffmpeg.probe(vob)["format"]["duration"]) for vob in vobs)
             elif meta.get("tv_pack") == 1:
-                filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
-                first_ep = next((p for p in filelist if self._is_video_file(p)), None)
+                first_ep = self._first_episode(meta.get("filelist", []))
                 if first_ep:
                     return float(ffmpeg.probe(first_ep)["format"]["duration"])
                 return 0
