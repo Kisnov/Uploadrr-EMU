@@ -302,15 +302,9 @@ class ScreenshotGenerator:
         ss_times = [img.get("ss_time") for img in meta.get("image_list", {}).get("main", []) if "ss_time" in img]
         if not ss_times or (len(ss_times) < num_screens):
             ss_times = self._generate_valid_ss_times(length, num_screens)
-        png_files = self.tmp_dir.glob(f"{filename}-*.png")
-        indices = []
-        for p in png_files:
-            match = re.search(r"-(\d+)\.png$", p.name)
-            if match:
-                indices.append(int(match.group(1)))
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = [
-            self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
+            self._take_screenshot(file, f"{filename}-{start_idx + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
             for i, t in enumerate(ss_times)
         ]
         results = await asyncio.gather(*tasks)
@@ -329,8 +323,7 @@ class ScreenshotGenerator:
         total_length = sum(vob["duration"] for vob in vobs)
         screens_per_vob = max(1, num_screens // len(vobs))
         extra_screens = num_screens % len(vobs)
-        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = []
         for vob_idx, vob in enumerate(vobs):
             num = screens_per_vob + (1 if vob_idx < extra_screens else 0)
@@ -339,7 +332,7 @@ class ScreenshotGenerator:
                 tasks.append(
                     self._take_screenshot(
                         vob["file"],
-                        f"{filename}-{max_idx + 1 + vob_idx * screens_per_vob + i}.png",
+                        f"{filename}-{start_idx + vob_idx * screens_per_vob + i}.png",
                         t,
                         "none",
                         self.ffdebug,
@@ -428,12 +421,11 @@ class ScreenshotGenerator:
         else:
             adjusted_ss_times = ss_times
 
-        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
-        max_idx = max(indices + [-1])
+        start_idx = self._next_index(filename)
         tasks = [
             self._take_screenshot(
                 file_path,
-                f"{filename}-{max_idx + 1 + i}.png",
+                f"{filename}-{start_idx + i}.png",
                 t,
                 keyframe,
                 self.ffdebug,
@@ -543,6 +535,11 @@ class ScreenshotGenerator:
 
         return None
 
+    def _next_index(self, filename):
+        """El primer número libre tras las capturas que ya hay de `filename`."""
+        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
+        return max(indices, default=-1) + 1
+
     async def _validate_and_retry(self, meta, results, file, filename, length, keyframe, num_screens, vobs=None):
         """Validate screenshots and retry missing ones"""
 
@@ -556,7 +553,7 @@ class ScreenshotGenerator:
         if missing > 0:
             used_times = {t for _, t in valid}
             new_times = self._generate_valid_ss_times(length, missing, avoid_times=used_times)
-            start_idx = len(valid) + 1
+            start_idx = self._next_index(filename)
             tasks = [
                 self._take_screenshot(
                     file, f"{filename}-{start_idx + i}.png", t, keyframe, self.ffdebug, vobs=vobs, hdr=meta.get("hdr")

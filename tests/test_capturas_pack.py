@@ -183,3 +183,23 @@ def test_las_capturas_nuevas_siguen_tras_las_que_ya_hay_del_capitulo(tmp_path, m
     asyncio.run(generador._generate_file({}, "Serie-S01E13", "u", 2, str(video)))
 
     assert salidas == ["Serie-S01E13-3.png", "Serie-S01E13-4.png"]
+
+
+def test_el_reintento_de_una_captura_no_pisa_las_que_ya_hay(tmp_path, monkeypatch):
+    generador = ScreenshotGenerator({"SCREENS": {}}, tmp_path)
+    generador.tmp_dir = tmp_path
+    generador.min_image_size = 1
+    for n in range(4):
+        (tmp_path / f"Serie-S01E13-{n}.png").write_bytes(b"x")
+    salidas = []
+
+    async def capturar(file, output, *_a, **_k):
+        salidas.append(output)
+        return None
+
+    monkeypatch.setattr(generador, "is_monochromatic", lambda _p: False)
+    monkeypatch.setattr(generador, "_take_screenshot", capturar)
+    resultados = [(str(tmp_path / "Serie-S01E13-3.png"), 100.0), None]
+    asyncio.run(generador._validate_and_retry({}, resultados, "v.mkv", "Serie-S01E13", 1200, "none", 2))
+
+    assert salidas == ["Serie-S01E13-4.png"]
