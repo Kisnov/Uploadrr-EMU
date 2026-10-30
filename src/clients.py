@@ -625,7 +625,7 @@ class Clients:
                 qbt_client.torrents_resume(infohash)
                 return
             await asyncio.sleep(1)
-        console.print(f"[bold red]Warning: Torrent with hash {infohash} not found after adding.")
+        raise RuntimeError(f"qBittorrent no muestra el torrent {infohash} 30 s después de añadirlo")
 
     def _apply_qbit_tags(self, qbt_client: qbittorrentapi.Client, infohash: str, client: dict, meta: dict, tracker: str) -> None:
         """Apply tags to a qBittorrent torrent with corrected tracker tag retrieval."""

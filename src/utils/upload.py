@@ -142,7 +142,8 @@ async def upload_to_tracker(
             try:
                 await client.add_to_client(meta, tracker_name)
             except Exception as e:
-                log.error(f"Subido, pero no se pudo añadir al cliente de torrents: {e}")
+                # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
+                print(f"Torrent client add failed: {' '.join(str(e).split()) or type(e).__name__}", flush=True)
         return True, skipped_files
     else:
         if client and result == "DEBUG":
