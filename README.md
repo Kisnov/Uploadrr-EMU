@@ -104,10 +104,16 @@ pip install pytest
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local. El CI pasa las
-reglas graves de `ruff` y `compileall` en cada PR. `CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas
-de la salida lee y qué claves de la configuración toca): si cambias una de ellas, hay que cambiar la aplicación a la
-vez.
+Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local, sin red. En cada
+PR, el CI pasa las reglas graves de `ruff`, `compileall` y las pruebas con cobertura, que sube a Codecov (solo
+informativa). Si el PR toca `.github/`, [zizmor](https://docs.zizmor.sh) revisa los workflows y `dependabot.yml`.
+
+Dependabot propone cada semana las versiones nuevas de `requirements.txt` y de las GitHub Actions, cuando llevan 7
+días publicadas: las menores y los parches juntos en un PR por ecosistema, y cada versión mayor en el suyo. Las
+actualizaciones de seguridad llegan en cuanto sale el aviso.
+
+`CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas de la salida lee y qué claves de la configuración
+toca): si cambias una de ellas, hay que cambiar la aplicación a la vez.
 
 ## Origen y créditos
 
