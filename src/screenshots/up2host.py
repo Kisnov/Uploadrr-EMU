@@ -75,8 +75,6 @@ class ScreenshotUploader:
                 if section == "main":
                     max_images = len(screens) if meta.get("is_music", False) else meta.get("screens", 3)
                     uploaded = await self._upload_batch(meta, images, viable_hosts, meta["name"], max_images, meta["xxx"])
-                    for i, up in enumerate(uploaded):
-                        up["local_file"] = images[i]["local_file"]
                     result["main"] = uploaded
 
                 elif section == "episodes":
@@ -85,14 +83,10 @@ class ScreenshotUploader:
                         uploaded = await self._upload_batch(
                             meta, ep_screens, viable_hosts, f"{ep_name} - {meta['name']}", per_episode, meta["xxx"]
                         )
-                        for i, up in enumerate(uploaded):
-                            up["local_file"] = ep_screens[i]["local_file"]
                         result["episodes"][ep_name] = uploaded
 
                 elif section == "contact_sheets":
                     uploaded = await self._upload_batch(meta, images, viable_hosts, f"CS - {meta['name']}", len(images), meta["xxx"])
-                    for i, up in enumerate(uploaded):
-                        up["local_file"] = images[i]["local_file"]
                     result["contact_sheets"] = uploaded
 
             if pm:
@@ -106,24 +100,24 @@ class ScreenshotUploader:
             log.debug(f"No images to upload for {label}")
             return []
 
+        # Cada captura con su ruta: el resultado de cada una vuelve a su sitio aunque falle otra.
         if meta.get("is_music", False):
-            image_paths = []
+            pending = []
             for img in images:
                 if "local_file" in img:
-                    img_path = Path(img["local_file"])
-                    resolved_path = img_path.resolve()
-                    image_paths.append(str(resolved_path))
+                    resolved_path = Path(img["local_file"]).resolve()
+                    pending.append((img, str(resolved_path)))
                     if not resolved_path.exists():
                         log.warning(f"Music image file does not exist: {img['local_file']}")
         else:
             tmp_dir = self.base_dir / "tmp" / meta["uuid"]
-            image_paths = [
-                (tmp_dir / img["local_file"]).as_posix()
+            pending = [
+                (img, (tmp_dir / img["local_file"]).as_posix())
                 for img in images[:max_images]
                 if "local_file" in img and Path(tmp_dir / img["local_file"]).exists()
             ]
 
-        if not image_paths:
+        if not pending:
             if "CS -" not in label:
                 log.warning(f"No valid image paths found for {label}")
             return []
@@ -156,86 +150,77 @@ class ScreenshotUploader:
             screen_keys = self.config["SCREENS"]["API_KEYS"]
             viable_hosts = [h for h in viable_hosts if h in screen_keys or h in NO_API_KEY_HOSTS]
 
+        # Las que fallan en un host se reintentan ahí y luego en el siguiente; las que ya subieron no se repiten.
+        uploaded = {}
         for host in viable_hosts:
+            missing = [i for i in range(len(pending)) if i not in uploaded]
+            if not missing:
+                break
             try:
-                uploaded = await self._upload_with_retries(host, images, image_paths, meta, label, max_images, adult=adult)
-                if uploaded:
-                    return uploaded
-                else:
-                    log.warning(f"No images uploaded to {host} for {label}, retrying next host")
+                uploaded.update(await self._upload_with_retries(host, [pending[i] for i in missing], missing, label, adult=adult))
             except Exception as e:
                 console.print_exception()
                 last_exc = e
                 log.error(f"[Uploader] {host} failed batch for {label}: {e!r}", exc_info=True)
-        err_msg = f"Failed to upload {label} to any host"
-        if last_exc:
-            err_msg += f": last error: {last_exc!r}"
-        log.error(err_msg)
-        raise AllHostsFailedError(err_msg)
 
-    async def _upload_with_retries(self, host_name, images, image_paths, meta, title, max_images, adult=False, max_retries=3):
+        if not uploaded:
+            err_msg = f"Failed to upload {label} to any host"
+            if last_exc:
+                err_msg += f": last error: {last_exc!r}"
+            log.error(err_msg)
+            raise AllHostsFailedError(err_msg)
+        if len(uploaded) < len(pending):
+            log.warning(f"Only {len(uploaded)}/{len(pending)} screenshots uploaded for {label}")
+        return [uploaded[i] for i in sorted(uploaded)]
+
+    async def _upload_with_retries(self, host_name, pending, indexes, title, adult=False, max_retries=3):
+        """Sube a un host las capturas pendientes; devuelve {índice: resultado} de las que han subido."""
         pm = ProgressManager.get_instance()
         host = self._load_host(host_name)
         if not host:
             log.error(f"[Uploader] Skipping upload: could not load host '{host_name}' (adult={adult})")
-            return []
+            return {}
 
-        if not image_paths:
-            log.warning(f"No valid image paths for upload to {host_name}")
-            return []
-
+        done = {}
         for attempt in range(max_retries):
+            todo = [n for n in range(len(pending)) if indexes[n] not in done]
+            if not todo:
+                break
             try:
-                results = []
-                if hasattr(host, "upload_batch"):
-                    batch_results = await host.upload_batch(self.client, image_paths, title=title, adult=adult)
-                    successful = sum(
-                        1
-                        for r in batch_results
-                        if r and isinstance(r, dict) and any(r.get(k) for k in ("img_url", "raw_url", "web_url"))
-                    )
-                    if pm:
-                        pm.screen_up(successful)
-                    results = batch_results
-                else:
-                    tasks = [host.upload(self.client, path, title=title, adult=adult) for path in image_paths]
-                    for f in asyncio.as_completed(tasks):
-                        try:
-                            r = await f
-                            log.debug(f"Raw single result from {host_name}: {r}")
-                            if r and isinstance(r, dict) and any(r.get(k) for k in ("img_url", "raw_url", "web_url")) and pm:
-                                pm.screen_up(1)
-                            results.append(r)
-                        except Exception as e:
-                            log.debug(f"Upload failed: {e}")
-                            results.append(None)
-
-                # Filter valid results
-                valid_results = []
-                for r, img in zip(results, images[:max_images]):
-                    if not r:
-                        continue
-                    if not isinstance(r, dict):
-                        continue
-                    if not any(r.get(k) for k in ("img_url", "raw_url", "web_url")):
-                        continue
-                    result = {
-                        "img_url": r.get("img_url", ""),
-                        "raw_url": r.get("raw_url", ""),
-                        "web_url": r.get("web_url", ""),
-                        "local_file": img["local_file"],
-                        "ss_time": img.get("ss_time", 0),
+                paths = [pending[n][1] for n in todo]
+                if host_name == "imgbox":
+                    # imgbox solo devuelve las que suben, con el nombre del fichero.
+                    by_name = {
+                        Path(r["local_file"]).name: r for r in await host.upload_batch(self.client, paths, title=title, adult=adult)
                     }
-                    valid_results.append(result)
-                if valid_results:
-                    return valid_results
+                    results = [by_name.get(Path(p).name) for p in paths]
                 else:
-                    log.warning(f"No valid uploads to {host_name} on attempt {attempt + 1}, retrying")
+                    # Más de 6 a la vez y los hosts cortan la conexión antes de dar la URL.
+                    limit = asyncio.Semaphore(6)
 
+                    async def one(path):
+                        async with limit:
+                            return await host.upload(self.client, path, title=title, adult=adult)
+
+                    results = await asyncio.gather(*(one(p) for p in paths), return_exceptions=True)
+                for n, r in zip(todo, results):
+                    if isinstance(r, dict) and any(r.get(k) for k in ("img_url", "raw_url", "web_url")):
+                        img = pending[n][0]
+                        done[indexes[n]] = {
+                            "img_url": r.get("img_url", ""),
+                            "raw_url": r.get("raw_url", ""),
+                            "web_url": r.get("web_url", ""),
+                            "local_file": img["local_file"],
+                            "ss_time": img.get("ss_time", 0),
+                        }
+                        if pm:
+                            pm.screen_up(1)
+                    elif isinstance(r, Exception):
+                        log.debug(f"{host_name} upload failed: {r!r}")
             except Exception as e:
                 log.error(f"{host_name} retry {attempt + 1}/{max_retries} failed: {e!r}")
                 console.print_exception()
+            if len(done) < len(pending) and attempt < max_retries - 1:
+                log.warning(f"{len(pending) - len(done)} screenshots missing on {host_name} after attempt {attempt + 1}, retrying")
                 await asyncio.sleep(0.3)
-
-        log.error(f"All retries failed for host {host_name}, returning partial or no results")
-        return []  # Return empty list to indicate total failure
+        return done
