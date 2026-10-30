@@ -109,8 +109,8 @@ PR, el CI pasa las reglas graves de `ruff`, `compileall` y las pruebas con cober
 informativa). Si el PR toca `.github/`, [zizmor](https://docs.zizmor.sh) revisa los workflows y `dependabot.yml`.
 
 Dependabot propone cada semana las versiones nuevas de `requirements.txt` y de las GitHub Actions, cuando llevan 7
-días publicadas: las menores y los parches juntos en un PR por ecosistema, y cada versión mayor en el suyo. Las
-actualizaciones de seguridad llegan en cuanto sale el aviso.
+días publicadas: las menores y los parches juntos en un PR por ecosistema, y cada versión mayor en el suyo. Las de
+seguridad no esperan esos 7 días: llegan en cuanto un aviso tiene versión corregida.
 
 `CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas de la salida lee y qué claves de la configuración
 toca): si cambias una de ellas, hay que cambiar la aplicación a la vez.
