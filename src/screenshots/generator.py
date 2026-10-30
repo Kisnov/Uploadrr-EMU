@@ -192,7 +192,12 @@ class ScreenshotGenerator:
     async def _generate_tv_pack_screenshots(self, meta, filename, uuid, screens, contact_screens):
         """Generate screenshots for TV pack, reusing valid existing ones per episode."""
         per_episode = self.screens.get("per_episode", 3)
-        filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
+        first_ep = self._first_episode(meta.get("filelist", []))
+        # Con per_episode a 0 solo se captura el primer capítulo.
+        if per_episode:
+            filelist = sorted(meta.get("filelist", []), key=self._get_episode_identifier)
+        else:
+            filelist = [first_ep] if first_ep else []
         result = {"main": [], "episodes": {}}
 
         ss_time_map_main = {img["local_file"]: img.get("ss_time", 0) for img in meta.get("image_list", {}).get("main", [])}
@@ -203,7 +208,7 @@ class ScreenshotGenerator:
                 continue
             ep_name = self._get_episode_identifier(ep_path)
             ep_filename = f"{filename}-{ep_name}"
-            num_needed = max(screens, contact_screens) if ep_name == "E01" else per_episode
+            num_needed = max(screens, contact_screens) if ep_path == first_ep else per_episode
 
             # -- VALIDATION -- #
             pattern = f"{ep_filename}-*.png"
@@ -229,9 +234,10 @@ class ScreenshotGenerator:
                     for img in existing_screenshots
                 ]
 
-            if ep_name == "E01":
+            if ep_path == first_ep:
                 result["main"] = ep_screens[:screens]
-            result["episodes"][ep_name] = ep_screens[:num_needed]
+            if per_episode:
+                result["episodes"][ep_name] = ep_screens[:num_needed]
 
         return result
 
@@ -680,6 +686,18 @@ class ScreenshotGenerator:
     def _get_episode_identifier(self, path):
         match = re.search(r"S\d{2}E(\d{2})", str(path), re.IGNORECASE)
         return f"E{match.group(1)}" if match else Path(path).stem.split(".")[-1]
+
+    def _first_episode(self, filelist):
+        """El capítulo de número más bajo; los especiales (S00) solo si el pack no trae otra temporada."""
+
+        def orden(path):
+            match = re.search(r"S(\d+)E(\d+)", Path(path).name, re.IGNORECASE)
+            if not match:
+                return (2, 0, 0, str(path))
+            season, episode = int(match.group(1)), int(match.group(2))
+            return (1 if season == 0 else 0, season, episode, str(path))
+
+        return min((p for p in filelist if self._is_video_file(p)), key=orden, default=None)
 
     def _is_video_file(self, path):
         return Path(path).suffix.lower() in {".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm"}

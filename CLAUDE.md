@@ -37,7 +37,8 @@ or report their errors unless they break an eMuwarez upload.
   an incomplete season pack, `print` writes `Incomplete season pack: season N, missing episodes A, B`.
 - `config.yaml` keys the app stages before each run and restores afterwards: `DEFAULT.tmdb`,
   `DEFAULT.add_logo`, `TRACKERS.EMU.api_key`, `TRACKERS.BLU.useAPI` (forced to `false`), `SCREENS.img_hosts`,
-  `SCREENS.API_KEYS`, `TORRENT_CLIENTS.qbit.*`. When `torrent_storage_dir` doesn't exist (it resolves against this
+  `SCREENS.API_KEYS`, `SCREENS.per_episode` (`0`, only the first episode of a pack, unless the app is set to screenshot
+  every episode), `TORRENT_CLIENTS.qbit.*`. When `torrent_storage_dir` doesn't exist (it resolves against this
   repo's cwd), the app drops it from `TORRENT_CLIENTS.qbit` and sets `enable_search: False`.
 
 ## Verify

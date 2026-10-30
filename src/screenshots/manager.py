@@ -122,7 +122,7 @@ class ScreenshotManager:
                 need_generation = True
 
         # --- Check Episodes --- #
-        if meta.get("tv_pack") == 1:
+        if meta.get("tv_pack") == 1 and self.config["SCREENS"].get("per_episode", 3):
             per_episode = self.config["SCREENS"].get("per_episode", 3)
             filelist = meta.get("filelist", [])
             for ep_path in filelist:
@@ -254,7 +254,7 @@ class ScreenshotManager:
                 image_list["main"] = new_main[:screens_main]  # Limit to required number
 
             # --- Populate Episodes if needed --- #
-            if meta.get("tv_pack") == 1:
+            if meta.get("tv_pack") == 1 and self.config["SCREENS"].get("per_episode", 3):
                 per_episode = self.config["SCREENS"].get("per_episode", 3)
                 filelist = meta.get("filelist", [])
                 for ep_path in filelist:
