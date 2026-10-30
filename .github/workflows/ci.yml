@@ -30,9 +30,12 @@ jobs:
       - run: python -m compileall -q .
       # Sin red ni ffmpeg/mediainfo: tests/conftest.py corta cualquier salida.
       - run: pytest --cov=src --cov-report=term-missing --cov-report=xml
-      # Hasta que la app de Codecov y CODECOV_TOKEN estén puestos, este paso falla sin tumbar el CI.
+      # Codecov solo informa (continue-on-error): si la subida falla, el CI no cae.
+      # fail_ci_if_error hace que pare si la firma de su CLI no cuadra, en vez de ejecutarla igual.
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        timeout-minutes: 5
+        continue-on-error: true
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          fail_ci_if_error: true
