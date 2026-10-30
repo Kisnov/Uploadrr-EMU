@@ -68,3 +68,21 @@ def test_codec_de_audio(handler, pista, texto):
 def test_hdr(handler, video, hdr):
     uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
     assert handler.get_hdr(uuid) == hdr
+
+
+def test_dts_con_varias_caracteristicas_y_xll(handler):
+    uuid = _con_pistas(handler, _video(), _audio(Format="DTS", Format_AdditionalFeatures="ES XCh XLL"))
+    assert handler.get_audio(uuid, {"original_language": "en"})[1] == "DTS-HD MA 5.1"
+
+
+@pytest.mark.parametrize(
+    "video",
+    [
+        _video(HDR_Format="SMPTE ST 2086", transfer_characteristics="HLG", transfer_characteristics_Original="HLG"),
+        _video(HDR_Format="SMPTE ST 2094 App 4", transfer_characteristics="HLG", transfer_characteristics_Original="HLG"),
+    ],
+    ids=["2086-hlg", "2094-hlg"],
+)
+def test_hlg_no_se_confunde_con_hdr10(handler, video):
+    uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
+    assert handler.get_hdr(uuid) == "HLG"

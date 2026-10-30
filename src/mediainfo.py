@@ -420,8 +420,9 @@ class MediaInfoHandler:
         # === Codec Naming ===
         # El nombre comercial puede llevar coletillas («… with Dolby Atmos»): gana el más largo que encaje.
         named = next((commercial_names[k] for k in sorted(commercial_names, key=len, reverse=True) if k in str(commercial)), None)
-        # Sin nombre comercial, un DTS con XLL es DTS-HD MA.
-        codec = named or AUDIO_MAP.get(fmt, fmt) + (audio_extra.get(additional, "") if fmt == "DTS" else "")
+        # Sin nombre comercial, un DTS con XLL entre sus características («ES XCh XLL») es DTS-HD MA.
+        dts_extra = "-HD MA" if "XLL" in str(additional).split() else audio_extra.get(additional, "")
+        codec = named or AUDIO_MAP.get(fmt, fmt) + (dts_extra if fmt == "DTS" else "")
 
         # DTS:X fix
         if fmt.startswith("DTS") and additional.endswith("X"):
@@ -471,17 +472,21 @@ class MediaInfoHandler:
                         hdr_format = " / ".join(
                             str(video_track.get(k) or "") for k in ("HDR_Format_Compatibility", "HDR_Format_String", "HDR_Format")
                         ).strip(" /")
-                        # SMPTE ST 2094 App 4 es HDR10+; SMPTE ST 2086, los metadatos de HDR10.
-                        if "HDR10+" in hdr_format or "SMPTE ST 2094 App 4" in hdr_format:
+                        transfer = " ".join(
+                            str(video_track.get(k) or "") for k in ("transfer_characteristics", "transfer_characteristics_Original")
+                        )
+                        # SMPTE ST 2094 App 4 es HDR10+ y SMPTE ST 2086 los metadatos de HDR10, salvo con HLG.
+                        hlg = "HLG" in transfer
+                        if "HDR10+" in hdr_format or ("SMPTE ST 2094 App 4" in hdr_format and not hlg):
                             hdr = "HDR10+"
-                        elif "HDR10" in hdr_format or "SMPTE ST 2086" in hdr_format:
+                        elif "HDR10" in hdr_format or ("SMPTE ST 2086" in hdr_format and not hlg):
                             hdr = "HDR"
                         elif not hdr_format and "PQ" in (
                             video_track.get("transfer_characteristics"),
                             video_track.get("transfer_characteristics_Original"),
                         ):
                             hdr = "PQ10"
-                        elif "HLG" in video_track.get("transfer_characteristics_Original", ""):
+                        elif hlg:
                             hdr = "HLG"
                         elif "BT.2020 (10-bit)" in video_track.get("transfer_characteristics_Original", ""):
                             hdr = "WCG"
