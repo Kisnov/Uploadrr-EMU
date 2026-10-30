@@ -323,7 +323,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
         "-t",
         "--type",
         dest="manual_type",
-        choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv"],
+        choices=["disc", "remux", "encode", "webdl", "web-dl", "webrip", "hdtv", "sd"],
         help="Release type",
     )
     parser.add_argument(

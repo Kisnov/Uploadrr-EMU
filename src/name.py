@@ -185,7 +185,8 @@ class NameGenerator:
                 elif "HDDVD" in source.upper():
                     source_key = "HDDVD"
             return templates[media_type].get(source_key, "")
-        return templates.get(media_type, "")
+        # El SD de eMuwarez se nombra como un encode.
+        return templates.get("ENCODE" if media_type == "SD" else media_type, "")
 
     @staticmethod
     def clean_filename(name: str) -> str:
