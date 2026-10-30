@@ -21,6 +21,7 @@ class ScreenshotUploader:
         self.base_dir = base_dir
         self.timeout = httpx.Timeout(60.0)
         self.client = None
+        self.failed_hosts = set()
 
     async def __aenter__(self):
         self.client = httpx.AsyncClient(timeout=self.timeout)
@@ -152,16 +153,23 @@ class ScreenshotUploader:
 
         # Las que fallan en un host se reintentan ahí y luego en el siguiente; las que ya subieron no se repiten.
         uploaded = {}
-        for host in viable_hosts:
+        # Un host que no subió nada en un lote pasa al final en los siguientes: sus timeouts no se repiten en cada capítulo.
+        for host in sorted(viable_hosts, key=lambda h: h in self.failed_hosts):
             missing = [i for i in range(len(pending)) if i not in uploaded]
             if not missing:
                 break
+            done = {}
             try:
-                uploaded.update(await self._upload_with_retries(host, [pending[i] for i in missing], missing, label, adult=adult))
+                done = await self._upload_with_retries(host, [pending[i] for i in missing], missing, label, adult=adult)
             except Exception as e:
                 console.print_exception()
                 last_exc = e
                 log.error(f"[Uploader] {host} failed batch for {label}: {e!r}", exc_info=True)
+            uploaded.update(done)
+            if done:
+                self.failed_hosts.discard(host)
+            else:
+                self.failed_hosts.add(host)
 
         if not uploaded:
             err_msg = f"Failed to upload {label} to any host"

@@ -108,3 +108,23 @@ def test_si_ninguno_la_sube_se_devuelven_las_demas_en_orden(tmp_path, monkeypatc
 def test_si_no_sube_ninguna_falla(tmp_path, monkeypatch, capturas):
     with pytest.raises(AllHostsFailedError):
         _subir(tmp_path, monkeypatch, {"ptscreens": Host("ptscreens", siempre_falla=True)}, capturas)
+
+
+def test_un_host_que_no_sube_nada_pasa_al_final_en_los_lotes_siguientes(tmp_path, monkeypatch, capturas):
+    monkeypatch.setattr(up2host.asyncio, "sleep", _sin_espera(asyncio.sleep))
+    monkeypatch.setattr(up2host.ProgressManager, "_instance", None)  # otro test deja uno a medias
+    caido, bueno = Host("imgbb", siempre_falla=True), Host("ptscreens")
+    hosts = {"imgbb": caido, "ptscreens": bueno}
+    uploader = ScreenshotUploader({"SCREENS": {"API_KEYS": {nombre: "k" for nombre in hosts}}}, tmp_path)
+    monkeypatch.setattr(uploader, "_load_host", lambda nombre: hosts[nombre])
+    meta = {"uuid": "u", "xxx": False}
+
+    async def correr():
+        async with uploader:
+            return [await uploader._upload_batch(meta, capturas, list(hosts), f"E0{n}", 3) for n in (1, 2)]
+
+    primero, segundo = asyncio.run(correr())
+
+    assert [r["img_url"] for r in segundo] == ["ptscreens/peli-0.png", "ptscreens/peli-1.png", "ptscreens/peli-2.png"]
+    assert len(caido.subidas) == 9  # tres intentos en el primer lote y ninguno en el segundo
+    assert len(bueno.subidas) == 6

@@ -32,7 +32,7 @@ SCREENS:
     onlyimage: null
   img_hosts: [imgbox, ptpimg, ptscreens, onlyimage, hamster, imghost, imgbb, lensdump, pixhost, fastpic] # order dictates prefrence!
   screen_count: 6
-  per_episode: 3 # for tv will take x screens for every episode put them in spoiler
+  per_episode: 3 # for tv will take x screens for every episode put them in spoiler (0: only the first episode)
   img_size: 500
   deinterlace_method: yadif
   tonemap_hdr: true

@@ -24,6 +24,8 @@ class ScreenshotManager:
 
     async def handle_screenshots(self, meta: Dict, tracker_whitelists: Dict[str, List[str]], task_widget=None) -> Dict:
         log.debug("in handle_screenshots")
+        # Un host caído se aparta solo durante este contenido: el siguiente vuelve a probarlo primero.
+        self.uploader.failed_hosts.clear()
         try:
             # Handle Music
             if meta.get("is_music"):
@@ -110,6 +112,11 @@ class ScreenshotManager:
 
         screens_main = meta.get("screens", self.config["DEFAULT"].get("screens", 3))
         tmp_dir = self.base_dir / "tmp" / meta["uuid"]
+        main_pattern = f"{meta['filename']}-*.png"
+        first_ep = self.generator._first_episode(meta.get("filelist", [])) if meta.get("tv_pack") == 1 else None
+        if first_ep:
+            # Las principales de un pack son las de su primer capítulo, no las que queden de otro.
+            main_pattern = f"{meta['filename']}-{self.generator._get_episode_identifier(first_ep)}-*.png"
 
         need_generation = False
         need_upload = False
@@ -117,12 +124,12 @@ class ScreenshotManager:
         # --- Check MAIN --- #
         if self._missing_urls(image_list["main"]):
             need_upload = True
-            existing_files = list(tmp_dir.glob(f"{meta['filename']}-*.png"))
+            existing_files = list(tmp_dir.glob(main_pattern))
             if len(existing_files) < screens_main:
                 need_generation = True
 
         # --- Check Episodes --- #
-        if meta.get("tv_pack") == 1:
+        if meta.get("tv_pack") == 1 and self.config["SCREENS"].get("per_episode", 3):
             per_episode = self.config["SCREENS"].get("per_episode", 3)
             filelist = meta.get("filelist", [])
             for ep_path in filelist:
@@ -225,7 +232,7 @@ class ScreenshotManager:
 
             # --- Populate MAIN if needed --- #
             if self._missing_urls(image_list["main"]):
-                existing_files = sorted(tmp_dir.glob(f"{meta['filename']}-*.png"))[:screens_main]
+                existing_files = sorted(tmp_dir.glob(main_pattern))[:screens_main]
 
                 # Dict of valid existing uploads keyed by local_file
                 valid_uploads = {
@@ -254,7 +261,7 @@ class ScreenshotManager:
                 image_list["main"] = new_main[:screens_main]  # Limit to required number
 
             # --- Populate Episodes if needed --- #
-            if meta.get("tv_pack") == 1:
+            if meta.get("tv_pack") == 1 and self.config["SCREENS"].get("per_episode", 3):
                 per_episode = self.config["SCREENS"].get("per_episode", 3)
                 filelist = meta.get("filelist", [])
                 for ep_path in filelist:
