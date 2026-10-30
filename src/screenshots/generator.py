@@ -41,6 +41,8 @@ class ScreenshotGenerator:
         self.use_oxipng = self.screens.get("use_oxipng", False) and OXIPNG_AVAILABLE
         self.pyoxipng_level = self.screens.get("oxipng_level", 4)  # Default level 4
         self.ffdebug = False
+        # Como mucho dos ffmpeg a la vez: con un 4K, todas las capturas en paralelo ahogan la CPU y la RAM del NAS.
+        self._ffmpeg = asyncio.Semaphore(2)
 
     async def generate_screenshots(self, meta: Dict, filename: str, uuid: str) -> Dict:
         """Generate screenshots for the given media, reusing existing ones if valid."""
@@ -456,6 +458,8 @@ class ScreenshotGenerator:
             vf_filters.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=709")
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
             vf_filters.append("zscale=t=bt709:m=bt709:r=full,format=rgb24")
+        # Píxeles cuadrados: un DVD anamórfico (720x576 en 16:9) sale con su proporción. Con el ancho par.
+        vf_filters.append("scale='trunc(iw*sar/2)*2':ih,setsar=1")
         if self.screens.get("frame_stats", False):
             font = str(Path(__file__).parent / "fonts" / "Dosis.ttf")
             if sys.platform == "win32":
@@ -469,7 +473,7 @@ class ScreenshotGenerator:
             ).format(font, frame_num)
             vf_filters.append(stats)
 
-        vf_filter = ",".join(vf_filters) or "scale=iw:ih"
+        vf_filter = ",".join(vf_filters)
 
         optimize = self.screens.get("optimize", False)
         if not self.use_oxipng and optimize:
@@ -511,8 +515,9 @@ class ScreenshotGenerator:
                 if ffdebug:
                     log.info(f" COMMAND CALLED:\n [blue]{args} \n")
 
-                process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                stdout, stderr = await process.communicate()
+                async with self._ffmpeg:
+                    process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                    stdout, stderr = await process.communicate()
                 stderr_text = stderr.decode("utf-8", errors="ignore")
                 if ffdebug:
                     log.info(f"ffmpeg stderr:\n{stderr_text}")
