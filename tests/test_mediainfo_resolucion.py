@@ -15,6 +15,8 @@ def handler(tmp_path, monkeypatch):
     ("ancho", "alto", "barrido", "resolucion"),
     [
         (960, 540, "Progressive", "540p"),
+        (1152, 540, "Progressive", "540p"),
+        (1200, 540, "Progressive", "720p"),
         (1280, 540, "Progressive", "720p"),
         (1920, 1080, "Progressive", "1080p"),
         (720, 576, "Interlaced", "576i"),
