@@ -473,7 +473,9 @@ class MediaInfoHandler:
                             str(video_track.get(k) or "") for k in ("HDR_Format_Compatibility", "HDR_Format_String", "HDR_Format")
                         ).strip(" /")
                         # Manda transfer_characteristics; _Original solo si falta (mediainfo lo da cuando no cuadran).
-                        transfer = str(video_track.get("transfer_characteristics") or video_track.get("transfer_characteristics_Original") or "")
+                        transfer = str(
+                            video_track.get("transfer_characteristics") or video_track.get("transfer_characteristics_Original") or ""
+                        )
                         # SMPTE ST 2094 App 4 es HDR10+ y SMPTE ST 2086 los metadatos de HDR10, salvo con HLG.
                         hlg = "HLG" in transfer
                         if "HDR10+" in hdr_format or ("SMPTE ST 2094 App 4" in hdr_format and not hlg):
