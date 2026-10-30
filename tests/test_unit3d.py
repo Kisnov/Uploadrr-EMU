@@ -494,3 +494,24 @@ def test_upload_ok_but_torrent_never_downloads(tracker, emu, upload_meta, capsys
     assert not saved_torrent(upload_meta).exists()
     assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
     assert len(tracker.calls("GET", "/torrent/download/42.rsskey")) == 4
+
+
+@pytest.mark.parametrize(
+    ("resolucion", "res_id"),
+    [
+        ("4320p", "1"),
+        ("2160p", "2"),
+        ("1080p", "3"),
+        ("1080i", "4"),
+        ("720p", "5"),
+        ("576p", "6"),
+        ("576i", "6"),
+        ("540p", "7"),
+        ("480p", "8"),
+        ("480i", "8"),
+        ("8640p", "10"),
+        ("OTHER", "10"),
+    ],
+)
+def test_ids_de_resolucion_del_formulario_de_emu(emu, meta, resolucion, res_id):
+    assert run(emu.get_res_id({**meta, "resolution": resolucion})) == res_id

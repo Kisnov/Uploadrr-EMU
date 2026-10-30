@@ -161,7 +161,7 @@ class MediaInfoHandler:
         closest_width = self._closest(width_list, width)
         closest_height = self._closest(height_list, height)
         res = f"{closest_width}x{closest_height}{scan}"
-        return self._map_resolution(res, guess, closest_width, scan, closest_height, height)
+        return self._map_resolution(res, guess, closest_width, scan, closest_height, height, width)
 
     @staticmethod
     def _closest(lst: list, value: int) -> int:
@@ -170,7 +170,7 @@ class MediaInfoHandler:
         return next((x for x in lst if value <= x), lst[-1])
 
     @staticmethod
-    def _map_resolution(res: str, guess, width: int, scan: str, height: int, actual_height: int) -> str:
+    def _map_resolution(res: str, guess, width: int, scan: str, height: int, actual_height: int, actual_width: int = 0) -> str:
         """Map resolution string to standard format."""
         RESOLUTION_MAP = {
             "15360x8640p": "8640p",
@@ -204,8 +204,9 @@ class MediaInfoHandler:
             720: {"p": "576p", "i": "576i"},
         }
 
-        if actual_height == 540:
-            return "OTHER"
+        # eMuwarez tiene 540p. Desde 1200 de ancho es un 720p recortado, como en la nomenclatura de la app.
+        if actual_height == 540 and actual_width < 1200:
+            return "540p"
 
         resolution = RESOLUTION_MAP.get(res, res if res in RESOLUTION_MAP.values() else None)
         if resolution:
