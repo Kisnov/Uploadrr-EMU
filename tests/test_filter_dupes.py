@@ -59,3 +59,26 @@ def test_episodio_frente_a_otros_episodios_y_al_pack():
 def test_un_remux_solo_compite_con_remux():
     nombres = ["Peli 2020 1080p BDRemux AVC-GRP", "Peli 2020 1080p BluRay x264-GRP"]
     assert _filtrar(nombres, type="REMUX") == ["Peli 2020 1080p BDRemux AVC-GRP"]
+
+
+@pytest.mark.parametrize(
+    ("hdr", "nombre"),
+    [("DV HDR", "Peli.2020.1080p.WEB-DL.HDR10+DV.HEVC-GRP"), ("HDR10+", "Peli.2020.1080p.WEB-DL.DV+HDR10+.HEVC-GRP")],
+    ids=["hdr10+dv", "dv+hdr10+"],
+)
+def test_hdr_y_dv_pegados_con_mas(hdr, nombre):
+    assert _filtrar([nombre], hdr=hdr) == [nombre]
+
+
+@pytest.mark.parametrize(
+    ("nombre", "es_dupe"),
+    [
+        ("Peli.2020.1080p10bit.WEB-DL-GRP", True),
+        ("Peli.2020.1080pHEVC.WEB-DL-GRP", True),
+        ("Peli.2020.1080pirate.WEB-DL-GRP", False),
+        ("Peli.2020.10800p.WEB-DL-GRP", False),
+    ],
+    ids=["10bit", "hevc", "sufijo-desconocido", "otra-cifra"],
+)
+def test_resolucion_con_sufijo_pegado(nombre, es_dupe):
+    assert _filtrar([nombre], resolution="1080p") == ([nombre] if es_dupe else [])

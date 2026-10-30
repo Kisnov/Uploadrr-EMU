@@ -6,6 +6,14 @@ import requests
 from src.utils.bbcode import BBCODE
 from src.utils.console import console
 
+# Lo que puede ir pegado a la resolución en un nombre («1080p10bit», «1080pHEVC»).
+RESOLUTION_SUFFIX = re.compile(r"(10bit|8bit|hevc|avc|x26[45]|h26[45]|uhd|sdr|hdr\w*|dv|web\w*|bluray|remux)")
+
+
+def _same_resolution(word, resolutions):
+    """Si la palabra es una de las resoluciones, sola o con un sufijo conocido pegado."""
+    return any(word == r or (word.startswith(r) and RESOLUTION_SUFFIX.fullmatch(word[len(r) :])) for r in resolutions)
+
 
 class COMMON:
     def __init__(self, config):
@@ -71,10 +79,15 @@ class COMMON:
         for each in dupes:
             # Resolución y HDR por palabras enteras: «Adventure» no es Dolby Vision.
             words = set(re.split(r"[^a-z0-9+]+", each.lower()))
+            # «HDR10+DV» va junto: también cuentan sus trozos («hdr10+», «dv»).
+            for word in [w for w in words if "+" in w]:
+                parts = word.split("+")
+                words.update(p for p in parts if p)
+                words.update(f"{p}+" for p in parts[:-1] if p)
             search = each.lower().replace("-", "").replace(" ", "").replace(".", "")
             required = []
             if meta.get("sd", 0) != 1 and resolution:
-                required.append(bool(resolutions & words))
+                required.append(any(_same_resolution(w, resolutions) for w in words))
             if needs_hdr:
                 required.append(bool({"hdr", "hdr10", "hdr10+", "hdr10plus", "pq10"} & words))
             if needs_dv:
