@@ -305,9 +305,9 @@ class ScreenshotGenerator:
         png_files = self.tmp_dir.glob(f"{filename}-*.png")
         indices = []
         for p in png_files:
-            match = re.search(r"\d+", p.name)
+            match = re.search(r"-(\d+)\.png$", p.name)
             if match:
-                indices.append(int(match.group()))
+                indices.append(int(match.group(1)))
         max_idx = max(indices + [-1])
         tasks = [
             self._take_screenshot(file, f"{filename}-{max_idx + 1 + i}.png", t, keyframe, self.ffdebug, hdr=meta["hdr"])
@@ -329,7 +329,7 @@ class ScreenshotGenerator:
         total_length = sum(vob["duration"] for vob in vobs)
         screens_per_vob = max(1, num_screens // len(vobs))
         extra_screens = num_screens % len(vobs)
-        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
+        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
         max_idx = max(indices + [-1])
         tasks = []
         for vob_idx, vob in enumerate(vobs):
@@ -428,7 +428,7 @@ class ScreenshotGenerator:
         else:
             adjusted_ss_times = ss_times
 
-        indices = [int(m.group()) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"\d+", p.name))]
+        indices = [int(m.group(1)) for p in self.tmp_dir.glob(f"{filename}-*.png") if (m := re.search(r"-(\d+)\.png$", p.name))]
         max_idx = max(indices + [-1])
         tasks = [
             self._take_screenshot(
@@ -685,7 +685,7 @@ class ScreenshotGenerator:
 
     def _get_episode_identifier(self, path):
         # Con la temporada: S00E01 y S01E01 no comparten capturas.
-        match = re.search(r"S(\d+)E(\d+)", str(path), re.IGNORECASE)
+        match = re.search(r"S(\d+)E(\d+)", Path(path).name, re.IGNORECASE)
         return f"S{match.group(1)}E{match.group(2)}".upper() if match else Path(path).stem.split(".")[-1]
 
     def _first_episode(self, filelist):

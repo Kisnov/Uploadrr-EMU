@@ -151,3 +151,35 @@ def test_la_descripcion_no_repite_el_primer_capitulo_y_nombra_cada_uno_con_su_te
 
     assert "[spoiler=S01E01]" not in fichero.texto
     assert "[spoiler=S00E01]" in fichero.texto and "[spoiler=S01E02]" in fichero.texto
+
+
+def test_el_capitulo_sale_del_nombre_del_fichero_y_no_de_la_carpeta(tmp_path):
+    generador = ScreenshotGenerator({"SCREENS": {}}, tmp_path)
+    assert generador._get_episode_identifier("/pack/S1E1-S1E5/Serie.S01E02.mkv") == "S01E02"
+
+
+def test_las_capturas_nuevas_siguen_tras_las_que_ya_hay_del_capitulo(tmp_path, monkeypatch):
+    generador = ScreenshotGenerator({"SCREENS": {}}, tmp_path)
+    generador.tmp_dir = tmp_path
+    video = tmp_path / "Serie.S01E13.mkv"
+    video.write_bytes(b"")
+    for n in range(3):
+        (tmp_path / f"Serie-S01E13-{n}.png").write_bytes(b"x")
+    salidas = []
+
+    async def ffprobe(*_a, **_k):
+        return {"streams": [{"r_frame_rate": "24/1"}], "format": {"duration": "1200"}}
+
+    async def capturar(file, output, *_a, **_k):
+        salidas.append(output)
+        return output
+
+    async def validar(meta, results, *_a):
+        return results
+
+    monkeypatch.setattr(generador, "_ffprobe", ffprobe)
+    monkeypatch.setattr(generador, "_take_screenshot", capturar)
+    monkeypatch.setattr(generador, "_validate_and_retry", validar)
+    asyncio.run(generador._generate_file({}, "Serie-S01E13", "u", 2, str(video)))
+
+    assert salidas == ["Serie-S01E13-3.png", "Serie-S01E13-4.png"]
