@@ -230,10 +230,10 @@ def test_search_repeats_the_page_that_hits_the_rate_limit(tracker, emu, meta, sl
 
 
 def test_search_rate_limit_that_persists_raises(tracker, emu, meta, sleeps):
-    tracker.routes[("GET", SEARCH)] = lambda q: (429, b"")
+    tracker.routes[("GET", SEARCH)] = lambda q: (429, b"", ("Retry-After", "Wed, 21 Oct 2015 07:28:00 GMT"))
     with pytest.raises(DupeSearchError, match="HTTP 429"):
         run(emu.search_existing(meta))
-    assert len(tracker.requests) == 4 and sleeps == [60, 60, 60]
+    assert len(tracker.requests) == 4 and sleeps == [60, 60, 60]  # un Retry-After con fecha no se interpreta
 
 
 def test_search_other_errors_are_not_retried(tracker, emu, meta, sleeps):
