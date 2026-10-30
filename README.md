@@ -1,6 +1,10 @@
 # Uploadrr-EMU
 
 [![CI](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml/badge.svg)](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/ci.yml)
+[![zizmor](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/zizmor.yml/badge.svg)](https://github.com/Kisnov/Uploadrr-EMU/actions/workflows/zizmor.yml)
+[![Codecov](https://codecov.io/gh/Kisnov/Uploadrr-EMU/graph/badge.svg)](https://codecov.io/gh/Kisnov/Uploadrr-EMU)
+[![CodeRabbit](https://img.shields.io/coderabbit/prs/github/Kisnov/Uploadrr-EMU?utm_source=oss&utm_medium=github&utm_campaign=Kisnov%2FUploadrr-EMU&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
+[![Dependabot](https://img.shields.io/badge/dependabot-activo-025E8C?logo=dependabot&logoColor=white)](.github/dependabot.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
 [![Licencia: GPL-3.0](https://img.shields.io/github/license/Kisnov/Uploadrr-EMU)](LICENSE)
@@ -104,10 +108,16 @@ pip install pytest
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local. El CI pasa las
-reglas graves de `ruff` y `compileall` en cada PR. `CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas
-de la salida lee y qué claves de la configuración toca): si cambias una de ellas, hay que cambiar la aplicación a la
-vez.
+Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local, sin salir de la máquina. En cada
+PR, el CI pasa las reglas graves de `ruff`, `compileall` y las pruebas con cobertura, que sube a Codecov (solo
+informativa). Si el PR toca `.github/`, [zizmor](https://docs.zizmor.sh) revisa los workflows y `dependabot.yml`.
+
+Dependabot propone cada semana las versiones nuevas de `requirements.txt` y de las GitHub Actions, cuando llevan 7
+días publicadas: las menores y los parches juntos en un PR por ecosistema, y cada versión mayor en el suyo. Las de
+seguridad no esperan esos 7 días: llegan en cuanto un aviso tiene versión corregida.
+
+`CLAUDE.md` recoge el contrato con emuwarez-uploadrr (qué líneas de la salida lee y qué claves de la configuración
+toca): si cambias una de ellas, hay que cambiar la aplicación a la vez.
 
 ## Origen y créditos
 
