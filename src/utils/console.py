@@ -39,6 +39,9 @@ _original_traceback_init = Traceback.__init__
 def _traceback_init_with_redactor(self, *args, **kwargs):
     _original_traceback_init(self, *args, **kwargs)
     self.redactor = redactor
+    # El mensaje de la excepción también: un error de conexión a qui lleva su clave en la URL.
+    for stack in self.trace.stacks:
+        stack.exc_value = redactor.redact(stack.exc_value)
 
 
 Traceback.__init__ = _traceback_init_with_redactor

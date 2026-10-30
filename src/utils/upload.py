@@ -9,7 +9,7 @@ from src.manual import ManualPackager
 from src.prep import Prep
 from src.progress import ProgressManager
 from src.trackers.COMMON import COMMON
-from src.utils.console import console, log
+from src.utils.console import console, log, redactor
 from src.utils.descgen import DescGenerator
 
 from .meta import get_missing
@@ -143,7 +143,9 @@ async def upload_to_tracker(
                 await client.add_to_client(meta, tracker_name)
             except Exception as e:
                 # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
-                print(f"Torrent client add failed: {' '.join(str(e).split()) or type(e).__name__}", flush=True)
+                # Va por print, así que hay que taparla a mano: el error de conexión lleva la clave de qui.
+                motivo = redactor.redact(" ".join(str(e).split()))
+                print(f"Torrent client add failed: {motivo or type(e).__name__}", flush=True)
         return True, skipped_files
     else:
         if client and result == "DEBUG":
