@@ -47,7 +47,7 @@ def sin_red_ni_procesos(monkeypatch):
 
 
 class FakeTracker:
-    """Cada prueba pone en routes[(método, ruta)] una función query -> (status, cuerpo)."""
+    """Cada prueba pone en routes[(método, ruta)] una función query -> (status, cuerpo, *(cabecera, valor))."""
 
     def __init__(self):
         self.requests = []
@@ -60,11 +60,13 @@ class FakeTracker:
                 query = parse_qs(parts.query, keep_blank_values=True)
                 self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 tracker.requests.append((self.command, parts.path, query))
-                status, body = tracker.routes[(self.command, parts.path)](query)
+                status, body, *headers = tracker.routes[(self.command, parts.path)](query)
                 if isinstance(body, (dict, list)):
                     body = json.dumps(body).encode()
                 try:
                     self.send_response(status)
+                    for name, value in headers:
+                        self.send_header(name, value)
                     self.end_headers()
                     self.wfile.write(body)
                 except OSError:
@@ -198,6 +200,47 @@ def test_search_page_limit(tracker, emu, meta, monkeypatch):
     with pytest.raises(DupeSearchError):
         run(emu.search_existing(meta))
     assert len(tracker.requests) == 3
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Las esperas que se piden, sin esperar."""
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(unit3d.asyncio, "sleep", sleep)
+    return waits
+
+
+def test_search_repeats_the_page_that_hits_the_rate_limit(tracker, emu, meta, sleeps):
+    answers = iter([
+        (429, b"", ("Retry-After", "7")),
+        (200, {"data": [item("A", 10)], "links": {"next": f"{tracker.url}{SEARCH}?cursor=2&tmdbId=1"}}),
+        (429, b""),
+        (200, {"data": [item("B", 20)], "links": {"next": None}}),
+    ])
+    tracker.routes[("GET", SEARCH)] = lambda q: next(answers)
+    assert run(emu.search_existing(meta)) == {"A": 10, "B": 20}
+
+    assert sleeps == [8, 60]  # Retry-After y un segundo, o un minuto si no viene
+    first, first_again, second, second_again = tracker.calls("GET", SEARCH)
+    assert first == first_again and second == second_again and second["cursor"] == ["2"]
+
+
+def test_search_rate_limit_that_persists_raises(tracker, emu, meta, sleeps):
+    tracker.routes[("GET", SEARCH)] = lambda q: (429, b"")
+    with pytest.raises(DupeSearchError, match="HTTP 429"):
+        run(emu.search_existing(meta))
+    assert len(tracker.requests) == 4 and sleeps == [60, 60, 60]
+
+
+def test_search_other_errors_are_not_retried(tracker, emu, meta, sleeps):
+    tracker.routes[("GET", SEARCH)] = lambda q: (500, b"error")
+    with pytest.raises(DupeSearchError, match="HTTP 500"):
+        run(emu.search_existing(meta))
+    assert len(tracker.requests) == 1 and sleeps == []
 
 
 # Subida
