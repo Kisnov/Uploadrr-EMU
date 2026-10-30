@@ -93,3 +93,18 @@ def test_red_xxx_sin_redundancias():
     porndb = {"parent": "Aylo", "network": "Brazzers", "site": "brazzers exxtra"}
     assert NameGenerator._xxx_network({"porndb": porndb}) == "[Brazzers Exxtra] "
     assert NameGenerator._stylize("manyvids:someone") == "ManyVids:Someone"
+
+
+def test_un_sd_se_nombra_como_un_encode():
+    datos = dict(category="MOVIE", title="Amelie", year="2001", resolution="576p", source="DVD", video_encode="x264")
+    sd = asyncio.run(NameGenerator().get_name(_meta(type="SD", **datos)))
+    encode = asyncio.run(NameGenerator().get_name(_meta(type="ENCODE", **datos)))
+    assert sd == encode and sd[0] != "NO_TEMPLATE_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("propias", "plantilla"),
+    [({"ENCODE": "la de encode"}, "la de encode"), ({"SD": "la de SD", "ENCODE": "la de encode"}, "la de SD")],
+)
+def test_un_sd_con_plantillas_propias(propias, plantilla):
+    assert NameGenerator.get_template("MOVIE", "SD", custom_templates={"MOVIE": propias}) == plantilla

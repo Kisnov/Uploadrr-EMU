@@ -101,3 +101,9 @@ def test_manda_la_transferencia_principal(handler):
     video = _video(HDR_Format="SMPTE ST 2086", transfer_characteristics="PQ", transfer_characteristics_Original="HLG")
     uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
     assert handler.get_hdr(uuid) == "HDR"
+
+
+@pytest.mark.parametrize(("formato", "codec"), [("AVC", "x264"), ("HEVC", "x265")])
+def test_un_sd_lleva_el_codec_de_un_encode(handler, formato, codec):
+    uuid = _con_pistas(handler, {"@type": "Video", "Format": formato})
+    assert handler.get_video_encode(uuid, "SD")[0] == codec

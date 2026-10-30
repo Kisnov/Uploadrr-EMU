@@ -12,7 +12,7 @@ from src.trackers.EMU import EMU
 
 @pytest.mark.parametrize(
     ("tipo", "type_id"),
-    [("disc", "1"), ("remux", "2"), ("encode", "3"), ("webdl", "4"), ("web-dl", "4"), ("webrip", "5"), ("hdtv", "6")],
+    [("disc", "1"), ("remux", "2"), ("encode", "3"), ("webdl", "4"), ("web-dl", "4"), ("webrip", "5"), ("hdtv", "6"), ("sd", "7")],
 )
 def test_el_tipo_manual_llega_en_mayusculas(tipo, type_id, tmp_path, monkeypatch):
     monkeypatch.setattr(MediaInfoHandler, "_instance", None)

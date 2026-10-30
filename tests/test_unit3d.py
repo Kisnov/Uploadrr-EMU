@@ -515,3 +515,11 @@ def test_upload_ok_but_torrent_never_downloads(tracker, emu, upload_meta, capsys
 )
 def test_ids_de_resolucion_del_formulario_de_emu(emu, meta, resolucion, res_id):
     assert run(emu.get_res_id({**meta, "resolution": resolucion})) == res_id
+
+
+@pytest.mark.parametrize(
+    ("tipo", "type_id"),
+    [("DISC", "1"), ("REMUX", "2"), ("ENCODE", "3"), ("WEBDL", "4"), ("WEBRIP", "5"), ("HDTV", "6"), ("SD", "7"), ("FLAC", "0")],
+)
+def test_ids_de_tipo_del_formulario_de_emu(emu, meta, tipo, type_id):
+    assert run(emu.get_type_id({**meta, "type": tipo})) == type_id

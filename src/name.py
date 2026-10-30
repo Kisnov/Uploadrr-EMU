@@ -156,6 +156,9 @@ class NameGenerator:
                 return cat_templates
 
             # If it's a dict (hierarchical structure), use the original logic
+            # El SD usa su plantilla si la hay y, si no, la de un encode.
+            if media_type == "SD" and "SD" not in cat_templates:
+                media_type = "ENCODE"
             if media_type in cat_templates:
                 template_or_dict = cat_templates[media_type]
                 if isinstance(template_or_dict, dict):
@@ -185,7 +188,8 @@ class NameGenerator:
                 elif "HDDVD" in source.upper():
                     source_key = "HDDVD"
             return templates[media_type].get(source_key, "")
-        return templates.get(media_type, "")
+        # El SD de eMuwarez se nombra como un encode.
+        return templates.get("ENCODE" if media_type == "SD" else media_type, "")
 
     @staticmethod
     def clean_filename(name: str) -> str:

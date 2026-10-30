@@ -28,6 +28,12 @@ class EMU(Unit3d):
     async def get_res_id(self, meta: Dict[str, Any]) -> str:
         return self.resolution_ids.get(meta["resolution"], "10")
 
+    # También del formulario: el 7 es SD (en UNIT3D, FLAC).
+    type_ids = {"DISC": "1", "REMUX": "2", "ENCODE": "3", "WEBDL": "4", "WEBRIP": "5", "HDTV": "6", "SD": "7"}
+
+    async def get_type_id(self, meta: Dict[str, Any]) -> str:
+        return self.type_ids.get(meta["type"], "0")
+
     def edit_name(self, meta: Dict[str, Any]) -> str:
         built_name = meta["name"]
         title = meta.get("title", "")

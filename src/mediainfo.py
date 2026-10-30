@@ -569,8 +569,8 @@ class MediaInfoHandler:
 
         # Codec mapping based on type
         CODEC_MAP = {
-            "AVC": {"ENCODE": "x264", "WEBRIP": "x264", "WEBDL": "H.264", "HDTV": "H.264"},
-            "HEVC": {"ENCODE": "x265", "WEBRIP": "x265", "WEBDL": "H.265", "HDTV": "H.265"},
+            "AVC": {"ENCODE": "x264", "WEBRIP": "x264", "WEBDL": "H.264", "HDTV": "H.264", "SD": "x264"},
+            "HEVC": {"ENCODE": "x265", "WEBRIP": "x265", "WEBDL": "H.265", "HDTV": "H.265", "SD": "x265"},
             "VP9": "VP9",
             "VC-1": "VC-1",
             "AV1": "AV1",
