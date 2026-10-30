@@ -55,6 +55,7 @@ or report their errors unless they break an eMuwarez upload.
 - CI (`.github/workflows/ci.yml`) runs critical ruff rules (`E9,F63,F7,F82`), `compileall` and pytest with coverage on
   every PR, and uploads it to Codecov (informational only, `codecov.yml`).
   Style is left to CodeRabbit on changed lines.
+- `zizmor.yml` audits the workflows and `dependabot.yml` when `.github/` changes; run `zizmor --gh-token "$(gh auth token)" .` locally (without a token it skips online audits) before pushing a workflow edit.
 
 ## Secrets and auth
 
