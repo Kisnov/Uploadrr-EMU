@@ -37,6 +37,8 @@ lanza este script sin intervención en cada subida. También se puede usar a man
 
 - Python 3.12 (es la versión que se prueba).
 - `ffmpeg` y `mediainfo`.
+- Para las capturas de un Dolby Vision perfil 5: `ffmpeg` 6.1 o posterior con libplacebo y un driver de Vulkan (en
+  Debian, `mesa-vulkan-drivers`). Sin ellos, esas capturas no salen.
 - Opcional: `mktorrent` para crear el `.torrent` más rápido (`DEFAULT.torrent_creation: mktorrent`).
 - Solo para discos Blu-ray completos en Linux o macOS: [Mono](https://www.mono-project.com/), para BDInfo.
 
