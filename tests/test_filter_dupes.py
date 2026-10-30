@@ -82,3 +82,12 @@ def test_hdr_y_dv_pegados_con_mas(hdr, nombre):
 )
 def test_resolucion_con_sufijo_pegado(nombre, es_dupe):
     assert _filtrar([nombre], resolution="1080p") == ([nombre] if es_dupe else [])
+
+
+@pytest.mark.parametrize(
+    ("hdr", "nombre"),
+    [("DV HDR", "Tron.Ares.2025.48fps.2160pDV-Hdr-GRP"), ("HDR", "Peli.2020.2160pHDR10.WEB-DL-GRP")],
+    ids=["2160pdv", "2160phdr10"],
+)
+def test_hdr_pegado_a_la_resolucion(hdr, nombre):
+    assert _filtrar([nombre], hdr=hdr, resolution="2160p") == [nombre]

@@ -84,7 +84,12 @@ class COMMON:
                 parts = word.split("+")
                 words.update(p for p in parts if p)
                 words.update(f"{p}+" for p in parts[:-1] if p)
-            search = each.lower().replace("-", "").replace(" ", "").replace(".", "")
+            # «2160pDV»: el sufijo pegado a la resolución también es una palabra.
+            for word in list(words):
+                attached = re.fullmatch(r"\d{3,4}[pi](.+)", word)
+                if attached and RESOLUTION_SUFFIX.fullmatch(attached.group(1)):
+                    words.add(attached.group(1))
+            search =each.lower().replace("-", "").replace(" ", "").replace(".", "")
             required = []
             if meta.get("sd", 0) != 1 and resolution:
                 required.append(any(_same_resolution(w, resolutions) for w in words))
