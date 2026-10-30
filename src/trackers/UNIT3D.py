@@ -19,6 +19,7 @@ from src.utils.torrentman import edit_torrent, extract_size_from_torrent
 # Segundos de espera antes de cada reintento.
 UPLOAD_RETRY_DELAYS = (5, 15)
 DOWNLOAD_RETRY_DELAYS = (5, 15, 30)
+SEARCH_RETRY_DELAYS = (60, 60, 60)  # tras un 429 sin Retry-After: la API admite 30 peticiones por minuto
 # Errores del servidor o de Cloudflare en los que la subida se repite.
 RETRY_STATUSES = {500, 502, 503, 504, 520, 521, 522, 523, 524}
 MAX_SEARCH_PAGES = 20
@@ -428,12 +429,21 @@ class Unit3d:
         origin = (url.scheme, url.host, url.port)
         items = []
         headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
+        attempts = len(SEARCH_RETRY_DELAYS) + 1
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             for _ in range(MAX_SEARCH_PAGES):
-                try:
-                    response = await client.get(url, params=params, headers=headers)
-                except httpx.HTTPError as e:
-                    raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
+                for attempt in range(1, attempts + 1):
+                    try:
+                        response = await client.get(url, params=params, headers=headers)
+                    except httpx.HTTPError as e:
+                        raise DupeSearchError(f"No se pudo buscar duplicados en {self.tracker}: {e!r}") from e
+                    if response.status_code != 429 or attempt == attempts:
+                        break
+                    retry_after = response.headers.get("Retry-After", "")
+                    # Retry-After va en segundos enteros y puede quedarse corto en casi uno.
+                    delay = int(retry_after) + 1 if retry_after.isdecimal() else SEARCH_RETRY_DELAYS[attempt - 1]
+                    console.print(f"[yellow]{self.tracker}: HTTP 429 al buscar, reintento en {delay}s ({attempt}/{attempts})")
+                    await asyncio.sleep(delay)
                 if response.status_code != 200:
                     raise DupeSearchError(f"La búsqueda de duplicados en {self.tracker} devolvió HTTP {response.status_code}")
                 try:
