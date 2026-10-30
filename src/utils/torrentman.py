@@ -9,12 +9,13 @@ import shutil
 import subprocess
 import tempfile
 import time
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 
 import bencodepy as bencode
-from torf import Torrent
+from torf import TorfError, Torrent
 
 from src.cleanrr import running_subprocesses
 from src.progress import ProgressManager
@@ -244,8 +245,114 @@ class TorrentMaker:
                 progress.update("mktorrent not found in PATH, falling back to torf...")
                 await self.use_torf(torrent, path, output_path, piece_size)
 
+        elif method == "mkbrr":
+            if self._check_tool("mkbrr"):
+                await self._use_mkbrr(torrent, path, output_path, piece_size, threads)
+            else:
+                progress.update("mkbrr not found in PATH, falling back to torf...")
+                await self.use_torf(torrent, path, output_path, piece_size)
+
         else:  # Default to torf
             await self.use_torf(torrent, path, output_path, piece_size)
+
+    async def _use_mkbrr(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int, threads) -> None:
+        """mkbrr sobre los mismos ficheros que elegiría torf; si su .torrent no lista esos ficheros, torf."""
+        with ExitStack() as stack:
+            try:
+                temp_dir = stack.enter_context(tempfile.TemporaryDirectory())
+                target = Path(path)
+                if target.is_dir():
+                    # Los filtros los aplica torf: mkbrr hashea un árbol de enlaces con solo los ficheros elegidos.
+                    target = Path(temp_dir) / target.name
+                    for filepath in torrent.filepaths:
+                        link = target / Path(filepath).relative_to(path)
+                        link.parent.mkdir(parents=True, exist_ok=True)
+                        link.symlink_to(Path(filepath).resolve())
+            except OSError as e:
+                log.warning(f"mkbrr staging failed ({e}), falling back to torf...")
+                await self.use_torf(torrent, path, output_path, piece_size)
+                return
+            args = [
+                "mkbrr",
+                "create",
+                str(target),
+                "-t",
+                self.tracker,
+                "-p",
+                "-l",
+                str(piece_size),
+                "-s",
+                "Uploadrr",
+                "-c",
+                "Created by Uploadrr",
+                "-o",
+                str(output_path),
+                "--skip-prefix",
+            ]
+            if threads:
+                args.extend(["--workers", str(threads)])
+            output_path.unlink(missing_ok=True)
+            try:
+                returncode = await self._run_mkbrr(args)
+            except OSError as e:
+                log.warning(f"mkbrr could not run ({e}), falling back to torf...")
+                await self.use_torf(torrent, path, output_path, piece_size)
+                return
+        if returncode == 0 and self._same_files(output_path, torrent):
+            ProgressManager.get_instance().update("mkbrr hashing complete")
+            return
+        log.warning("mkbrr failed or listed other files, falling back to torf...")
+        await self.use_torf(torrent, path, output_path, piece_size)
+
+    async def _run_mkbrr(self, args: list) -> int:
+        """Ejecuta mkbrr pasando su porcentaje a la barra de progreso. Devuelve el código de salida."""
+        progress = ProgressManager.get_instance()
+        progress.update("Hashing with mkbrr: 0.0%")
+        process = await asyncio.create_subprocess_exec(*args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        running_subprocesses.add(process)
+        last = None
+        output = bytearray()
+        try:
+            while chunk := await process.stdout.read(4096):
+                output += chunk
+                found = re.findall(rb"(\d{1,3})%", chunk)
+                if found and found[-1] != last:
+                    last = found[-1]
+                    progress.update(f"Hashing with mkbrr: {int(last):.1f}%")
+            returncode = await process.wait()
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            running_subprocesses.discard(process)
+        warning = self._season_pack_warning(output.decode(errors="replace"))
+        if warning:
+            # Línea fija para quien lanza esto: la app la convierte en aviso.
+            print(warning, flush=True)
+        return returncode
+
+    @staticmethod
+    def _season_pack_warning(output: str) -> Optional[str]:
+        """El aviso de mkbrr de pack de temporada incompleto, en una línea; None si no lo hay."""
+        text = re.sub(r"\x1b\[[0-9;]*m", "", output)
+        if "incomplete season pack" not in text:
+            return None
+        season = re.search(r"Season number:\s*(\d+)", text)
+        warning = f"Incomplete season pack: season {season.group(1) if season else '?'}"
+        missing = re.search(r"Missing:\s*(.+)", text)
+        if missing:
+            warning += ", missing episodes " + ", ".join(re.findall(r"\d+", missing.group(1)))
+        return warning
+
+    @staticmethod
+    def _same_files(output_path: Path, torrent: Torrent) -> bool:
+        """Si el .torrent escrito tiene el nombre y los ficheros (ruta y tamaño) que eligió torf."""
+        try:
+            made = Torrent.read(output_path, validate=False)
+        except (TorfError, OSError):
+            return False
+        listed = sorted((str(f), f.size) for f in made.files)
+        return made.name == torrent.name and listed == sorted((str(f), f.size) for f in torrent.files)
 
     async def use_torf(self, torrent: Torrent, path: Path, output_path: Path, piece_size: int) -> None:
         """Fallback to torf with consistent settings and ProgressManager feedback."""

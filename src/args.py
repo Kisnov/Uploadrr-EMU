@@ -339,8 +339,8 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument(
         "-tc",
         "--torrent-creation",
-        choices=["torf", "torrenttools", "mktorrent"],
-        default=config.get("DEFAULT", {}).get("torrent_creation", "torf"),
+        choices=["torf", "torrenttools", "mktorrent", "mkbrr"],
+        default=config.get("DEFAULT", {}).get("torrent_creation", "mkbrr"),
         help="Torrent creation tool",
     )
 
