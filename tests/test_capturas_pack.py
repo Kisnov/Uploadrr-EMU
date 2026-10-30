@@ -100,3 +100,36 @@ def test_con_per_episode_0_solo_se_suben_las_principales(tmp_path, monkeypatch):
 
     assert len(subidas) == 1
     assert subidas[0]["main"] == principales and subidas[0]["episodes"] == {}
+
+
+def test_las_capturas_que_quedan_de_otro_capitulo_no_sirven_de_principales(tmp_path, monkeypatch):
+    config = {"DEFAULT": {"screens": 6}, "SCREENS": {"per_episode": 0}}
+    gestor = ScreenshotManager(config, tmp_path)
+    (tmp_path / "tmp" / "u").mkdir(parents=True)
+    for n in range(6):
+        (tmp_path / "tmp" / "u" / f"Serie-E01-{n}.png").write_bytes(b"x" * 2000)
+    generadas = []
+
+    async def generar(meta, filename, uuid):
+        generadas.append(filename)
+        return {"main": [], "episodes": {}}
+
+    monkeypatch.setattr(gestor.generator, "generate_screenshots", generar)
+    meta = {"uuid": "u", "filename": "Serie", "screens": 6, "tv_pack": 1, "filelist": _pack("S01E13", "S01E14")}
+    meta["skip_imghost_upload"] = True
+
+    asyncio.run(gestor._handle_video_content(meta, {}))
+
+    assert generadas == ["Serie"]
+
+
+def test_cada_contenido_vuelve_a_probar_primero_el_host_caido(tmp_path, monkeypatch):
+    gestor = ScreenshotManager({"DEFAULT": {}, "SCREENS": {}}, tmp_path)
+    gestor.uploader.failed_hosts.add("imgbb")
+    monkeypatch.setattr(gestor, "_handle_video_content", lambda meta, wl, tw: asyncio.sleep(0, meta))
+    monkeypatch.setattr(gestor, "_cleanup", lambda meta: asyncio.sleep(0))
+    monkeypatch.setattr(gestor, "_reset_terminal", lambda: None)
+
+    asyncio.run(gestor.handle_screenshots({"uuid": "u"}, {}))
+
+    assert gestor.uploader.failed_hosts == set()
