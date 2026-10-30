@@ -13,7 +13,7 @@ class Redactrr:
 
     def load_from_config(self, config: Dict[str, Any]) -> None:
         """Inspect config dict and register sensitive keys or entire sections automatically."""
-        sensitive_keys = {"tmdb", "api_key", "password", "pass", "token", "pid", "announce_key", "annouce_url"}
+        sensitive_keys = {"tmdb", "api_key", "password", "pass", "token", "pid", "announce_key", "annouce_url", "qui_proxy_url"}
         sensitive_paths = {"SCREENS.API_KEYS", "ADULT.API_KEYS"}
         placeholders = {}
 
@@ -25,6 +25,9 @@ class Redactrr:
                     if any(sens in k.lower() for sens in sensitive_keys):
                         if v is not None and isinstance(v, str) and v.strip():
                             placeholders[v] = k.upper()
+                    # La clave de qui es lo que va tras /proxy/: se tapa también si el log enseña la URL troceada.
+                    if k == "qui_proxy_url" and isinstance(v, str) and "/proxy/" in v:
+                        placeholders[v.rstrip("/").rsplit("/", 1)[-1]] = "QUI_PROXY_KEY"
 
                     if any(full_key.startswith(sens_path) for sens_path in sensitive_paths):
                         if v is not None and isinstance(v, str) and v.strip():
@@ -66,17 +69,11 @@ class RedactingRichHandler(RichHandler):
 
     def emit(self, record):
         if self.redactor:
-            record.msg = self.redactor.redact(str(record.msg))
+            # El mensaje ya formateado: un argumento que no es str (el ParseResult del host de qbittorrent-api) también.
+            record.msg = self.redactor.redact(record.getMessage())
+            record.args = ()
             if record.exc_text:
                 record.exc_text = self.redactor.redact(record.exc_text)
-            if record.args:
-                new_args = []
-                for a in record.args:
-                    if isinstance(a, str):
-                        new_args.append(self.redactor.redact(a))
-                    else:
-                        new_args.append(a)
-                record.args = tuple(new_args)
         return super().emit(record)
 
     def render_traceback(self, traceback: Traceback) -> RenderResult:
