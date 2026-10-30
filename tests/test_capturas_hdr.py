@@ -67,17 +67,20 @@ def test_como_mucho_dos_ffmpeg_a_la_vez(tmp_path, monkeypatch):
     activos, maximo = 0, 0
 
     class Proceso:
+        """Vivo desde que se crea hasta que acaba communicate()."""
+
         returncode = 1
 
         async def communicate(self):
-            nonlocal activos, maximo
-            activos += 1
-            maximo = max(maximo, activos)
+            nonlocal activos
             await asyncio.sleep(0.01)
             activos -= 1
             return b"", b""
 
     async def ffmpeg_falso(*_args, **_kwargs):
+        nonlocal activos, maximo
+        activos += 1
+        maximo = max(maximo, activos)
         return Proceso()
 
     monkeypatch.setattr(gen.asyncio, "create_subprocess_exec", ffmpeg_falso)
