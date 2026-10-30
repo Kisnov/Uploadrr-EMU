@@ -1,7 +1,7 @@
 [project]
 name = "uploadrr"
 version = "2.0.0"
-description = "Torrent prepration for Movies, TV, Music + Adult Content. Forked from L4G."
+description = "Prepara y sube películas y series a eMuwarez (UNIT3D). Derivado de Uploadrr y Upload-Assistant de L4G."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
