@@ -115,7 +115,8 @@ class VideoProcessor:
         """Handle video processing based on disc type and set initial metadata."""
         manual_type = meta.get("manual_type")
         if manual_type:
-            manual_type.upper().replace("-", "")
+            # Sin asignarlo, `-t webdl` dejaba el tipo en minúsculas y EMU recibía type_id 0.
+            manual_type = manual_type.upper().replace("-", "")
         guess = None
         manual_year = int(meta.get("manual_year"))
         if meta["is_disc"] == "BDMV":
@@ -686,7 +687,7 @@ class VideoProcessor:
             if meta["tag"][1:] == tag:
                 for key in value:
                     if key == "type":
-                        if meta[key] == "ENCODE":
+                        if meta[key] == "ENCODE" and not meta.get("manual_type"):
                             meta[key] = value.get(key)
                     elif key == "personalrelease":
                         meta[key] = bool(value.get(key, False))
@@ -731,7 +732,8 @@ class VideoProcessor:
                 source = f"{system} DVD".strip() if type == "REMUX" else system
 
             elif source in ("Web", "WEB"):
-                if type == "ENCODE":
+                # El tipo de -t manda: lo pone la nomenclatura.
+                if type == "ENCODE" and not meta.get("manual_type"):
                     type = "WEBRIP"
 
             elif source in ("HD-DVD", "HD DVD", "HDDVD"):
