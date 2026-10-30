@@ -115,7 +115,8 @@ class VideoProcessor:
         """Handle video processing based on disc type and set initial metadata."""
         manual_type = meta.get("manual_type")
         if manual_type:
-            manual_type.upper().replace("-", "")
+            # Sin asignarlo, `-t webdl` dejaba el tipo en minúsculas y EMU recibía type_id 0.
+            manual_type = manual_type.upper().replace("-", "")
         guess = None
         manual_year = int(meta.get("manual_year"))
         if meta["is_disc"] == "BDMV":
