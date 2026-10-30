@@ -5,8 +5,8 @@
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
 [![Licencia: GPL-3.0](https://img.shields.io/github/license/Kisnov/Uploadrr-EMU)](LICENSE)
 
-Fork de [Uploadrr](https://codeberg.org/CvT/Uploadrr) dedicado a subir a **[eMuwarez](https://emu-warez.com)**, un
-tracker UNIT3D (clave `EMU`). Prepara la subida (mediainfo, capturas, descripción, `.torrent`), busca duplicados,
+Derivado de [Uploadrr](https://codeberg.org/CvT/Uploadrr) y dedicado a subir a **[eMuwarez](https://emu-warez.com)**,
+un tracker UNIT3D (clave `EMU`). Prepara la subida (mediainfo, capturas, descripción, `.torrent`), busca duplicados,
 sube y añade el torrent firmado a qBittorrent para sembrarlo.
 
 Lo usa **emuwarez-uploadrr**, un servicio web autoalojado que cruza la biblioteca de Radarr/Sonarr con eMuwarez y
@@ -110,7 +110,10 @@ vez.
 
 [Upload-Assistant](https://github.com/L4GSP1KE/Upload-Assistant) de L4G →
 [Uploadrr](https://codeberg.org/CvT/Uploadrr) de CvT →
-[Uploadrr-EMU](https://codeberg.org/ccx94/Uploadrr-EMU) de ccx94, que añadió eMuwarez → este fork.
+[Uploadrr-EMU](https://codeberg.org/ccx94/Uploadrr-EMU) de ccx94, que añadió eMuwarez → este repositorio.
+
+Desde octubre de 2026 es un proyecto independiente: no forma parte de la red de forks de GitHub ni se sincroniza
+con los proyectos anteriores. Los cambios de ahí se traen a mano si interesan.
 
 Todo el código de base es de L4G, CvT y quienes contribuyeron a esos proyectos. Licencia GPL-3.0, ver
 [LICENSE](LICENSE).
