@@ -104,7 +104,7 @@ pip install pytest
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local, sin red. En cada
+Las pruebas lanzan la búsqueda de duplicados y la subida contra un tracker UNIT3D falso en local, sin salir de la máquina. En cada
 PR, el CI pasa las reglas graves de `ruff`, `compileall` y las pruebas con cobertura, que sube a Codecov (solo
 informativa). Si el PR toca `.github/`, [zizmor](https://docs.zizmor.sh) revisa los workflows y `dependabot.yml`.
 
