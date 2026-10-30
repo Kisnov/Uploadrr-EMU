@@ -687,7 +687,7 @@ class VideoProcessor:
             if meta["tag"][1:] == tag:
                 for key in value:
                     if key == "type":
-                        if meta[key] == "ENCODE":
+                        if meta[key] == "ENCODE" and not meta.get("manual_type"):
                             meta[key] = value.get(key)
                     elif key == "personalrelease":
                         meta[key] = bool(value.get(key, False))
@@ -732,7 +732,8 @@ class VideoProcessor:
                 source = f"{system} DVD".strip() if type == "REMUX" else system
 
             elif source in ("Web", "WEB"):
-                if type == "ENCODE":
+                # El tipo de -t manda: lo pone la nomenclatura.
+                if type == "ENCODE" and not meta.get("manual_type"):
                     type = "WEBRIP"
 
             elif source in ("HD-DVD", "HD DVD", "HDDVD"):

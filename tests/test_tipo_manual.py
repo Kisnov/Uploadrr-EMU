@@ -31,3 +31,23 @@ def test_el_tipo_manual_llega_en_mayusculas(tipo, type_id, tmp_path, monkeypatch
 
     assert meta["type"] == tipo.upper().replace("-", "")
     assert asyncio.run(EMU(config={"TRACKERS": {"EMU": {"api_key": "x"}}, "DEFAULT": {}}).get_type_id(meta)) == type_id
+
+
+@pytest.fixture
+def procesador(tmp_path, monkeypatch):
+    monkeypatch.setattr(MediaInfoHandler, "_instance", None)
+    return vp.VideoProcessor({"DEFAULT": {}, "TRACKERS": {}}, MediaInfoHandler({}, str(tmp_path)), tmp_path)
+
+
+@pytest.mark.parametrize(("manual", "tipo"), [(None, "WEBRIP"), ("encode", "ENCODE")])
+def test_un_encode_de_origen_web_solo_pasa_a_webrip_sin_tipo_manual(procesador, manual, tipo):
+    video = "/d/Peli 2020 1080p WEB x264-GRP.mkv"
+    assert procesador.get_source("ENCODE", video, video, None, {"manual_type": manual})[1] == tipo
+
+
+@pytest.mark.parametrize(("manual", "tipo"), [(None, "WEBDL"), ("encode", "ENCODE")])
+def test_el_tipo_de_tags_json_no_pisa_el_tipo_manual(procesador, tmp_path, manual, tipo):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "tags.json").write_text('{"SubsPlease": {"type": "WEBDL"}}')
+    meta = {"path": "/d/x.mkv", "tag": "-SubsPlease", "type": "ENCODE", "manual_type": manual}
+    assert asyncio.run(procesador.tag_override(meta))["type"] == tipo
