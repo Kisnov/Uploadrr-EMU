@@ -57,13 +57,22 @@ def test_codec_de_audio(handler, pista, texto):
         (_video(HDR_Format="SMPTE ST 2086", HDR_Format_Compatibility="HDR10"), "HDR"),
         (_video(HDR_Format="SMPTE ST 2086"), "HDR"),
         (_video(HDR_Format="SMPTE ST 2094 App 4", HDR_Format_Compatibility="HDR10+ Profile B"), "HDR10+"),
+        (
+            _video(
+                HDR_Format="SMPTE ST 2094 App 4",
+                HDR_Format_Compatibility="HDR10+ Profile A",
+                transfer_characteristics="HLG",
+                transfer_characteristics_Original="HLG",
+            ),
+            "HDR10+",
+        ),
         (_video(HDR_Format="SMPTE ST 2094 App 4"), "HDR10+"),
         (_video(HDR_Format="Dolby Vision / SMPTE ST 2086", HDR_Format_Compatibility="Blu-ray / HDR10"), "DV HDR"),
         (_video(HDR_Format="Dolby Vision"), "DV"),
         (_video(), "PQ10"),
         (_video(colour_primaries="BT.709", transfer_characteristics="BT.709"), ""),
     ],
-    ids=["hdr10", "solo-2086", "hdr10+", "solo-2094", "dv-hdr10", "dv-p5", "pq10", "sdr"],
+    ids=["hdr10", "solo-2086", "hdr10+", "hdr10+-explicito-con-hlg", "solo-2094", "dv-hdr10", "dv-p5", "pq10", "sdr"],
 )
 def test_hdr(handler, video, hdr):
     uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
