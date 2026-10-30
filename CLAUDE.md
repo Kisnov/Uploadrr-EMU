@@ -1,6 +1,6 @@
 # Uploadrr-EMU
 
-Fork of Uploadrr (public upstream: codeberg.org/ccx94/Uploadrr-EMU) used only to upload to eMuwarez, a
+Standalone repo derived from Uploadrr (via codeberg.org/ccx94/Uploadrr-EMU), used only to upload to eMuwarez, a
 UNIT3D tracker (key `EMU`, https://emu-warez.com). Its one caller is emuwarez-uploadrr, which clones `main`
 into its Docker image at `/opt/Uploadrr` and runs it unattended:
 
@@ -16,6 +16,8 @@ or report their errors unless they break an eMuwarez upload.
 - Sole maintainer: Gabriel (Kisnov). Main repo `Kisnov/Uploadrr-EMU`, base `main`. Branch and PR, grouped
   (no PR per one-line fix), non-draft so CodeRabbit reviews. Conventional Commits with a Spanish summary.
 - Merged changes reach the app only when its image is rebuilt.
+- Not in a GitHub fork network: nothing syncs from upstream. Pull a change from Codeberg only on purpose,
+  by hand, and credit it in the commit.
 
 ## Contract with emuwarez-uploadrr (change both repos together)
 
@@ -60,5 +62,5 @@ or report their errors unless they break an eMuwarez upload.
   machine-read lines that hold no secrets.
 - Re-downloading the signed `.torrent` after upload (`src/trackers/UNIT3D.py`) must send the same `params`
   and `User-Agent` as the upload POST, or eMuwarez answers 403 and `[EMU]<name>.torrent` is never written.
-- `data/config.yaml` and `data/config.yaml.bak` are not tracked: the fork's defaults live in
+- `data/config.yaml` and `data/config.yaml.bak` are not tracked: this repo's defaults live in
   `data/backup/example_config.yaml`. `data/tags.json` is tracked although `.gitignore` lists it: placeholders only.
