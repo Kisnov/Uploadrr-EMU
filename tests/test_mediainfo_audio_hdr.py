@@ -86,3 +86,9 @@ def test_dts_con_varias_caracteristicas_y_xll(handler):
 def test_hlg_no_se_confunde_con_hdr10(handler, video):
     uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
     assert handler.get_hdr(uuid) == "HLG"
+
+
+def test_manda_la_transferencia_principal(handler):
+    video = _video(HDR_Format="SMPTE ST 2086", transfer_characteristics="PQ", transfer_characteristics_Original="HLG")
+    uuid = _con_pistas(handler, video, _audio(Format="AC-3"))
+    assert handler.get_hdr(uuid) == "HDR"
