@@ -447,7 +447,14 @@ class ScreenshotGenerator:
         vf_filters = []
         if vobs:
             vf_filters.append(self.screens.get("deinterlace_method", "yadif"))
-        if hdr and self.screens.get("tonemap_hdr", True):
+        if hdr == "DV" and self.screens.get("tonemap_hdr", True):
+            # Dolby Vision sin capa HDR10 (perfil 5): no trae etiquetas de color y zscale falla; libplacebo aplica el RPU.
+            # contrast_recovery=0: con Vulkan por CPU deja cuadrículas que cambian en cada pasada.
+            vf_filters.append(
+                "libplacebo=tonemapping=hable:contrast_recovery=0:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+            )
+            vf_filters.append("format=rgb24")
+        elif hdr and self.screens.get("tonemap_hdr", True):
             vf_filters.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=709")
             vf_filters.append(f"tonemap={self.config['SCREENS'].get('hdr_method', 'reinhard:desat=0')}")
             vf_filters.append("zscale=t=bt709:m=bt709:r=full,format=rgb24")
@@ -499,6 +506,9 @@ class ScreenshotGenerator:
                 if keyframe == "nokey":
                     args.insert(1, "-skip_frame")
                     args.insert(2, "nokey")
+
+                if vf_filter.startswith("libplacebo"):
+                    args[1:1] = ["-init_hw_device", "vulkan"]
 
                 if ffdebug:
                     log.info(f" COMMAND CALLED:\n [blue]{args} \n")
