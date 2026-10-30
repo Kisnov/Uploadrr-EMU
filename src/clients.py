@@ -146,13 +146,7 @@ class Clients:
         torrent_storage_dir = Path(client.get("torrent_storage_dir", ""))
         local_path, remote_path = await self.remote_path_map(meta)
 
-        qbt_client = qbittorrentapi.Client(
-            host=client["qbit_url"],
-            port=client["qbit_port"],
-            username=client["qbit_user"],
-            password=client["qbit_pass"],
-            VERIFY_WEBUI_CERTIFICATE=client.get("VERIFY_WEBUI_CERTIFICATE", True),
-        )
+        qbt_client = self._qbit_client(client)
         try:
             qbt_client.auth_log_in()
         except qbittorrentapi.LoginFailed:
@@ -418,13 +412,7 @@ class Clients:
         if not path_str.endswith("/"):
             path_str += "/"
 
-        qbt_client = qbittorrentapi.Client(
-            host=client["qbit_url"],
-            port=client["qbit_port"],
-            username=client["qbit_user"],
-            password=client["qbit_pass"],
-            VERIFY_WEBUI_CERTIFICATE=client.get("VERIFY_WEBUI_CERTIFICATE", True),
-        )
+        qbt_client = self._qbit_client(client)
 
         console.print("[bold yellow]Adding and rechecking torrent")
         try:
@@ -568,6 +556,21 @@ class Clients:
                 return resp.json()
             console.print(f"[bold red]Failed to execute RPC: HTTP {response.status_code}")
             return None
+
+    @staticmethod
+    def _qbit_client(client: dict) -> qbittorrentapi.Client:
+        """qBittorrent directo o, con `qui_proxy_url`, a través del proxy de qui, que no pide credenciales."""
+        verificar = client.get("VERIFY_WEBUI_CERTIFICATE", True)
+        qui = (client.get("qui_proxy_url") or "").strip().rstrip("/")
+        if qui:
+            return qbittorrentapi.Client(host=qui, VERIFY_WEBUI_CERTIFICATE=verificar)
+        return qbittorrentapi.Client(
+            host=client["qbit_url"],
+            port=client["qbit_port"],
+            username=client["qbit_user"],
+            password=client["qbit_pass"],
+            VERIFY_WEBUI_CERTIFICATE=verificar,
+        )
 
     def _get_torrent_client(self, meta: dict) -> Optional[str]:
         """Determine the torrent client from meta or config."""
