@@ -58,54 +58,32 @@ class COMMON:
             console.log("[cyan]Pre-filtered dupes")
             console.log(dupes)
 
+        resolution = (meta.get("resolution") or "").lower()
+        # 1080p y 1080i compiten por el mismo hueco (la búsqueda ya trae los dos).
+        resolutions = {"1080p", "1080i"} if resolution in ("1080p", "1080i") else {resolution}
+        hdr = meta.get("hdr", "") or ""
+        needs_hdr = bool(re.search("HDR|PQ10", hdr, flags=re.I))
+        needs_dv = "DV" in hdr
+        season, episode = meta.get("season", ""), meta.get("episode", "")
+        kind = meta.get("type", "")
+
         new_dupes = {}
         for each in dupes:
-            remove_set = set({meta.get("resolution")}) if meta.get("sd", 0) != 1 else set()
-            search_combos = [
-                {"search": meta.get("hdr", ""), "search_for": {"HDR", "PQ10"}, "update": {"HDR|PQ10"}},
-                {"search": meta.get("hdr", ""), "search_for": {"DV"}, "update": {"DV|DoVi"}},
-                {"search": meta.get("hdr", ""), "search_not": {"DV", "DoVi", "HDR", "PQ10"}, "update": {"!(DV)|(DoVi)|(HDR)|(PQ10)"}},
-                {"search": str(meta.get("tv_pack", 0)), "search_for": "1", "update": {rf"{meta.get('season')}(?!E\d+)"}},
-                {
-                    "search": meta.get("episode", ""),
-                    "search_for": meta.get("episode", ""),
-                    "update": {meta.get("season", ""), meta.get("episode", "")},
-                },
-            ]
-            search_matches = [{"if": {"REMUX", "WEBDL", "WEBRip", "HDTV"}, "in": meta.get("type", "")}]
-
-            for s in search_combos:
-                if isinstance(s.get("search"), str) and s.get("search_for"):
-                    if any(re.search(x, s["search"], flags=re.IGNORECASE) for x in s["search_for"]):
-                        remove_set.update(s["update"])
-                if isinstance(s.get("search_not"), str) and s.get("search_not"):
-                    if not any(re.search(x, s["search"], flags=re.IGNORECASE) for x in s["search_not"]):
-                        remove_set.update(s["update"])
-
-            for sm in search_matches:
-                for a in sm["if"]:
-                    if a in sm["in"]:
-                        remove_set.add(a)
-
+            # Resolución y HDR por palabras enteras: «Adventure» no es Dolby Vision.
+            words = set(re.split(r"[^a-z0-9+]+", each.lower()))
             search = each.lower().replace("-", "").replace(" ", "").replace(".", "")
-            for x in remove_set.copy():
-                if x:
-                    if "|" in x:
-                        look_for = x.split("|")
-                        for y in look_for:
-                            if y.lower() in search:
-                                remove_set.discard(x)
-                                remove_set.add(y)
-
-            allow = True
-            for x in remove_set:
-                if x:
-                    if not x.startswith("!"):
-                        if not re.search(x, search, flags=re.I):
-                            allow = False
-                    else:
-                        if re.search(x.replace("!", "", 1), search, flags=re.I) not in (None, False):
-                            allow = False
-            if allow and each not in new_dupes:
+            required = []
+            if meta.get("sd", 0) != 1 and resolution:
+                required.append(bool(resolutions & words))
+            if needs_hdr:
+                required.append(bool({"hdr", "hdr10", "hdr10+", "hdr10plus", "pq10"} & words))
+            if needs_dv:
+                required.append(bool({"dv", "dovi"} & words))
+            if str(meta.get("tv_pack", 0)) == "1":
+                required.append(bool(re.search(rf"{season}(?!E\d+)", search, flags=re.I)))
+            if episode:
+                required.append(season.lower() in search and episode.lower() in search)
+            required.extend(a.lower() in search for a in ("REMUX", "WEBDL", "WEBRip", "HDTV") if a in kind)
+            if all(required):
                 new_dupes[each] = dupes[each]
         return new_dupes
