@@ -1,10 +1,13 @@
 # requirements.txt fija las dependencias directas: sus subidas de versión llegan solo por estos PR.
+# Cada versión nueva espera 7 días antes de proponerse; los avisos de seguridad no esperan.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       python:
         update-types: [minor, patch]
@@ -13,6 +16,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         update-types: [minor, patch]
