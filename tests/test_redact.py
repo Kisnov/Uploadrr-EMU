@@ -4,6 +4,7 @@ import io
 import logging
 from urllib.parse import urlparse
 
+import pytest
 from rich.console import Console
 
 from src.utils.redact import RedactingRichHandler, Redactrr
@@ -11,15 +12,16 @@ from src.utils.redact import RedactingRichHandler, Redactrr
 QUI = "http://qui:7476/proxy/clave0de0qui/"
 
 
-def _redactor():
+def _redactor(url=QUI):
     redactor = Redactrr()
-    redactor.load_from_config({"TORRENT_CLIENTS": {"qbit": {"qui_proxy_url": QUI}}})
+    redactor.load_from_config({"TORRENT_CLIENTS": {"qbit": {"qui_proxy_url": url}}})
     return redactor
 
 
-def test_la_clave_de_qui_se_tapa_en_cualquier_forma():
-    redactor = _redactor()
-    for texto in (QUI, "POST http://qui:7476/proxy/clave0de0qui/api/v2/auth/login", repr(urlparse(QUI))):
+@pytest.mark.parametrize("url", [QUI, QUI.rstrip("/"), f" {QUI} "])
+def test_la_clave_de_qui_se_tapa_en_cualquier_forma(url):
+    redactor = _redactor(url)
+    for texto in (QUI, "POST http://qui:7476/proxy/clave0de0qui/api/v2/auth/login", repr(urlparse(QUI.rstrip("/")))):
         assert "clave0de0qui" not in redactor.redact(texto)
 
 

@@ -26,8 +26,11 @@ class Redactrr:
                         if v is not None and isinstance(v, str) and v.strip():
                             placeholders[v] = k.upper()
                     # La clave de qui es lo que va tras /proxy/: se tapa también si el log enseña la URL troceada.
+                    # Limpia como en clients._qbit_client, que es como sale en el log.
                     if k == "qui_proxy_url" and isinstance(v, str) and "/proxy/" in v:
-                        placeholders[v.rstrip("/").rsplit("/", 1)[-1]] = "QUI_PROXY_KEY"
+                        url = v.strip().rstrip("/")
+                        placeholders[url] = "QUI_PROXY_URL"
+                        placeholders[url.rsplit("/", 1)[-1]] = "QUI_PROXY_KEY"
 
                     if any(full_key.startswith(sens_path) for sens_path in sensitive_paths):
                         if v is not None and isinstance(v, str) and v.strip():
