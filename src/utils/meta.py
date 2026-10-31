@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 from rich.text import Text
 
-from src.args import apply_special_logic, build_parser, enforce_global_only, normalize_args
+from src.args import apply_special_logic, build_parser, changed_args, enforce_global_only
 from src.name import NameGenerator
 from src.utils.console import console, log
 
@@ -99,7 +99,7 @@ async def edit_meta(
             console.print("[dim]Hint: Use --flag value (e.g., --tmdb 12345, --tag GROUP)[/dim]")
             continue
 
-        edit_meta_dict = normalize_args(ns)
+        edit_meta_dict = changed_args(ns, parser)
         new_meta = {**meta, **edit_meta_dict}
         new_meta = apply_special_logic(new_meta)
         new_meta["edit"] = True

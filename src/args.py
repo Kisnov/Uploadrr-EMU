@@ -165,6 +165,12 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
     return meta
 
 
+def changed_args(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> Dict[str, Any]:
+    """normalize_args() without the values left at their default, so they don't reset what is already set."""
+    defaults = normalize_args(parser.parse_args([]))
+    return {k: v for k, v in normalize_args(ns).items() if v != defaults.get(k)}
+
+
 def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
     """
     Apply higher-level logic that depends on multiple fields or side effects.
@@ -510,4 +516,12 @@ def group_args_by_path(argv: List[str]) -> Tuple[List[Tuple[List[str], str]], Li
 # =============================================================================
 # 📦 Exported Interface
 # =============================================================================
-__all__ = ["build_parser", "normalize_args", "apply_special_logic", "enforce_global_only", "group_args_by_path", "GLOBAL_ARGS"]
+__all__ = [
+    "build_parser",
+    "normalize_args",
+    "changed_args",
+    "apply_special_logic",
+    "enforce_global_only",
+    "group_args_by_path",
+    "GLOBAL_ARGS",
+]

@@ -1,11 +1,11 @@
-"""Opciones de la línea de órdenes que no usa emuwarez-uploadrr: -episode, -d/-df/-pb y -pr."""
+"""Opciones de la línea de órdenes que no usa emuwarez-uploadrr: banderas por elemento, -episode, -d/-df/-pb y -pr."""
 from __future__ import annotations
 
 import asyncio
 
 import pytest
 
-from src.args import apply_special_logic, build_parser, normalize_args
+from src.args import apply_special_logic, build_parser, changed_args, group_args_by_path, normalize_args
 from src.utils import descgen
 from src.utils.descgen import DescGenerator
 
@@ -20,6 +20,20 @@ def _descripcion(tmp_path, argv):
     meta = {**_meta(argv), "uuid": "Peli"}
     meta = asyncio.run(DescGenerator(CONFIG, tmp_path).gen_desc(meta))
     return meta, (tmp_path / "tmp" / "Peli" / "DESCRIPTION.txt").read_text(encoding="utf-8")
+
+
+def test_las_banderas_de_un_elemento_no_pisan_las_globales(tmp_path):
+    # Como upload.py: el bloque del elemento se fusiona encima del meta global.
+    video = tmp_path / "Peli.mkv"
+    video.write_bytes(b"")
+    items, global_argv = group_args_by_path(["-s", "4", str(video), "-ua", "-tk", "EMU"])
+    parser = build_parser({})
+    global_meta = apply_special_logic(normalize_args(parser.parse_args(global_argv)))
+    (bloque, _), = items
+
+    meta = apply_special_logic({**global_meta, **changed_args(parser.parse_args(bloque), parser)})
+
+    assert (meta["screens"], meta["unattended"], meta["trackers"]) == (4, True, ["EMU"])
 
 
 @pytest.mark.parametrize(
