@@ -426,7 +426,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
     parser.add_argument("-reg", "--region", nargs="*", help="Region (for discs)")
     parser.add_argument("-mt", "--manual-title", dest="manual_name", nargs="*", help="Override generated name")
-    parser.add_argument("-rt", "--randomized", nargs="*", default=0, help="Number of extra randomized torrents")
+    parser.add_argument("-rt", "--randomized", type=int, default=0, help="Number of extra randomized torrents")
     parser.add_argument("-fl", "--freeleech", nargs="*", help="Freeleech percentage (default 100 if flag used alone)")
 
     return parser
