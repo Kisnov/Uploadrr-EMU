@@ -6,7 +6,9 @@ import asyncio
 import pytest
 import requests
 
-from src.args import apply_special_logic, build_parser, group_args_by_path, normalize_args, supplied_args
+import upload
+from src.args import apply_special_logic, build_parser, normalize_args
+from src.cleanrr import CleanupHandler
 from src.utils import descgen
 from src.utils.descgen import DescGenerator
 
@@ -41,17 +43,21 @@ def _descripcion(tmp_path, argv, **extra):
         (["-s", "3"], ["-ua", "-tk", "EMU", "-s", "5"], 3),  # 3 es el valor por defecto, pero lo pide el elemento
     ],
 )
-def test_las_banderas_de_un_elemento_no_pisan_las_globales(tmp_path, antes, despues, pantallas):
-    # Como upload.py: el bloque del elemento se fusiona encima del meta global.
+def test_las_banderas_de_un_elemento_no_pisan_las_globales(tmp_path, monkeypatch, antes, despues, pantallas):
     video = tmp_path / "Peli.mkv"
     video.write_bytes(b"")
-    items, global_argv = group_args_by_path([*antes, str(video), *despues])
-    parser = build_parser({})
-    global_meta = apply_special_logic(normalize_args(parser.parse_args(global_argv)))
-    (bloque, _), = items
+    cola = []
 
-    meta = apply_special_logic({**global_meta, **supplied_args(bloque, parser)})
+    async def procesar(self, queue, *_args):
+        cola.extend(queue)
 
+    monkeypatch.setattr(CleanupHandler, "_register_signal_handlers", lambda self: None)
+    monkeypatch.setattr(upload.Uploadrr, "_process_queue", procesar)
+    monkeypatch.setattr(upload.sys, "argv", ["upload.py", *antes, str(video), *despues])
+
+    asyncio.run(upload.Uploadrr({"TRACKERS": {"EMU": {"api_key": "x"}}, "DEFAULT": {}}).do_the_thing(tmp_path))
+
+    (meta,) = cola
     assert (meta["screens"], meta["unattended"], meta["trackers"]) == (pantallas, True, ["EMU"])
 
 
