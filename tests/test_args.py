@@ -124,6 +124,7 @@ def test_normaliza_los_argumentos(argv, clave, valor):
         (["-tmdb", "tv/55"], "TV", "55"),
         (["-tmdb", "movie/9"], "MOVIE", "9"),
         (["-c", "tv", "-tmdb", "9"], "TV", "9"),
+        (["-c", "movie", "-tmdb", "tv/55"], "TV", "55"),
         (["-tmdb", "9"], None, "9"),
     ],
 )
