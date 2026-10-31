@@ -188,7 +188,8 @@ class DescGenerator:
 
                 raw_url = parsed._replace(path=new_path)
                 raw_str = urllib.parse.urlunparse(raw_url)
-                response = requests.get(raw_str)
+                response = requests.get(raw_str, timeout=30)
+                response.raise_for_status()  # a 404 page must not become the description
                 response.encoding = "utf-8"
                 await description.write(response.text)
                 await description.write("\n")
