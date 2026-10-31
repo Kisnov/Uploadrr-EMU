@@ -58,11 +58,13 @@ def _validate_porndb_id(value: str) -> str:
         raise argparse.ArgumentTypeError(f"Invalid PornDB ID: '{value}'. Must be digits or UUID.")
 
 
-def _season_or_episode(value: str) -> Dict[str, str]:
+def _season_or_episode(value: str, key: str = "season") -> Dict[str, str]:
     """
     Parse Sxx, Exx, SxxExx → {"manual_season": "S02", "manual_episode": "E05"}
     """
     value = value.strip().lower()
+    if value.isdigit():  # a bare number belongs to the argument that carries it
+        value = key[0] + value
     # Match optional S## and optional E##
     match = re.match(r"s?(\d+)?\s*e?(\d+)?", value)
     if not match:
@@ -198,7 +200,7 @@ def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
     # --- Season/Episode parsing from --season/--episode CLI args ---
     for key in ("season", "episode"):
         if meta.get(key):
-            extra = _season_or_episode(meta[key])
+            extra = _season_or_episode(meta[key], key)
             # e.g., {"manual_season": "S02", "manual_episode": "E05"}
             meta.update(extra)
             meta.pop(key, None)  # remove raw 'season'/'episode'
