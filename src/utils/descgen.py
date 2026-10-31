@@ -108,6 +108,7 @@ class DescGenerator:
         description_path.parent.mkdir(parents=True, exist_ok=True)
 
         async with aiofiles.open(description_path, "w", newline="", encoding="utf-8") as description:
+            # Sin descripción propia (-d, -df, -pb) se prueba la de PTP o la de BLU.
             if (desclink, meta.get("descfile", None), meta["desc"]) == (None, None, None):
                 # desc_source = None
                 # if meta.get("ptp_manual") is not None:
@@ -151,105 +152,99 @@ class DescGenerator:
                                 meta["description"] = "BLU"
                                 custom_desc_written = True
 
-                # Try Jinja2 template
-                if meta.get("desc_template"):
-                    from jinja2 import Template
+            # Try Jinja2 template
+            if meta.get("desc_template"):
+                from jinja2 import Template
 
-                    template_path = Path(meta["base_dir"]) / "data" / "templates" / f"{meta['desc_template']}.txt"
-                    if template_path.is_file():
-                        with open(template_path, "r", encoding="utf-8") as f:
-                            desc_template = Template(f.read())
-                            template_desc = desc_template.render(meta)
-                            if template_desc.strip():
-                                await description.write(template_desc)
-                                await description.write("\n")
-                                custom_desc_written = True
+                template_path = Path(meta["base_dir"]) / "data" / "templates" / f"{meta['desc_template']}.txt"
+                if template_path.is_file():
+                    with open(template_path, "r", encoding="utf-8") as f:
+                        desc_template = Template(f.read())
+                        template_desc = desc_template.render(meta)
+                        if template_desc.strip():
+                            await description.write(template_desc)
+                            await description.write("\n")
+                            custom_desc_written = True
 
-                # Add NFO file if requested
-                if meta["nfo"] and nfo_file:
-                    nfo_path = Path(nfo_file)
-                    if nfo_path.is_file():
-                        async with aiofiles.open(nfo_path, "r", encoding="utf-8") as nfo_f:
-                            nfo_content = await nfo_f.read()
-                        await description.write("\n[code]")
-                        await description.write(nfo_content)
-                        await description.write("[/code]\n")
-                        meta["description"] = "CUSTOM"
-                        custom_desc_written = True
-
-                if desclink:
-                    parsed = urllib.parse.urlparse(desclink.replace("/raw/", "/"))
-                    split_path = parsed.path.rstrip("/").split("/")
-                    if len(split_path) > 1:
-                        new_path = "/" + "/".join(split_path[:-1] + ["raw", split_path[-1]])
-                    else:
-                        new_path = "/raw" + parsed.path
-
-                    raw_url = parsed._replace(path=new_path)
-                    raw_str = urllib.parse.urlunparse(raw_url)
-                    response = requests.get(raw_str)
-                    response.encoding = "utf-8"
-                    await description.write(response.text)
-                    await description.write("\n")
+            # Add NFO file if requested
+            if meta["nfo"] and nfo_file:
+                nfo_path = Path(nfo_file)
+                if nfo_path.is_file():
+                    async with aiofiles.open(nfo_path, "r", encoding="utf-8") as nfo_f:
+                        nfo_content = await nfo_f.read()
+                    await description.write("\n[code]")
+                    await description.write(nfo_content)
+                    await description.write("[/code]\n")
                     meta["description"] = "CUSTOM"
                     custom_desc_written = True
 
-                # Auto-desc from local file
-                if auto_desc:
-                    path = Path(meta.get("path", ""))
-                    uuid = meta.get("uuid", "")
-                    if uuid:
-                        uuid = Path(uuid).stem
-                    desc_folder = self.config["AUTO"].get("description_folder")
-                    descfile = None
+            if desclink:
+                parsed = urllib.parse.urlparse(desclink.replace("/raw/", "/"))
+                split_path = parsed.path.strip("/").split("/")
+                if len(split_path) > 1:
+                    new_path = "/" + "/".join(split_path[:-1] + ["raw", split_path[-1]])
+                else:
+                    new_path = "/raw" + parsed.path
 
-                    if desc_folder:
-                        desc_folder = Path(desc_folder)
-                        if desc_folder.is_dir():
-                            potential_file = desc_folder / f"{uuid}.txt"
-                            if potential_file.is_file():
-                                descfile = potential_file
+                raw_url = parsed._replace(path=new_path)
+                raw_str = urllib.parse.urlunparse(raw_url)
+                response = requests.get(raw_str)
+                response.encoding = "utf-8"
+                await description.write(response.text)
+                await description.write("\n")
+                meta["description"] = "CUSTOM"
+                custom_desc_written = True
 
-                    if descfile is None and path.exists():
-                        if path.is_file():
-                            descfile = path.with_suffix(".txt")
-                            if not descfile.is_file():
-                                descfile = path.parent / f"{uuid}.txt"
-                        elif path.is_dir():
-                            descfile = path / f"{uuid}.txt"
-                            if not descfile.is_file():
-                                descfile = path / "description.txt"
+            # Auto-desc from local file
+            if auto_desc:
+                path = Path(meta.get("path", ""))
+                uuid = meta.get("uuid", "")
+                if uuid:
+                    uuid = Path(uuid).stem
+                desc_folder = self.config["AUTO"].get("description_folder")
+                descfile = None
 
-                    if descfile and descfile.is_file():
-                        async with aiofiles.open(descfile, "r", encoding="utf-8") as f:
-                            descfile_content = await f.read()
-                        if not any(line.strip().startswith("# USE:") for line in descfile_content.splitlines()):
-                            descfile_content = "# USE: full\n" + descfile_content
-                        await description.write("\n" + descfile_content + "\n")
-                        meta["description"] = "CUSTOM"
-                        custom_desc_written = True
+                if desc_folder:
+                    desc_folder = Path(desc_folder)
+                    if desc_folder.is_dir():
+                        potential_file = desc_folder / f"{uuid}.txt"
+                        if potential_file.is_file():
+                            descfile = potential_file
 
-                # Manual desc
-                desc = meta.get("desc")
-                if desc and desc != descfile_content:
-                    await description.write("\n" + desc + "\n")
+                if descfile is None and path.exists():
+                    if path.is_file():
+                        descfile = path.with_suffix(".txt")
+                        if not descfile.is_file():
+                            descfile = path.parent / f"{uuid}.txt"
+                    elif path.is_dir():
+                        descfile = path / f"{uuid}.txt"
+                        if not descfile.is_file():
+                            descfile = path / "description.txt"
+
+                if descfile and descfile.is_file():
+                    async with aiofiles.open(descfile, "r", encoding="utf-8") as f:
+                        descfile_content = await f.read()
+                    if not any(line.strip().startswith("# USE:") for line in descfile_content.splitlines()):
+                        descfile_content = "# USE: full\n" + descfile_content
+                    await description.write("\n" + descfile_content + "\n")
                     meta["description"] = "CUSTOM"
                     custom_desc_written = True
 
-                # External descfile
-                descfile_path = meta.get("descfile")
-                if descfile_path:
-                    p = Path(descfile_path)
-                    if p.is_file():
-                        async with aiofiles.open(p, "r", encoding="utf-8") as f:
-                            descfile_text = await f.read()
-                        await description.write("\n" + descfile_text + "\n")
-                        meta["description"] = "CUSTOM"
-                        custom_desc_written = True
+            # Manual desc
+            desc = meta.get("desc")
+            if desc and desc != descfile_content:
+                await description.write("\n" + desc + "\n")
+                meta["description"] = "CUSTOM"
+                custom_desc_written = True
 
-                # Final fallback: write meta["desc"] if present
-                if meta.get("desc"):
-                    await description.write("\n" + meta["desc"] + "\n")
+            # External descfile
+            descfile_path = meta.get("descfile")
+            if descfile_path:
+                p = Path(descfile_path)
+                if p.is_file():
+                    async with aiofiles.open(p, "r", encoding="utf-8") as f:
+                        descfile_text = await f.read()
+                    await description.write("\n" + descfile_text + "\n")
                     meta["description"] = "CUSTOM"
                     custom_desc_written = True
 

@@ -152,6 +152,10 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
     if isinstance(meta.get("manual_edition"), list):
         meta["manual_edition"] = " ".join(meta["manual_edition"]) or ""
 
+    # --- Description: list → space-joined string (gen_desc writes it as text) ---
+    if isinstance(meta.get("desc"), list):
+        meta["desc"] = " ".join(meta["desc"]) or None
+
     # --- Keywords: list → comma-separated string (as expected by uploaders) ---
     if isinstance(meta.get("keywords"), list):
         meta["keywords"] = ",".join(meta["keywords"])
