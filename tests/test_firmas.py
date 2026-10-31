@@ -34,8 +34,8 @@ def test_por_defecto_la_del_tracker_gana(fichero):
 
 @pytest.mark.parametrize("meta, esperada", [
     ({"anon": 1}, "[GLOBAL-ANON]"),
-    ({"personal_release": True}, "[GLOBAL-PR]"),
-    ({"anon": 1, "personal_release": True}, "[GLOBAL-ANON-PR]"),
+    ({"personalrelease": True}, "[GLOBAL-PR]"),
+    ({"anon": 1, "personalrelease": True}, "[GLOBAL-ANON-PR]"),
 ])
 def test_anonima_y_personal_release(fichero, meta, esperada):
     assert _firma(fichero, meta=meta) == f"\n{esperada}"
@@ -74,5 +74,5 @@ def test_false_usa_la_del_tracker(fichero):
 @pytest.mark.xfail(strict=True,
                    reason="BUG: busca 'anon_pr_sig' en el tracker en vez de 'anon_pr_signature', y cae en la global")
 def test_la_firma_anonima_pr_del_tracker_se_respeta(fichero):
-    meta = {"anon": 1, "personal_release": True}
+    meta = {"anon": 1, "personalrelease": True}
     assert _firma(fichero, tracker_cfg={"anon_pr_signature": "[EMU-ANON-PR]"}, meta=meta) == "\n[EMU-ANON-PR]"

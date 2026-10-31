@@ -194,7 +194,7 @@ async def get_confirmation(meta: Dict, trackers: Optional[List[str]], tracker_re
     from rich.text import Text
 
     console.print(Text(f" {res} / {meta['type']}{tag}", style="bold"))
-    if meta.get("personal_release", False):
+    if meta.get("personalrelease", False):
         console.print("[bright_magenta]Personal Release!")
 
     display_names = []

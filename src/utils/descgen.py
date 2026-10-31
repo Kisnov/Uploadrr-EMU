@@ -574,7 +574,7 @@ class DescGenerator:
 
         xanon = meta.get("xxx") and self.config["TRACKERS"].get(tracker, {}).get("xanon", False)
         is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"].get(tracker, {}).get("anon", False) or xanon
-        is_pr = meta.get("personal_release", False)
+        is_pr = meta.get("personalrelease", False)
         sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
 
         if not tracker_config.get(sig_key):
