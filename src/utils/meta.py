@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from rich.prompt import Prompt
 from rich.text import Text
 
-from src.args import apply_special_logic, build_parser, enforce_global_only, normalize_args
+from src.args import apply_special_logic, build_parser, enforce_global_only, supplied_args
 from src.name import NameGenerator
 from src.utils.console import console, log
 
@@ -33,7 +33,7 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "descfile", "desclink", "draft", "dupe", "episode", "ffdebug", "freeleech", "full_dir",
         "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_name",
         "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
-        "nohash", "path", "personal_release", "ptp", "qbit_cat", "qbit_tag", "randomized", "rehash",
+        "nohash", "path", "personalrelease", "ptp", "qbit_cat", "qbit_tag", "randomized", "rehash",
         "region", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation",
         "trackers", "tmdb_manual", "unattended", "webdv",
         # XXX keys
@@ -99,7 +99,7 @@ async def edit_meta(
             console.print("[dim]Hint: Use --flag value (e.g., --tmdb 12345, --tag GROUP)[/dim]")
             continue
 
-        edit_meta_dict = normalize_args(ns)
+        edit_meta_dict = supplied_args(edit_argv, parser)
         new_meta = {**meta, **edit_meta_dict}
         new_meta = apply_special_logic(new_meta)
         new_meta["edit"] = True

@@ -58,11 +58,13 @@ def _validate_porndb_id(value: str) -> str:
         raise argparse.ArgumentTypeError(f"Invalid PornDB ID: '{value}'. Must be digits or UUID.")
 
 
-def _season_or_episode(value: str) -> Dict[str, str]:
+def _season_or_episode(value: str, key: str = "season") -> Dict[str, str]:
     """
     Parse Sxx, Exx, SxxExx → {"manual_season": "S02", "manual_episode": "E05"}
     """
     value = value.strip().lower()
+    if value.isdigit():  # a bare number belongs to the argument that carries it
+        value = key[0] + value
     # Match optional S## and optional E##
     match = re.match(r"s?(\d+)?\s*e?(\d+)?", value)
     if not match:
@@ -152,11 +154,22 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
     if isinstance(meta.get("manual_edition"), list):
         meta["manual_edition"] = " ".join(meta["manual_edition"]) or ""
 
+    # --- Description: list → space-joined string (gen_desc writes it as text) ---
+    if isinstance(meta.get("desc"), list):
+        meta["desc"] = " ".join(meta["desc"]) or None
+
     # --- Keywords: list → comma-separated string (as expected by uploaders) ---
     if isinstance(meta.get("keywords"), list):
         meta["keywords"] = ",".join(meta["keywords"])
 
     return meta
+
+
+def supplied_args(argv: List[str], parser: argparse.ArgumentParser) -> Dict[str, Any]:
+    """normalize_args() of only the options given in argv, so the rest don't reset what is already set."""
+    unset = object()  # argparse only fills in defaults for attributes the namespace doesn't have yet
+    ns = parser.parse_args(argv, namespace=argparse.Namespace(**{k: unset for k in vars(parser.parse_args([]))}))
+    return normalize_args(argparse.Namespace(**{k: v for k, v in vars(ns).items() if v is not unset}))
 
 
 def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,7 +207,7 @@ def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
     # --- Season/Episode parsing from --season/--episode CLI args ---
     for key in ("season", "episode"):
         if meta.get(key):
-            extra = _season_or_episode(meta[key])
+            extra = _season_or_episode(meta[key], key)
             # e.g., {"manual_season": "S02", "manual_episode": "E05"}
             meta.update(extra)
             meta.pop(key, None)  # remove raw 'season'/'episode'
@@ -413,7 +426,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
     parser.add_argument("-reg", "--region", nargs="*", help="Region (for discs)")
     parser.add_argument("-mt", "--manual-title", dest="manual_name", nargs="*", help="Override generated name")
-    parser.add_argument("-rt", "--randomized", nargs="*", default=0, help="Number of extra randomized torrents")
+    parser.add_argument("-rt", "--randomized", type=int, default=0, help="Number of extra randomized torrents")
     parser.add_argument("-fl", "--freeleech", nargs="*", help="Freeleech percentage (default 100 if flag used alone)")
 
     return parser
@@ -504,4 +517,12 @@ def group_args_by_path(argv: List[str]) -> Tuple[List[Tuple[List[str], str]], Li
 # =============================================================================
 # 📦 Exported Interface
 # =============================================================================
-__all__ = ["build_parser", "normalize_args", "apply_special_logic", "enforce_global_only", "group_args_by_path", "GLOBAL_ARGS"]
+__all__ = [
+    "build_parser",
+    "normalize_args",
+    "supplied_args",
+    "apply_special_logic",
+    "enforce_global_only",
+    "group_args_by_path",
+    "GLOBAL_ARGS",
+]

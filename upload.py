@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, List
 import inspect
 
+import requests
+
 import src.utils.imports  # noqa: F401
-from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args
+from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args, supplied_args
 from src.cleanrr import CleanupHandler
 from src.clients import Clients
 from src.exceptions import BDInfoExtractionError
@@ -92,8 +94,7 @@ class Uploadrr:
                 try:
                     ns = parser.parse_args(arg_block)
                     enforce_global_only(ns, is_global=False, parser=parser)
-                    raw = normalize_args(ns)
-                    item_updates = {k: v for k, v in raw.items() if v is not None and v != [] and v != ""}
+                    item_updates = supplied_args(arg_block, parser)
                 except Exception as e:
                     console.print(f"[red]❌ Item {i} ({path}): {e}[/red]")
                     sys.exit(1)
@@ -174,7 +175,7 @@ class Uploadrr:
                 prep = Prep(config=self.config, base_dir=base_dir)
                 try:
                     item_meta = await prep.gather_prep(meta=item_meta, mode="cli")
-                except BDInfoExtractionError as e:
+                except (BDInfoExtractionError, requests.RequestException) as e:  # RequestException: -pb that fails
                     log.warning(f"[yellow]Skipping due to prep error: {e}[/yellow]")
                     progress.update(f"Processing {item_name}: Skipped (Prep error)")
                     skipped += 1
