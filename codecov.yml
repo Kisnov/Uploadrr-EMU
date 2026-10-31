@@ -7,6 +7,21 @@ coverage:
     patch:
       default:
         informational: true
+# Lo heredado de Uploadrr que no se mantiene (README): otros trackers, música y contenido adulto.
+ignore:
+  - src/trackers/AITHER.py
+  - src/trackers/BLU.py
+  - src/trackers/HDB.py
+  - src/trackers/PTP.py
+  - src/metascraper.py
+  - src/databases/ptgen.py
+  - src/utils/cookieme.py
+  - src/musicprocessor.py
+  - src/databases/musicbrainz.py
+  - src/databases/discogs.py
+  - src/databases/deezer.py
+  - src/databases/porndb.py
+  - src/utils/phash.py
 comment:
   layout: "diff, files"
   require_changes: true
