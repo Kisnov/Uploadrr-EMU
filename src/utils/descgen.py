@@ -225,9 +225,9 @@ class DescGenerator:
                 if descfile and descfile.is_file():
                     async with aiofiles.open(descfile, "r", encoding="utf-8") as f:
                         descfile_content = await f.read()
-                    if not any(line.strip().startswith("# USE:") for line in descfile_content.splitlines()):
-                        descfile_content = "# USE: full\n" + descfile_content
-                    await description.write("\n" + descfile_content + "\n")
+                    has_marker = any(line.strip().startswith("# USE:") for line in descfile_content.splitlines())
+                    marker = "" if has_marker else "# USE: full\n"
+                    await description.write("\n" + marker + descfile_content + "\n")
                     meta["description"] = "CUSTOM"
                     custom_desc_written = True
 
