@@ -165,10 +165,11 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
     return meta
 
 
-def changed_args(ns: argparse.Namespace, parser: argparse.ArgumentParser) -> Dict[str, Any]:
-    """normalize_args() without the values left at their default, so they don't reset what is already set."""
-    defaults = normalize_args(parser.parse_args([]))
-    return {k: v for k, v in normalize_args(ns).items() if v != defaults.get(k)}
+def supplied_args(argv: List[str], parser: argparse.ArgumentParser) -> Dict[str, Any]:
+    """normalize_args() of only the options given in argv, so the rest don't reset what is already set."""
+    unset = object()  # argparse only fills in defaults for attributes the namespace doesn't have yet
+    ns = parser.parse_args(argv, namespace=argparse.Namespace(**{k: unset for k in vars(parser.parse_args([]))}))
+    return normalize_args(argparse.Namespace(**{k: v for k, v in vars(ns).items() if v is not unset}))
 
 
 def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -519,7 +520,7 @@ def group_args_by_path(argv: List[str]) -> Tuple[List[Tuple[List[str], str]], Li
 __all__ = [
     "build_parser",
     "normalize_args",
-    "changed_args",
+    "supplied_args",
     "apply_special_logic",
     "enforce_global_only",
     "group_args_by_path",
