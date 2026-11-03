@@ -615,13 +615,17 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
     if nohash:
         meta["client"] = "none"
         pasos = meta.get("pasos_hechos")
+        quitado = True
         if torrent_path.exists() and not (isinstance(pasos, list) and "torrent" in pasos):
             # Un BASE.torrent sin marca no se da por bueno: si no, un --resume posterior lo reutilizaría.
             try:
                 torrent_path.unlink()
             except OSError as e:
+                quitado = False
                 log.warning(f"[yellow]Could not delete the unmarked BASE.torrent: {e}[/yellow]")
-        await marcar_paso_hecho(meta, "torrent")
+        # Si el torrent viejo sigue ahí, no se marca: sin marca, el próximo --resume lo rehace en vez de reutilizarlo.
+        if quitado:
+            await marcar_paso_hecho(meta, "torrent")
     else:
         reutilizable = (
             not rehash

@@ -621,3 +621,25 @@ def test_nohash_conserva_un_torrent_marcado(torrents):
     _run(torrentman.handle_torrent_creation({}, _meta(contenido, base, nohash=True, resume=True, pasos_hechos=["torrent"])))
 
     assert torrent.exists()
+
+
+def test_save_meta_no_propaga_un_fallo_al_crear_el_directorio(tmp_path):
+    (tmp_path / "tmp").write_text("esto es un fichero, no un directorio")   # tmp/<uuid> no se puede crear
+
+    assert _run(meta_mod.save_meta({"a": 1}, tmp_path, "Peli")) is False
+
+
+def test_nohash_no_marca_el_torrent_si_no_puede_quitar_el_viejo(torrents, capsys, monkeypatch):
+    contenido, base, torrent = torrents
+    _torrent_valido(torrent, contenido)                  # sin marca: no se puede reutilizar
+
+    def denegado(self, *a, **k):
+        raise PermissionError("no")
+
+    monkeypatch.setattr(Path, "unlink", denegado)
+
+    meta = _run(torrentman.handle_torrent_creation({}, _meta(contenido, base, nohash=True, resume=True)))
+
+    assert torrent.exists()                              # sigue ahí…
+    assert "torrent" not in meta.get("pasos_hechos", [])  # …pero sin marca: el próximo --resume lo rehace
+    assert _pasos(capsys) == []

@@ -15,10 +15,10 @@ from src.utils.console import console, log
 
 async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> bool:
     """Save meta.json. Devuelve False si no se pudo escribir (el fallo se registra y no se propaga)."""
-    meta_dir = base_dir / "tmp" / uuid
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / "meta.json"
     try:
+        meta_dir = base_dir / "tmp" / uuid
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = meta_dir / "meta.json"
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=4)
         log.debug(f"Saved meta.json to {meta_path}")
