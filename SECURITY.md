@@ -28,7 +28,7 @@ Por ejemplo:
 - Leer o escribir ficheros fuera de la carpeta que se está subiendo y de `tmp/`.
 - Subir algo distinto de lo que se pidió (por ejemplo, un `.torrent` o unas capturas de otro fichero).
 
-Los fallos de otros programas (qBittorrent, el propio tracker, ffmpeg…) repórtalos a sus responsables.
+Los fallos exclusivos de otros programas (qBittorrent, el propio tracker, ffmpeg…) repórtalos a sus responsables; los de la integración con ellos, aquí.
 
 ## Claves y datos personales
 
