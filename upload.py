@@ -22,7 +22,7 @@ from src.utils.checks import pre_upload_checks
 from src.utils.config import check_python_version, load_yaml_config
 from src.utils.console import console, log, redactor, set_log_level
 from src.utils.loads import load_trackers
-from src.utils.meta import edit_meta, load_existing_meta, save_meta
+from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marcar_paso_hecho, save_meta
 from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
@@ -169,7 +169,13 @@ class Uploadrr:
                 item_name = Path(path).name
                 progress.update(f"Processing {item_name} ({idx}/{total})")
 
+                # Sin --resume cada ítem parte de cero: lo que dejó una ejecución anterior en tmp/<uuid> (BASE.torrent,
+                # capturas, meta.json) puede no corresponder ya a los ficheros.
+                if not item_meta.get("resume"):
+                    limpiar_tmp_item(base_dir, path)
                 item_meta = await load_existing_meta(base_dir, path, item_meta)
+                if not item_meta.get("resume"):
+                    item_meta["pasos_hechos"] = []  # por si el borrado falló y se cargó un meta.json viejo
                 await apply_delay(item_meta, self.config)
 
                 prep = Prep(config=self.config, base_dir=base_dir)
@@ -199,6 +205,10 @@ class Uploadrr:
                     nonlocal item_meta
                     item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
                     await save_meta(item_meta, base_dir, item_meta["uuid"])
+                    # handle_screenshots se traga los errores genéricos y devuelve el meta sin imágenes: solo es
+                    # un paso hecho si no queda ninguna captura principal sin URL.
+                    if not screenshot_manager.faltan_capturas(item_meta):
+                        await marcar_paso_hecho(item_meta, "screenshots", base_dir)
 
                 needs_screenshots = int(item_meta.get("screens", 0)) or item_meta.get("user_images")
 
@@ -237,6 +247,8 @@ class Uploadrr:
 
                 if needs_screenshots and not screens_handled:
                     await handle_screens()
+                elif not needs_screenshots:
+                    await marcar_paso_hecho(item_meta, "screenshots", base_dir)  # nada pendiente
 
                 item_meta = await handle_torrent_creation(self.config, item_meta)
 

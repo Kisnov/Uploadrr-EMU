@@ -395,6 +395,12 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
         ("-ny", "--no-year", "no_year", "Remove year from title"),
         ("-pr", "--personal-release", "personalrelease", "Mark as personal release"),
         ("-rh", "--rehash", "rehash", "Force rehash"),
+        (
+            "-rs",
+            "--resume",
+            "resume",
+            "Reuse the finished steps kept in tmp/<name> (screenshots, torrent); without it that folder is wiped first",
+        ),
         ("-siu", "--skip-imagehost-upload", "skip_imghost_upload", "Skip image upload"),
         ("-st", "--stream", "stream", "Stream-optimized encoding"),
         ("-vs", "--vapoursynth", "vapoursynth", "Use VapourSynth for screenshots"),

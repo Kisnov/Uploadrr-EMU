@@ -403,6 +403,12 @@ class ScreenshotManager:
             return url.startswith(("http://", "https://"))
         return False
 
+    def faltan_capturas(self, meta: Dict) -> bool:
+        """True si alguna captura principal de ``meta`` aún no tiene URL (o no hay ninguna)."""
+        image_list = meta.get("image_list")
+        main = image_list if isinstance(image_list, list) else image_list.get("main") if isinstance(image_list, dict) else None
+        return self._missing_urls(main)
+
     def _missing_urls(self, section):
         if not section:
             return True
