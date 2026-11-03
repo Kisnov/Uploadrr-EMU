@@ -192,6 +192,8 @@ class Uploadrr:
                     continue
 
                 screens_handled = False
+                # Con generate_b4_confirm las capturas se hacen antes de saber los trackers viables: sin restricción de hosts.
+                tracker_whitelists: Dict[str, List[str]] = {}
 
                 async def handle_screens():
                     nonlocal item_meta
