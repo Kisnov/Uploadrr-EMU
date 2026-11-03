@@ -100,8 +100,8 @@ Para series, `-c tv` y además `-season S01` (y `-episode E01` si es un episodio
 
 **Pasos hechos:** al terminar las capturas y el `.torrent`, Uploadrr-EMU lo anota en `tmp/<nombre>/meta.json`
 (`pasos_hechos`) e imprime `Step done: screenshots` y `Step done: torrent`. Con `--resume` los pasos ya hechos se
-reutilizan (y se vuelven a imprimir); un `BASE.torrent` sin marca o que no se puede leer se rehace. Subido al tracker
-sigue siendo `Torrent URL:`.
+reutilizan (y se vuelven a imprimir); un `BASE.torrent` sin marca o que no se puede leer se rehace. La marca de
+«subido al tracker» sigue siendo `Torrent URL:`.
 
 **Código de salida:** `0` solo si se ha subido. Un duplicado, un rechazo del tracker, un ID de TMDb sin ficha, una
 carpeta sin vídeo o cualquier error que impida la subida salen con `1`. Un fallo de qBittorrent después de subir
