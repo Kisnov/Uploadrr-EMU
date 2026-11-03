@@ -14,7 +14,7 @@ import src.utils.imports  # noqa: F401
 from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args, supplied_args
 from src.cleanrr import CleanupHandler
 from src.clients import Clients
-from src.exceptions import BDInfoExtractionError
+from src.exceptions import BDInfoExtractionError, StaleTorrentError
 from src.prep import Prep
 from src.progress import ProgressManager
 from src.screenshots.manager import ScreenshotManager
@@ -260,7 +260,14 @@ class Uploadrr:
                 elif not needs_screenshots:
                     await marcar_paso_hecho(item_meta, "screenshots", base_dir)  # nada pendiente
 
-                item_meta = await handle_torrent_creation(self.config, item_meta)
+                try:
+                    item_meta = await handle_torrent_creation(self.config, item_meta)
+                except StaleTorrentError as e:
+                    log.warning(f"[yellow]Skipping {item_name}: {e}[/yellow]")
+                    progress.update(f"Processing {item_name}: Skipped (old torrent could not be removed)")
+                    skipped += 1
+                    skipped_details.append((path, "Old torrent could not be removed"))
+                    continue
 
                 success, _ = await upload_to_trackers(
                     item_meta,

@@ -14,6 +14,7 @@ import pytest
 from torf import Torrent
 
 import upload
+from src.exceptions import StaleTorrentError
 from src.args import apply_special_logic, build_parser, normalize_args, supplied_args
 from src.screenshots.manager import ScreenshotManager
 from src.utils import meta as meta_mod
@@ -629,7 +630,7 @@ def test_save_meta_no_propaga_un_fallo_al_crear_el_directorio(tmp_path):
     assert _run(meta_mod.save_meta({"a": 1}, tmp_path, "Peli")) is False
 
 
-def test_nohash_no_marca_el_torrent_si_no_puede_quitar_el_viejo(torrents, capsys, monkeypatch):
+def test_nohash_no_sigue_si_no_puede_quitar_el_torrent_viejo(torrents, capsys, monkeypatch):
     contenido, base, torrent = torrents
     _torrent_valido(torrent, contenido)                  # sin marca: no se puede reutilizar
 
@@ -637,9 +638,30 @@ def test_nohash_no_marca_el_torrent_si_no_puede_quitar_el_viejo(torrents, capsys
         raise PermissionError("no")
 
     monkeypatch.setattr(Path, "unlink", denegado)
+    meta = _meta(contenido, base, nohash=True, resume=True)
 
-    meta = _run(torrentman.handle_torrent_creation({}, _meta(contenido, base, nohash=True, resume=True)))
+    with pytest.raises(StaleTorrentError):               # el tracker no puede recibir ese fichero viejo
+        _run(torrentman.handle_torrent_creation({}, meta))
 
-    assert torrent.exists()                              # sigue ahí…
-    assert "torrent" not in meta.get("pasos_hechos", [])  # …pero sin marca: el próximo --resume lo rehace
+    assert torrent.exists() and "torrent" not in meta.get("pasos_hechos", [])
     assert _pasos(capsys) == []
+
+
+def test_la_cola_salta_el_item_si_queda_un_torrent_viejo(cola, monkeypatch, capsys):
+    base, lanzar = cola
+    subidos = []
+
+    async def torrent_viejo(config, meta):
+        raise StaleTorrentError("no se pudo quitar")
+
+    async def subir(*_a, **_k):
+        subidos.append(1)
+        return True, None
+
+    monkeypatch.setattr(upload, "handle_torrent_creation", torrent_viejo)
+    monkeypatch.setattr(upload, "upload_to_trackers", subir)
+
+    with pytest.raises(SystemExit):                      # un elemento saltado sale con 1
+        lanzar()
+
+    assert subidos == []                                 # y no se subió nada

@@ -18,6 +18,7 @@ import bencodepy as bencode
 from torf import TorfError, Torrent
 
 from src.cleanrr import running_subprocesses
+from src.exceptions import StaleTorrentError
 from src.progress import ProgressManager
 from src.utils.console import log
 from src.utils.meta import marcar_paso_hecho
@@ -623,9 +624,10 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
             except OSError as e:
                 quitado = False
                 log.warning(f"[yellow]Could not delete the unmarked BASE.torrent: {e}[/yellow]")
-        # Si el torrent viejo sigue ahí, no se marca: sin marca, el próximo --resume lo rehace en vez de reutilizarlo.
-        if quitado:
-            await marcar_paso_hecho(meta, "torrent")
+        # Si el torrent viejo sigue ahí no se marca, y tampoco se sigue: el tracker recibiría ese fichero.
+        if not quitado:
+            raise StaleTorrentError(f"{torrent_path} is an old BASE.torrent that could not be removed")
+        await marcar_paso_hecho(meta, "torrent")
     else:
         reutilizable = (
             not rehash
