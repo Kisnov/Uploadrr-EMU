@@ -22,7 +22,7 @@ from src.utils.checks import pre_upload_checks
 from src.utils.config import check_python_version, load_yaml_config
 from src.utils.console import console, log, redactor, set_log_level
 from src.utils.loads import load_trackers
-from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marcar_paso_hecho, save_meta
+from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marcar_paso_hecho, queda_estado_viejo, save_meta
 from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
@@ -172,8 +172,7 @@ class Uploadrr:
                 # Sin --resume cada ítem parte de cero: lo que dejó una ejecución anterior en tmp/<uuid> (BASE.torrent,
                 # capturas, meta.json) puede no corresponder ya a los ficheros.
                 if not item_meta.get("resume"):
-                    item_dir = base_dir / "tmp" / item_name
-                    if not limpiar_tmp_item(base_dir, path) and (item_dir.is_symlink() or item_dir.exists()):
+                    if not limpiar_tmp_item(base_dir, path) and queda_estado_viejo(base_dir, path):
                         # Si queda algo, las capturas viejas se contarían como de esta ejecución: mejor saltarlo.
                         log.warning(f"[yellow]Skipping {item_name}: its old temporary state could not be removed[/yellow]")
                         progress.update(f"Processing {item_name}: Skipped (temporary state could not be removed)")

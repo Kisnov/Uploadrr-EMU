@@ -19,7 +19,7 @@ from src.screenshots.manager import ScreenshotManager
 from src.utils import meta as meta_mod
 from src.utils import torrentman
 from src.utils.console import console
-from src.utils.meta import limpiar_tmp_item, load_existing_meta, marcar_paso_hecho
+from src.utils.meta import limpiar_tmp_item, load_existing_meta, marcar_paso_hecho, queda_estado_viejo
 
 
 def _pasos(capsys) -> list[str]:
@@ -526,3 +526,47 @@ def test_si_no_hay_estado_viejo_el_borrado_que_no_hace_nada_no_salta_el_item(col
     lanzar()
 
     assert Aplicacion.fases == ["capturas", "torrent"]
+
+
+def test_queda_estado_viejo_si_no_se_puede_comprobar(tmp_path, monkeypatch):
+    base = tmp_path / "app"
+    assert queda_estado_viejo(base, "/media/Peli") is False            # no hay nada
+    (base / "tmp" / "Peli").mkdir(parents=True)
+    assert queda_estado_viejo(base, "/media/Peli") is True             # hay un directorio
+
+    def denegado(self):
+        raise PermissionError("no")
+
+    monkeypatch.setattr(Path, "is_symlink", denegado)
+    assert queda_estado_viejo(base, "/media/Peli") is True             # no se sabe: se trata como que queda
+
+
+def test_si_no_se_puede_ni_comprobar_el_estado_viejo_se_salta_el_item(cola, monkeypatch):
+    base, lanzar = cola
+    monkeypatch.setattr(upload, "limpiar_tmp_item", lambda *_a, **_k: False)
+    monkeypatch.setattr(upload, "queda_estado_viejo", lambda *_a, **_k: True)
+
+    with pytest.raises(SystemExit):
+        lanzar()
+
+    assert Aplicacion.fases == []
+
+
+def test_al_regenerar_el_torrent_se_quita_la_marca_antes_de_crearlo(torrents, monkeypatch):
+    contenido, base, torrent = torrents
+    torrent.parent.mkdir(parents=True)
+    torrent.write_bytes(b"roto")
+    visto = {}
+
+    async def falla(self, meta, path, piece_size_max=None):
+        visto["pasos"] = list(meta["pasos_hechos"])
+        raise RuntimeError("hash a medias")
+
+    monkeypatch.setattr(TorrentMakerFalso, "create", falla)
+    meta = _meta(contenido, base, resume=True, pasos_hechos=["screenshots", "torrent"])
+
+    with pytest.raises(RuntimeError):
+        _run(torrentman.handle_torrent_creation({}, meta))
+
+    assert visto["pasos"] == ["screenshots"]                           # la marca vieja no sobrevive a un fallo
+    assert meta["pasos_hechos"] == ["screenshots"]

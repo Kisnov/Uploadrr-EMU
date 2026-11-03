@@ -56,6 +56,16 @@ def limpiar_tmp_item(base_dir: Path, path: str) -> bool:
         return False
 
 
+def queda_estado_viejo(base_dir: Path, path: str) -> bool:
+    """True si ``tmp/<uuid>`` sigue ahí (un directorio, un enlace…) o no se puede comprobar si está: si no se sabe,
+    se trata como que queda, para no seguir con restos de otra ejecución."""
+    item_dir = base_dir / "tmp" / Path(path).name
+    try:
+        return item_dir.is_symlink() or item_dir.exists()
+    except OSError:
+        return True
+
+
 async def marcar_paso_hecho(meta: Dict, paso: str, base_dir: Optional[Path] = None) -> None:
     """Anota ``paso`` en ``meta["pasos_hechos"]``, guarda meta.json y avisa a quien lanza Uploadrr.
 

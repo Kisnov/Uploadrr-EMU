@@ -623,6 +623,10 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
             and _base_torrent_valido(torrent_path)
         )
         if not reutilizable:
+            # Si regenerarlo falla, el meta que se guarda al salir no puede decir que el torrent está hecho.
+            pasos = meta.get("pasos_hechos")
+            if isinstance(pasos, list):
+                meta["pasos_hechos"] = [paso for paso in pasos if paso != "torrent"]
             if torrent_path.exists():
                 log.warning("[yellow]BASE.torrent is not a finished one: rebuilding it[/yellow]")
                 try:
