@@ -31,7 +31,17 @@ or report their errors unless they break an eMuwarez upload.
   reword `Searching for existing torrents`, `No dupes found`, `Uploading to EMU`,
   `Torrent uploaded successfully`, `Adding and rechecking torrent`, `Added to:`,
   `INCORRECT QBIT LOGIN CREDENTIALS`, `Torrent upload succeeded, but failed to`, `Hashing with <tool>: X%`,
-  `Uploading screenshots:`, `Incomplete season pack:` without updating the app.
+  `Uploading screenshots:`, `Incomplete season pack:`, `Step done:` without updating the app.
+- `--resume` (`-rs`, per item, `meta["resume"]`): without it, before each queue item `tmp/<uuid>` (`uuid` = name of
+  the uploaded folder/file) is wiped entirely (`limpiar_tmp_item` in `src/utils/meta.py`; only a real directory
+  inside `tmp`, never followed if it is a symlink; a failure is logged and does not abort). With it, what is marked
+  as done is reused. `resume` is in `overwrite_keys` of `load_existing_meta`, so a saved `resume: true` is not inherited.
+- Done steps: `meta["pasos_hechos"]` (list in `meta.json`) holds `screenshots` and `torrent`. Each is marked and
+  saved first, then printed with plain `print(..., flush=True)` as `Step done: screenshots` / `Step done: torrent`
+  (also when the step is reused in a `--resume`; nothing is printed for a step that did not run, e.g. a skipped item).
+  `screenshots` is marked only if no main screenshot is left without a URL (or none were needed); `torrent` when
+  `BASE.torrent` exists and decodes, or with `nohash`. `BASE.torrent` is reused only if `torrent` is marked and it
+  decodes; otherwise it is deleted and rebuilt. `Torrent URL:` stays the only mark of "uploaded to the tracker".
 - The `.torrent` is hashed with mkbrr when it is on `PATH` (the app image installs a pinned one), torf otherwise.
   The mkbrr result must list exactly the files torf would pick, or it is rebuilt with torf. When mkbrr warns of
   an incomplete season pack, `print` writes `Incomplete season pack: season N, missing episodes A, B`.

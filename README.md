@@ -93,9 +93,15 @@ Para series, `-c tv` y además `-season S01` (y `-episode E01` si es un episodio
 | `-tmdb` | ID de TMDb |
 | `-ua` | Sin preguntas. Ante un posible duplicado o un grupo vetado, no sube |
 | `-c` | Categoría: `movie` o `tv`. También acepta `fanres`, `sports` y `music`, heredadas de Uploadrr |
+| `-rs`, `--resume` | Reanuda: conserva y reutiliza lo que `tmp/<nombre>` tiene marcado como hecho (capturas, `.torrent`). Sin él, esa carpeta se borra entera antes de empezar cada ítem |
 | `-res` | Resolución: `2160p`, `1080p`, `1080i`, `720p`, `576p`, `576i`, `480p`, `480i`, `4320p`, `8640p` u `other` |
 
 `python upload.py --help` lista todas las opciones.
+
+**Pasos hechos:** al terminar las capturas y el `.torrent`, Uploadrr-EMU lo anota en `tmp/<nombre>/meta.json`
+(`pasos_hechos`) e imprime `Step done: screenshots` y `Step done: torrent`. Con `--resume` los pasos ya hechos se
+reutilizan (y se vuelven a imprimir); un `BASE.torrent` sin marca o que no se puede leer se rehace. Subido al tracker
+sigue siendo `Torrent URL:`.
 
 **Código de salida:** `0` solo si se ha subido. Un duplicado, un rechazo del tracker, un ID de TMDb sin ficha, una
 carpeta sin vídeo o cualquier error que impida la subida salen con `1`. Un fallo de qBittorrent después de subir
