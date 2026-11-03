@@ -14,7 +14,7 @@ import src.utils.imports  # noqa: F401
 from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args, supplied_args
 from src.cleanrr import CleanupHandler
 from src.clients import Clients
-from src.exceptions import BDInfoExtractionError
+from src.exceptions import BDInfoExtractionError, StaleTorrentError
 from src.prep import Prep
 from src.progress import ProgressManager
 from src.screenshots.manager import ScreenshotManager
@@ -22,7 +22,7 @@ from src.utils.checks import pre_upload_checks
 from src.utils.config import check_python_version, load_yaml_config
 from src.utils.console import console, log, redactor, set_log_level
 from src.utils.loads import load_trackers
-from src.utils.meta import edit_meta, load_existing_meta, save_meta
+from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marcar_paso_hecho, queda_estado_viejo, save_meta
 from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
@@ -169,7 +169,20 @@ class Uploadrr:
                 item_name = Path(path).name
                 progress.update(f"Processing {item_name} ({idx}/{total})")
 
+                # Sin --resume cada ítem parte de cero: lo que dejó una ejecución anterior en tmp/<uuid> (BASE.torrent,
+                # capturas, meta.json) puede no corresponder ya a los ficheros.
+                if not item_meta.get("resume"):
+                    if not limpiar_tmp_item(base_dir, path) and queda_estado_viejo(base_dir, path):
+                        # Si queda algo, las capturas viejas se contarían como de esta ejecución: mejor saltarlo.
+                        log.warning(f"[yellow]Skipping {item_name}: its old temporary state could not be removed[/yellow]")
+                        progress.update(f"Processing {item_name}: Skipped (temporary state could not be removed)")
+                        skipped += 1
+                        skipped_details.append((path, "Temporary state could not be removed"))
+                        del item_meta  # el finally de abajo no guarda el meta a través de un enlace rechazado
+                        continue
                 item_meta = await load_existing_meta(base_dir, path, item_meta)
+                if not item_meta.get("resume"):
+                    item_meta["pasos_hechos"] = []  # por si el borrado falló y se cargó un meta.json viejo
                 await apply_delay(item_meta, self.config)
 
                 prep = Prep(config=self.config, base_dir=base_dir)
@@ -192,11 +205,20 @@ class Uploadrr:
                     continue
 
                 screens_handled = False
+                # Con generate_b4_confirm las capturas se hacen antes de saber los trackers viables: sin restricción de hosts.
+                tracker_whitelists: Dict[str, List[str]] = {}
 
                 async def handle_screens():
                     nonlocal item_meta
+                    # Si se vuelven a generar y fallan, la marca de una ejecución anterior no puede seguir diciendo «hecho».
+                    if isinstance(item_meta.get("pasos_hechos"), list):
+                        item_meta["pasos_hechos"] = [p for p in item_meta["pasos_hechos"] if p != "screenshots"]
                     item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
                     await save_meta(item_meta, base_dir, item_meta["uuid"])
+                    # handle_screenshots se traga los errores genéricos y devuelve el meta sin imágenes: solo es
+                    # un paso hecho si no queda ninguna captura principal sin URL.
+                    if not screenshot_manager.faltan_capturas(item_meta):
+                        await marcar_paso_hecho(item_meta, "screenshots", base_dir)
 
                 needs_screenshots = int(item_meta.get("screens", 0)) or item_meta.get("user_images")
 
@@ -235,8 +257,17 @@ class Uploadrr:
 
                 if needs_screenshots and not screens_handled:
                     await handle_screens()
+                elif not needs_screenshots:
+                    await marcar_paso_hecho(item_meta, "screenshots", base_dir)  # nada pendiente
 
-                item_meta = await handle_torrent_creation(self.config, item_meta)
+                try:
+                    item_meta = await handle_torrent_creation(self.config, item_meta)
+                except StaleTorrentError as e:
+                    log.warning(f"[yellow]Skipping {item_name}: {e}[/yellow]")
+                    progress.update(f"Processing {item_name}: Skipped (old torrent could not be removed)")
+                    skipped += 1
+                    skipped_details.append((path, "Old torrent could not be removed"))
+                    continue
 
                 success, _ = await upload_to_trackers(
                     item_meta,

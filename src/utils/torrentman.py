@@ -18,8 +18,10 @@ import bencodepy as bencode
 from torf import TorfError, Torrent
 
 from src.cleanrr import running_subprocesses
+from src.exceptions import StaleTorrentError
 from src.progress import ProgressManager
 from src.utils.console import log
+from src.utils.meta import marcar_paso_hecho
 
 
 class TorrentMaker:
@@ -587,8 +589,22 @@ async def edit_torrent(
         raise
 
 
+def _base_torrent_valido(torrent_path: Path) -> bool:
+    """True si BASE.torrent existe y se puede decodificar como un .torrent (con ``info``)."""
+    try:
+        with open(torrent_path, "rb") as f:
+            data = bencode.decode(f.read())
+    except (OSError, bencode.BencodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and isinstance(data.get(b"info"), dict)
+
+
 async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
-    """Handle torrent file creation or reuse."""
+    """Handle torrent file creation or reuse.
+
+    Un BASE.torrent solo se reutiliza si el paso ``torrent`` figura en ``pasos_hechos`` y se decodifica: uno
+    que existe sin marca puede ser un hash a medias (proceso matado) o de ficheros que ya no son los mismos.
+    """
     maketorrent = TorrentMaker(config)
     torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "BASE.torrent"
     rehash = meta.get("rehash", False)
@@ -599,8 +615,37 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
 
     if nohash:
         meta["client"] = "none"
+        pasos = meta.get("pasos_hechos")
+        quitado = True
+        if torrent_path.exists() and not (isinstance(pasos, list) and "torrent" in pasos):
+            # Un BASE.torrent sin marca no se da por bueno: si no, un --resume posterior lo reutilizaría.
+            try:
+                torrent_path.unlink()
+            except OSError as e:
+                quitado = False
+                log.warning(f"[yellow]Could not delete the unmarked BASE.torrent: {e}[/yellow]")
+        # Si el torrent viejo sigue ahí no se marca, y tampoco se sigue: el tracker recibiría ese fichero.
+        if not quitado:
+            raise StaleTorrentError(f"{torrent_path} is an old BASE.torrent that could not be removed")
+        await marcar_paso_hecho(meta, "torrent")
     else:
-        if rehash or not torrent_path.exists():
+        reutilizable = (
+            not rehash
+            and isinstance(meta.get("pasos_hechos"), list)
+            and "torrent" in meta["pasos_hechos"]
+            and _base_torrent_valido(torrent_path)
+        )
+        if not reutilizable:
+            # Si regenerarlo falla, el meta que se guarda al salir no puede decir que el torrent está hecho.
+            pasos = meta.get("pasos_hechos")
+            if isinstance(pasos, list):
+                meta["pasos_hechos"] = [paso for paso in pasos if paso != "torrent"]
+            if torrent_path.exists():
+                log.warning("[yellow]BASE.torrent is not a finished one: rebuilding it[/yellow]")
+                try:
+                    torrent_path.unlink()
+                except OSError as e:
+                    log.warning(f"[yellow]Could not delete the old BASE.torrent: {e}[/yellow]")
             if not rehash:
                 from src.clients import Clients
 
@@ -608,8 +653,13 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
                 reuse_torrent = await client.find_existing_torrent(meta)
                 if reuse_torrent:
                     await maketorrent.from_existing(reuse_torrent, Path(meta["base_dir"]), meta["uuid"])
-                    return meta
+                    if _base_torrent_valido(torrent_path):
+                        await marcar_paso_hecho(meta, "torrent")
+                        return meta
+                    # La importación no dejó un torrent válido: se crea uno nuevo como siempre.
             await maketorrent.create(meta, path, piece_size_max)
+        if _base_torrent_valido(torrent_path):
+            await marcar_paso_hecho(meta, "torrent")
 
     if randomized >= 1:
         await maketorrent.create_random_torrents(Path(meta["base_dir"]), meta["uuid"], randomized, path)

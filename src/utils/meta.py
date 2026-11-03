@@ -1,5 +1,7 @@
 import itertools
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,17 +13,77 @@ from src.name import NameGenerator
 from src.utils.console import console, log
 
 
-async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> None:
-    """Save meta.json"""
-    meta_dir = base_dir / "tmp" / uuid
-    meta_dir.mkdir(parents=True, exist_ok=True)
-    meta_path = meta_dir / "meta.json"
+async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> bool:
+    """Save meta.json. Devuelve False si no se pudo escribir (el fallo se registra y no se propaga)."""
     try:
+        meta_dir = base_dir / "tmp" / uuid
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = meta_dir / "meta.json"
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=4)
         log.debug(f"Saved meta.json to {meta_path}")
+        return True
     except Exception as e:
         log.error(f"Failed to save meta.json: {e}")
+        return False
+
+
+def limpiar_tmp_item(base_dir: Path, path: str) -> bool:
+    """Borra por completo ``<base_dir>/tmp/<uuid>`` (uuid = nombre de ``path``), el estado de una subida anterior.
+
+    Sin ``--resume`` cada ítem empieza de cero: un BASE.torrent o unas capturas de una ejecución previa pueden
+    no corresponder ya a los ficheros (se volvieron a preparar con el mismo nombre). Solo se borra un directorio
+    real dentro de ``tmp``: ``tmp`` en sí puede ser un symlink (en la imagen apunta a /config), pero ``tmp/<uuid>``
+    no se sigue si lo fuera. Un fallo se avisa y no aborta. Devuelve True si se borró.
+    """
+    uuid = Path(path).name
+    if uuid in ("", ".", ".."):
+        return False
+    tmp_dir = base_dir / "tmp"
+    item_dir = tmp_dir / uuid
+    try:
+        if not os.path.lexists(item_dir):
+            return False
+        if item_dir.is_symlink() or not item_dir.is_dir():
+            log.warning(f"[yellow]Not wiping {item_dir}: it is not a real directory[/yellow]")
+            return False
+        if item_dir.resolve().parent != tmp_dir.resolve():
+            log.warning(f"[yellow]Not wiping {item_dir}: it resolves outside tmp[/yellow]")
+            return False
+        shutil.rmtree(item_dir)
+        log.debug(f"Wiped {item_dir}")
+        return True
+    except OSError as e:
+        log.warning(f"[yellow]Could not wipe {item_dir}: {e}[/yellow]")
+        return False
+
+
+def queda_estado_viejo(base_dir: Path, path: str) -> bool:
+    """True si ``tmp/<uuid>`` sigue ahí (un directorio, un enlace…) o no se puede comprobar si está: si no se sabe,
+    se trata como que queda, para no seguir con restos de otra ejecución."""
+    item_dir = base_dir / "tmp" / Path(path).name
+    try:
+        return item_dir.is_symlink() or item_dir.exists()
+    except OSError:
+        return True
+
+
+async def marcar_paso_hecho(meta: Dict, paso: str, base_dir: Optional[Path] = None) -> None:
+    """Anota ``paso`` en ``meta["pasos_hechos"]``, guarda meta.json y avisa a quien lanza Uploadrr.
+
+    La línea ``Step done: <paso>`` va con ``print`` y no con Rich, que parte las líneas a 80 columnas en una
+    tubería; emuwarez-uploadrr la lee tal cual. Se imprime también cuando el paso se reutiliza en un
+    ``--resume``, para que la lista de cada ejecución esté completa.
+    """
+    pasos = meta.get("pasos_hechos")
+    if not isinstance(pasos, list):
+        pasos = []
+    if paso not in pasos:
+        pasos.append(paso)
+    meta["pasos_hechos"] = pasos
+    guardado = await save_meta(meta, Path(base_dir if base_dir is not None else meta["base_dir"]), meta["uuid"])
+    if guardado:  # sin la marca en meta.json, un --resume no la encontraría: no se anuncia
+        print(f"Step done: {paso}", flush=True)
 
 
 async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
@@ -34,7 +96,7 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
         "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_name",
         "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
         "nohash", "path", "personalrelease", "ptp", "qbit_cat", "qbit_tag", "randomized", "rehash",
-        "region", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation",
+        "region", "resume", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "tag", "torrent_creation",
         "trackers", "tmdb_manual", "unattended", "webdv",
         # XXX keys
          "jav", "pack", "pdb_manual", "user_cover", "user_banner", "user_trailer", "xmovies", "xscene", "xxx"

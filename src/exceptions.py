@@ -32,3 +32,7 @@ class BDInfoExtractionError(Exception):
             super().__init__(*args, **kwargs)
         else:
             super().__init__(default_message, **kwargs)
+
+
+class StaleTorrentError(Exception):
+    """Raised when an old, unmarked BASE.torrent cannot be removed: uploading it could publish a torrent of other files."""
