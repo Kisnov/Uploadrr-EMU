@@ -269,6 +269,32 @@ def test_torrent_marcado_pero_corrupto_se_rehace(torrents, capsys, contenido_rot
     assert _pasos(capsys) == ["Step done: torrent"]
 
 
+def test_si_la_importacion_del_cliente_no_deja_un_torrent_valido_se_crea_uno(torrents, capsys, monkeypatch):
+    contenido, base, torrent = torrents
+
+    class ClientesConTorrent:
+        def __init__(self, config):
+            pass
+
+        async def find_existing_torrent(self, meta):
+            return "hash"
+
+    async def importacion_rota(self, reuse, base_dir, uuid):
+        torrent.parent.mkdir(parents=True, exist_ok=True)
+        torrent.write_bytes(b"roto")
+
+    import src.clients
+
+    monkeypatch.setattr(src.clients, "Clients", ClientesConTorrent)
+    monkeypatch.setattr(TorrentMakerFalso, "from_existing", importacion_rota, raising=False)
+
+    meta = _run(torrentman.handle_torrent_creation({}, _meta(contenido, base)))
+
+    assert TorrentMakerFalso.creados == 1
+    assert torrentman._base_torrent_valido(torrent)
+    assert meta["pasos_hechos"] == ["torrent"] and _pasos(capsys) == ["Step done: torrent"]
+
+
 def test_rehash_rehace_aunque_este_marcado(torrents):
     contenido, base, torrent = torrents
     _torrent_valido(torrent, contenido)
@@ -404,16 +430,18 @@ def test_sin_resume_se_borra_el_estado_y_se_hace_todo(cola, capsys):
     assert guardado["pasos_hechos"] == ["screenshots", "torrent"]
 
 
-def test_sin_resume_un_borrado_fallido_no_hereda_las_marcas_viejas(cola, monkeypatch):
+def test_sin_resume_un_borrado_fallido_salta_el_item_y_no_hereda_las_marcas_viejas(cola, monkeypatch, capsys):
     base, lanzar = cola
-    _estado_viejo(base)
+    estado = _estado_viejo(base)
+    antes = (estado / "meta.json").read_text()
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: (_ for _ in ()).throw(PermissionError("no")))
-    Aplicacion.capturas = []  # el gestor «falla»: sin imágenes
 
-    lanzar()
+    with pytest.raises(SystemExit) as salida:
+        lanzar()
 
-    guardado = json.loads((base / "tmp" / "Peli" / "meta.json").read_text())
-    assert "screenshots" not in guardado["pasos_hechos"]
+    assert salida.value.code == 1                  # un elemento saltado sale con 1, como cualquier otro
+    assert Aplicacion.fases == [] and _pasos(capsys) == []
+    assert (estado / "meta.json").read_text() == antes
 
 
 def test_con_resume_se_conserva_el_estado_y_se_imprimen_las_marcas_reutilizadas(cola, capsys):
@@ -476,3 +504,25 @@ def test_un_item_saltado_no_imprime_pasos(cola, capsys, monkeypatch):
     assert salida.value.code == 1
     assert _pasos(capsys) == []
 
+
+
+def test_si_no_se_puede_borrar_el_estado_viejo_se_salta_el_item(cola, monkeypatch, capsys):
+    base, lanzar = cola
+    estado = _estado_viejo(base)
+    monkeypatch.setattr(upload, "limpiar_tmp_item", lambda *_a, **_k: False)  # el borrado falla y deja el directorio
+
+    with pytest.raises(SystemExit):
+        lanzar()
+
+    assert Aplicacion.fases == []                  # ni capturas ni torrent: no se sube nada con restos viejos
+    assert _pasos(capsys) == []
+    assert (estado / "captura.png").exists()       # y el estado viejo no se toca
+
+
+def test_si_no_hay_estado_viejo_el_borrado_que_no_hace_nada_no_salta_el_item(cola, monkeypatch):
+    base, lanzar = cola
+    monkeypatch.setattr(upload, "limpiar_tmp_item", lambda *_a, **_k: False)  # nada que borrar: devuelve False
+
+    lanzar()
+
+    assert Aplicacion.fases == ["capturas", "torrent"]

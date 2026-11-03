@@ -172,7 +172,15 @@ class Uploadrr:
                 # Sin --resume cada ítem parte de cero: lo que dejó una ejecución anterior en tmp/<uuid> (BASE.torrent,
                 # capturas, meta.json) puede no corresponder ya a los ficheros.
                 if not item_meta.get("resume"):
-                    limpiar_tmp_item(base_dir, path)
+                    item_dir = base_dir / "tmp" / item_name
+                    if not limpiar_tmp_item(base_dir, path) and (item_dir.is_symlink() or item_dir.exists()):
+                        # Si queda algo, las capturas viejas se contarían como de esta ejecución: mejor saltarlo.
+                        log.warning(f"[yellow]Skipping {item_name}: its old temporary state could not be removed[/yellow]")
+                        progress.update(f"Processing {item_name}: Skipped (temporary state could not be removed)")
+                        skipped += 1
+                        skipped_details.append((path, "Temporary state could not be removed"))
+                        del item_meta  # el finally de abajo no guarda el meta a través de un enlace rechazado
+                        continue
                 item_meta = await load_existing_meta(base_dir, path, item_meta)
                 if not item_meta.get("resume"):
                     item_meta["pasos_hechos"] = []  # por si el borrado falló y se cargó un meta.json viejo

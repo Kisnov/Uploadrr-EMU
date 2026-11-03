@@ -638,7 +638,8 @@ async def handle_torrent_creation(config: Dict, meta: Dict) -> Dict:
                     await maketorrent.from_existing(reuse_torrent, Path(meta["base_dir"]), meta["uuid"])
                     if _base_torrent_valido(torrent_path):
                         await marcar_paso_hecho(meta, "torrent")
-                    return meta
+                        return meta
+                    # La importación no dejó un torrent válido: se crea uno nuevo como siempre.
             await maketorrent.create(meta, path, piece_size_max)
         if _base_torrent_valido(torrent_path):
             await marcar_paso_hecho(meta, "torrent")
