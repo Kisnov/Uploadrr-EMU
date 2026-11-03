@@ -13,8 +13,8 @@ from src.name import NameGenerator
 from src.utils.console import console, log
 
 
-async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> None:
-    """Save meta.json"""
+async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> bool:
+    """Save meta.json. Devuelve False si no se pudo escribir (el fallo se registra y no se propaga)."""
     meta_dir = base_dir / "tmp" / uuid
     meta_dir.mkdir(parents=True, exist_ok=True)
     meta_path = meta_dir / "meta.json"
@@ -22,8 +22,10 @@ async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> None:
         with meta_path.open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=4)
         log.debug(f"Saved meta.json to {meta_path}")
+        return True
     except Exception as e:
         log.error(f"Failed to save meta.json: {e}")
+        return False
 
 
 def limpiar_tmp_item(base_dir: Path, path: str) -> bool:
@@ -79,8 +81,9 @@ async def marcar_paso_hecho(meta: Dict, paso: str, base_dir: Optional[Path] = No
     if paso not in pasos:
         pasos.append(paso)
     meta["pasos_hechos"] = pasos
-    await save_meta(meta, Path(base_dir if base_dir is not None else meta["base_dir"]), meta["uuid"])
-    print(f"Step done: {paso}", flush=True)
+    guardado = await save_meta(meta, Path(base_dir if base_dir is not None else meta["base_dir"]), meta["uuid"])
+    if guardado:  # sin la marca en meta.json, un --resume no la encontraría: no se anuncia
+        print(f"Step done: {paso}", flush=True)
 
 
 async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:

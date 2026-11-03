@@ -210,6 +210,9 @@ class Uploadrr:
 
                 async def handle_screens():
                     nonlocal item_meta
+                    # Si se vuelven a generar y fallan, la marca de una ejecución anterior no puede seguir diciendo «hecho».
+                    if isinstance(item_meta.get("pasos_hechos"), list):
+                        item_meta["pasos_hechos"] = [p for p in item_meta["pasos_hechos"] if p != "screenshots"]
                     item_meta = await screenshot_manager.handle_screenshots(item_meta, tracker_whitelists)
                     await save_meta(item_meta, base_dir, item_meta["uuid"])
                     # handle_screenshots se traga los errores genéricos y devuelve el meta sin imágenes: solo es

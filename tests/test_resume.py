@@ -570,3 +570,54 @@ def test_al_regenerar_el_torrent_se_quita_la_marca_antes_de_crearlo(torrents, mo
 
     assert visto["pasos"] == ["screenshots"]                           # la marca vieja no sobrevive a un fallo
     assert meta["pasos_hechos"] == ["screenshots"]
+
+
+def test_si_meta_json_no_se_puede_guardar_no_se_anuncia_el_paso(tmp_path, capsys, monkeypatch):
+    base = tmp_path / "app"
+    meta = {"base_dir": str(base), "uuid": "Peli"}
+
+    async def no_guarda(*_a, **_k):
+        return False
+
+    monkeypatch.setattr(meta_mod, "save_meta", no_guarda)
+    _run(marcar_paso_hecho(meta, "torrent"))
+
+    assert _pasos(capsys) == []                       # sin la marca guardada, un --resume no la encontraría
+    assert meta["pasos_hechos"] == ["torrent"]
+
+
+def test_save_meta_dice_si_pudo_guardar(tmp_path):
+    assert _run(meta_mod.save_meta({"a": 1}, tmp_path, "Peli")) is True
+    assert _run(meta_mod.save_meta({"a": object()}, tmp_path, "Peli")) is False   # no serializable
+
+
+def test_al_regenerar_las_capturas_se_quita_su_marca_antes(cola):
+    base, lanzar = cola
+    estado = base / "tmp" / "Peli"
+    estado.mkdir(parents=True)
+    (estado / "meta.json").write_text(json.dumps({"pasos_hechos": ["screenshots", "torrent"]}))
+    Aplicacion.capturas = []                             # el gestor «falla»: sin imágenes
+
+    lanzar(resume=True)
+
+    guardado = json.loads((estado / "meta.json").read_text())
+    assert "screenshots" not in guardado["pasos_hechos"]  # un fallo no deja la marca vieja diciendo «hecho»
+
+
+def test_nohash_no_da_por_bueno_un_torrent_sin_marca(torrents, capsys):
+    contenido, base, torrent = torrents
+    _torrent_valido(torrent, contenido)                  # existe, válido, pero sin marca
+
+    meta = _run(torrentman.handle_torrent_creation({}, _meta(contenido, base, nohash=True, resume=True)))
+
+    assert not torrent.exists()                          # un --resume posterior no lo reutilizará
+    assert meta["pasos_hechos"] == ["torrent"] and _pasos(capsys) == ["Step done: torrent"]
+
+
+def test_nohash_conserva_un_torrent_marcado(torrents):
+    contenido, base, torrent = torrents
+    _torrent_valido(torrent, contenido)
+
+    _run(torrentman.handle_torrent_creation({}, _meta(contenido, base, nohash=True, resume=True, pasos_hechos=["torrent"])))
+
+    assert torrent.exists()
