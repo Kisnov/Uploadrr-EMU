@@ -96,3 +96,11 @@ def test_descripcion_unit3d_no_toca_las_imagenes_de_un_subdominio_del_tracker():
     out, imgs = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
     assert out.startswith("Visto en tracker")
     assert imgs[0]["img_url"] == "https://img.tracker.x/A.png"
+
+
+def test_descripcion_unit3d_no_confunde_un_host_que_empieza_igual_que_el_tracker():
+    desc = "[url=https://tracker.x.evil/p]trampa[/url] y https://tracker.x.evil/q; en tracker.x."
+    out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert "[url=https://tracker.x.evil/p]trampa[/url]" in out
+    assert "https://tracker.x.evil/q" in out
+    assert out.endswith("en tracker.")

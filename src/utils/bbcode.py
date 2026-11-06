@@ -156,13 +156,15 @@ class BBCODE:
 
         # Remove links to site
         site_netloc = urllib.parse.urlparse(site).netloc
+        # Host completo: ni pegado a otro nombre por la izquierda (img.tracker.x) ni por la derecha (tracker.x.evil).
         netloc_re = re.escape(site_netloc)
+        netloc_end = r"(?![\w-]|\.\w)"
         # Quita la etiqueta [url=...] del propio tracker hasta su [/url] y conserva lo de dentro (texto o [img]).
-        site_link_regex = r"\[url=https?:\/\/" + netloc_re + r"[^\]]*\]([\s\S]*?)\[\/url\]"
+        site_link_regex = r"\[url=https?:\/\/" + netloc_re + netloc_end + r"[^\]]*\]([\s\S]*?)\[\/url\]"
         desc = re.sub(site_link_regex, r"\1", desc, flags=re.IGNORECASE)
 
         # Solo el nombre del propio tracker; un subdominio (img.tracker.x) es otro host y se deja tal cual.
-        desc = re.sub(r"(?<![\w.-])" + netloc_re, site_netloc.split(".")[0], desc)
+        desc = re.sub(r"(?<![\w.-])" + netloc_re + netloc_end, site_netloc.split(".")[0], desc)
 
         # Temporarily hide spoiler tags
         spoilers = re.findall(r"\[spoiler[\s\S]*?\[\/spoiler\]", desc)
