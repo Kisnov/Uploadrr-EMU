@@ -287,13 +287,14 @@ class DescGenerator:
         # Open output file
         output_description_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{tracker}]DESCRIPTION.txt"
         async with aiofiles.open(output_description_path, "w", encoding="utf-8") as descfile:
+            # Lo pide emuwarez-uploadrr (-avbc) cuando el vídeo es de menos de 720p. Va siempre lo primero, también con
+            # «# USE: as-is»: eMuwarez solo acepta esa calidad con este aviso. La música no: create_music_description
+            # reabre este mismo fichero y lo que quedase aquí en el búfer pisaría el principio de lo suyo.
+            if tracker == "EMU" and meta.get("aviso_baja_calidad") and not meta.get("is_music"):
+                await descfile.write(AVISO_BAJA_CALIDAD)
+
             if desc_header:
                 await descfile.write(desc_header)
-
-            # Lo pide emuwarez-uploadrr (-avbc) cuando el vídeo es de menos de 720p. Va siempre arriba, también con
-            # «# USE: as-is»: eMuwarez solo acepta esa calidad con este aviso.
-            if tracker == "EMU" and meta.get("aviso_baja_calidad"):
-                await descfile.write(AVISO_BAJA_CALIDAD)
 
             bbcode = BBCODE()
 
