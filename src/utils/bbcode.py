@@ -156,17 +156,15 @@ class BBCODE:
 
         # Remove links to site
         site_netloc = urllib.parse.urlparse(site).netloc
-        site_regex = r"(\[url[\=\]]https?:\/\/{site_netloc}/[^\]]+])([^\[]+)(\[\/url\])?"
-        site_url_tags = re.findall(site_regex, desc)
-        if site_url_tags != []:
-            for site_url_tag in site_url_tags:
-                site_url_tag = "".join(site_url_tag)
-                url_tag_regex = r"(\[url[\=\]]https?:\/\/{site_netloc}[^\]]+])"
-                url_tag_removed = re.sub(url_tag_regex, "", site_url_tag)
-                url_tag_removed = url_tag_removed.replace("[/url]", "")
-                desc = desc.replace(site_url_tag, url_tag_removed)
+        # Host completo: ni pegado a otro nombre por la izquierda (img.tracker.x) ni por la derecha (tracker.x.evil).
+        netloc_re = re.escape(site_netloc)
+        netloc_end = r"(?![\w-]|\.\w)"
+        # Quita la etiqueta [url=...] del propio tracker hasta su [/url] y conserva lo de dentro (texto o [img]).
+        site_link_regex = r"\[url=https?:\/\/" + netloc_re + netloc_end + r"[^\]]*\]([\s\S]*?)\[\/url\]"
+        desc = re.sub(site_link_regex, r"\1", desc, flags=re.IGNORECASE)
 
-        desc = desc.replace(site_netloc, site_netloc.split(".")[0])
+        # Solo el nombre del propio tracker; un subdominio (img.tracker.x) es otro host y se deja tal cual.
+        desc = re.sub(r"(?<![\w.-])" + netloc_re + netloc_end, site_netloc.split(".")[0], desc)
 
         # Temporarily hide spoiler tags
         spoilers = re.findall(r"\[spoiler[\s\S]*?\[\/spoiler\]", desc)
@@ -185,11 +183,11 @@ class BBCODE:
                 image = re.findall(r"\[img[\s\S]*?\[\/img\]", tag)
                 if len(image) == 1:
                     image_dict = {}
-                    img_url = image[0].lower().replace("[img]", "").replace("[/img]", "")
+                    img_url = re.sub(r"\[/?img\]", "", image[0], flags=re.IGNORECASE)
                     image_dict["img_url"] = image_dict["raw_url"] = re.sub(r"\[img[\s\S]*\]", "", img_url)
                     url_tag = tag.replace(image[0], "")
                     image_dict["web_url"] = (
-                        re.match(r"\[url=[\s\S]*?\]", url_tag, flags=re.IGNORECASE)[0].lower().replace("[url=", "")[:-1]
+                        re.match(r"\[url=[\s\S]*?\]", url_tag, flags=re.IGNORECASE)[0][len("[url=") : -1]
                     )
                     imagelist.append(image_dict)
                     desc = desc.replace(tag, "")

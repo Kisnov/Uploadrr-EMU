@@ -72,16 +72,35 @@ def test_descripcion_unit3d_saca_las_imagenes_y_quita_el_center_vacio():
     assert imagenes == [{"img_url": "https://h.x/i/1.png", "raw_url": "https://h.x/i/1.png", "web_url": "https://h.x/v/1"}]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: los enlaces de imagen se pasan a minúsculas y los hosts distinguen mayúsculas")
 def test_descripcion_unit3d_respeta_las_mayusculas_de_las_imagenes():
     desc = "[url=https://h.x/v/AbC][img]https://h.x/i/AbC.png[/img][/url]"
     _, imagenes = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
     assert imagenes[0]["raw_url"] == "https://h.x/i/AbC.png"
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="BUG: la regex usa '{site_netloc}' literal (no es f-string) y nunca quita los enlaces del propio tracker")
 def test_descripcion_unit3d_quita_los_enlaces_al_propio_tracker():
     desc = "Ver [url=https://tracker.x/torrents/9]otra subida[/url]"
     out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
     assert out == "Ver otra subida"
+
+
+def test_descripcion_unit3d_enlace_al_tracker_con_imagen_dentro_no_deja_url_huerfano():
+    desc = "[url=https://tracker.x/torrents/9]Captura [img]https://h.x/A.png[/img][/url]"
+    out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert "[/url]" not in out and "[url" not in out
+    assert "[img]https://h.x/A.png[/img]" in out
+
+
+def test_descripcion_unit3d_no_toca_las_imagenes_de_un_subdominio_del_tracker():
+    desc = "Visto en tracker.x\n[url=https://web.x/a][img]https://img.tracker.x/A.png[/img][/url]"
+    out, imgs = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert out.startswith("Visto en tracker")
+    assert imgs[0]["img_url"] == "https://img.tracker.x/A.png"
+
+
+def test_descripcion_unit3d_no_confunde_un_host_que_empieza_igual_que_el_tracker():
+    desc = "[url=https://tracker.x.evil/p]trampa[/url] y https://tracker.x.evil/q; en tracker.x."
+    out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert "[url=https://tracker.x.evil/p]trampa[/url]" in out
+    assert "https://tracker.x.evil/q" in out
+    assert out.endswith("en tracker.")

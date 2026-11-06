@@ -562,30 +562,31 @@ class DescGenerator:
     async def _write_signature(self, descfile, meta: Dict, tracker: str):
         """Helper method to write signature."""
         use_global_sigs = self.config["SIGNATURES"].get("use_global_sigs", "default")
+        tracker_config = self.config["TRACKERS"].get(tracker, {})
 
         if use_global_sigs is None:
             return  # easy mode for NO SIGS!
         elif use_global_sigs is True:
             sig_config = self.config["SIGNATURES"]
         elif use_global_sigs is False:
-            sig_config = self.config["TRACKERS"].get(tracker, {})
+            sig_config = tracker_config
         else:
-            tracker_config = self.config["TRACKERS"].get(tracker, {})
             sig_config = tracker_config
 
         xanon = meta.get("xxx") and self.config["TRACKERS"].get(tracker, {}).get("xanon", False)
         is_anon = meta.get("anon", 0) != 0 or self.config["TRACKERS"].get(tracker, {}).get("anon", False) or xanon
         is_pr = meta.get("personalrelease", False)
-        sig_key = "anon_pr_sig" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
+        sig_key = "anon_pr_signature" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
 
-        if not tracker_config.get(sig_key):
+        # Solo en modo default la global es el respaldo; con false se usa únicamente la del tracker.
+        if use_global_sigs not in (True, False) and not tracker_config.get(sig_key):
             sig_config = self.config["SIGNATURES"]
 
         sig_types = {
             "signature": sig_config.get("signature"),
             "anon_signature": sig_config.get("anon_signature"),
             "pr_signature": sig_config.get("pr_signature"),
-            "anon_pr_sig": sig_config.get("anon_pr_signature"),
+            "anon_pr_signature": sig_config.get("anon_pr_signature"),
         }
 
         # Write signature if it exists
