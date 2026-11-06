@@ -59,20 +59,14 @@ def test_la_config_de_ejemplo_lleva_la_firma_del_fork():
     assert "uploadrr-signature.webp" in sigs["pr_signature"]
 
 
-@pytest.mark.xfail(raises=UnboundLocalError, strict=True,
-                   reason="BUG: tracker_config solo se define en la rama default; con true revienta")
 def test_true_usa_solo_la_global(fichero):
     assert _firma(fichero, modo=True, tracker_cfg={"signature": "[EMU]"}) == "\n[GLOBAL]"
 
 
-@pytest.mark.xfail(raises=UnboundLocalError, strict=True,
-                   reason="BUG: tracker_config solo se define en la rama default; con false revienta")
 def test_false_usa_la_del_tracker(fichero):
     assert _firma(fichero, modo=False, tracker_cfg={"signature": "[EMU]"}) == "\n[EMU]"
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="BUG: busca 'anon_pr_sig' en el tracker en vez de 'anon_pr_signature', y cae en la global")
 def test_la_firma_anonima_pr_del_tracker_se_respeta(fichero):
     meta = {"anon": 1, "personalrelease": True}
     assert _firma(fichero, tracker_cfg={"anon_pr_signature": "[EMU-ANON-PR]"}, meta=meta) == "\n[EMU-ANON-PR]"
