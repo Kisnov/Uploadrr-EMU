@@ -16,6 +16,17 @@ from src.utils.bbcode import BBCODE
 from .console import console, log
 
 
+# Aviso de eMuwarez para las subidas de menos de 720p (ver edit_desc).
+AVISO_BAJA_CALIDAD = (
+    "[center]\n"
+    "[color=#e74c3c][size=28][b]⚠ AVISO ⚠[/b][/size][/color]\n\n"
+    "[size=18]Esta calidad se acepta de manera [b]excepcional y temporal[/b].[/size]\n\n"
+    "[size=18]Será reemplazada en cuanto esté disponible una versión en mayor calidad.[/size]\n\n"
+    "[i]Gracias por su comprensión.[/i]\n"
+    "[/center]\n\n"
+)
+
+
 @dataclass
 class DescControl:
     """Controller for description handling via comment"""
@@ -278,6 +289,11 @@ class DescGenerator:
         async with aiofiles.open(output_description_path, "w", encoding="utf-8") as descfile:
             if desc_header:
                 await descfile.write(desc_header)
+
+            # Lo pide emuwarez-uploadrr (-avbc) cuando el vídeo es de menos de 720p. Va siempre arriba, también con
+            # «# USE: as-is»: eMuwarez solo acepta esa calidad con este aviso.
+            if tracker == "EMU" and meta.get("aviso_baja_calidad"):
+                await descfile.write(AVISO_BAJA_CALIDAD)
 
             bbcode = BBCODE()
 
