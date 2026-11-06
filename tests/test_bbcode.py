@@ -89,3 +89,10 @@ def test_descripcion_unit3d_enlace_al_tracker_con_imagen_dentro_no_deja_url_huer
     out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
     assert "[/url]" not in out and "[url" not in out
     assert "[img]https://h.x/A.png[/img]" in out
+
+
+def test_descripcion_unit3d_no_toca_las_imagenes_de_un_subdominio_del_tracker():
+    desc = "Visto en tracker.x\n[url=https://web.x/a][img]https://img.tracker.x/A.png[/img][/url]"
+    out, imgs = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert out.startswith("Visto en tracker")
+    assert imgs[0]["img_url"] == "https://img.tracker.x/A.png"

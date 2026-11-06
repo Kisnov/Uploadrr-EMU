@@ -161,7 +161,8 @@ class BBCODE:
         site_link_regex = r"\[url=https?:\/\/" + netloc_re + r"[^\]]*\]([\s\S]*?)\[\/url\]"
         desc = re.sub(site_link_regex, r"\1", desc, flags=re.IGNORECASE)
 
-        desc = desc.replace(site_netloc, site_netloc.split(".")[0])
+        # Solo el nombre del propio tracker; un subdominio (img.tracker.x) es otro host y se deja tal cual.
+        desc = re.sub(r"(?<![\w.-])" + netloc_re, site_netloc.split(".")[0], desc)
 
         # Temporarily hide spoiler tags
         spoilers = re.findall(r"\[spoiler[\s\S]*?\[\/spoiler\]", desc)
