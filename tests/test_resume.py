@@ -75,6 +75,20 @@ def test_un_resume_guardado_no_se_hereda_si_no_se_pasa(tmp_path):
     assert _run(load_existing_meta(tmp_path, str(item), con))["resume"] is True
 
 
+def test_un_aviso_de_baja_calidad_guardado_no_se_hereda_al_reanudar(tmp_path):
+    item = tmp_path / "Peli"
+    guardado = tmp_path / "tmp" / "Peli"
+    guardado.mkdir(parents=True)
+    (guardado / "meta.json").write_text(json.dumps({"aviso_baja_calidad": True, "tmdb": "1"}))
+
+    parser = build_parser({})
+    sin = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(parser.parse_args(["-rs"]))})
+    assert _run(load_existing_meta(tmp_path, str(item), sin))["aviso_baja_calidad"] is False
+
+    con = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(parser.parse_args(["-rs", "-avbc"]))})
+    assert _run(load_existing_meta(tmp_path, str(item), con))["aviso_baja_calidad"] is True
+
+
 # ---------------------------------------------------------------------------
 # Borrado de tmp/<uuid>
 # ---------------------------------------------------------------------------

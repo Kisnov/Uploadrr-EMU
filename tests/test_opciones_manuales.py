@@ -124,3 +124,8 @@ def test_pr_pone_la_firma_de_personal_release(fichero):
     meta = _meta(["-pr"])
     asyncio.run(DescGenerator(CONFIG, None)._write_signature(fichero, meta, "EMU"))
     assert fichero.texto == "\n[PR]"
+
+
+def test_avbc_pide_el_aviso_de_baja_calidad():
+    assert _meta(["-avbc"])["aviso_baja_calidad"] is True
+    assert _meta([])["aviso_baja_calidad"] is False

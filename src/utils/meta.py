@@ -91,7 +91,7 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
     meta_file = base_dir / "tmp" / Path(path).name / "meta.json"
     # fmt: off
     overwrite_keys = [
-        "anon", "base_dir", "blu", "category", "client", "debug","deezer_manual", "desc",
+        "anon", "aviso_baja_calidad", "base_dir", "blu", "category", "client", "debug","deezer_manual", "desc",
         "descfile", "desclink", "draft", "dupe", "episode", "ffdebug", "freeleech", "full_dir",
         "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_name",
         "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",

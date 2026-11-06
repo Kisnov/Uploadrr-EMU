@@ -24,13 +24,13 @@ def _gen_desc(tmp_path, config=None, **meta):
     return meta, (tmp_path / "tmp" / "Peli" / "DESCRIPTION.txt").read_text(encoding="utf-8")
 
 
-def _edit_desc(tmp_path, base, tracker="EMU", **meta):
+def _edit_desc(tmp_path, base, tracker="EMU", desc_header="", **meta):
     carpeta = tmp_path / "tmp" / "Peli"
     carpeta.mkdir(parents=True, exist_ok=True)
     (carpeta / "DESCRIPTION.txt").write_text(base, encoding="utf-8")
     meta = {"base_dir": str(tmp_path), "uuid": "Peli", "category": "MOVIE", "youtube": "abc", "logo": "https://logo.png",
             "screens": 1, "image_list": [CAPTURA], **meta}
-    asyncio.run(DescGenerator(CONFIG, tmp_path).edit_desc(meta, tracker))
+    asyncio.run(DescGenerator(CONFIG, tmp_path).edit_desc(meta, tracker, desc_header=desc_header))
     return (carpeta / f"[{tracker}]DESCRIPTION.txt").read_text(encoding="utf-8")
 
 
@@ -141,3 +141,22 @@ def test_la_info_de_los_discos_va_en_spoilers(tmp_path):
 
 def test_el_vob_de_un_dvd_va_en_un_spoiler(tmp_path):
     assert "[spoiler=VOB MediaInfo][code]MI[/code][/spoiler]" in _edit_desc(tmp_path, "", discs=[{"type": "DVD", "vob_mi": "MI"}])
+
+
+@pytest.mark.parametrize("base", ["Notas", "# USE: as-is\nTal cual"])
+def test_el_aviso_de_baja_calidad_va_arriba_siempre(tmp_path, base):
+    from src.utils.descgen import AVISO_BAJA_CALIDAD
+
+    texto = _edit_desc(tmp_path, base, desc_header="[CABECERA]", aviso_baja_calidad=True)
+
+    assert texto.startswith(AVISO_BAJA_CALIDAD + "[CABECERA]")
+    assert texto.count("[b]⚠ AVISO ⚠[/b]") == 1
+    assert base.removeprefix("# USE: as-is\n") in texto
+
+
+def test_sin_la_bandera_no_hay_aviso(tmp_path):
+    assert "AVISO" not in _edit_desc(tmp_path, "Notas")
+
+
+def test_el_aviso_solo_es_para_emu(tmp_path):
+    assert "AVISO" not in _edit_desc(tmp_path, "Notas", tracker="BLU", aviso_baja_calidad=True)

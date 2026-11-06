@@ -36,6 +36,9 @@ or report their errors unless they break an eMuwarez upload.
   the uploaded folder/file) is wiped entirely (`limpiar_tmp_item` in `src/utils/meta.py`; only a real directory
   inside `tmp`, never followed if it is a symlink; a failure is logged and does not abort). With it, what is marked
   as done is reused. `resume` is in `overwrite_keys` of `load_existing_meta`, so a saved `resume: true` is not inherited.
+- `--aviso-baja-calidad` (`-avbc`, per item, `meta["aviso_baja_calidad"]`, in `overwrite_keys`): the app passes it
+  when the video is below 720p, and `edit_desc` puts `AVISO_BAJA_CALIDAD` (`src/utils/descgen.py`) at the top of
+  `[EMU]DESCRIPTION.txt`, also with `# USE: as-is`. The app keeps the threshold; this repo keeps the text.
 - Done steps: `meta["pasos_hechos"]` (list in `meta.json`) holds `screenshots` and `torrent`. Each is marked and
   saved first, then printed with plain `print(..., flush=True)` as `Step done: screenshots` / `Step done: torrent`
   (also when the step is reused in a `--resume`; nothing is printed for a step that did not run, e.g. a skipped item).

@@ -381,6 +381,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     # --- Boolean flags (per-item) ---
     bool_flags = [
         ("-a", "--anon", "anon", "Upload anonymously"),
+        ("-avbc", "--aviso-baja-calidad", "aviso_baja_calidad", "Put the low-quality (<720p) notice at the top of the EMU description"),
         ("-dr", "--draft", "draft", "Send to drafts (BHD)"),
         ("-ffdebug", "--ffdebug", "ffdebug", "Show ffmpeg debug during screenshots"),
         ("-hc", "--hardcoded-subs", "hardcoded_subs", "Contains hardcoded subtitles"),
