@@ -67,6 +67,10 @@ def test_false_usa_la_del_tracker(fichero):
     assert _firma(fichero, modo=False, tracker_cfg={"signature": "[EMU]"}) == "\n[EMU]"
 
 
+def test_false_sin_firma_del_tracker_no_cae_a_la_global(fichero):
+    assert _firma(fichero, modo=False, tracker_cfg={}) == ""
+
+
 def test_la_firma_anonima_pr_del_tracker_se_respeta(fichero):
     meta = {"anon": 1, "personalrelease": True}
     assert _firma(fichero, tracker_cfg={"anon_pr_signature": "[EMU-ANON-PR]"}, meta=meta) == "\n[EMU-ANON-PR]"

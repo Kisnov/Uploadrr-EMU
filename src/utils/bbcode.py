@@ -157,15 +157,9 @@ class BBCODE:
         # Remove links to site
         site_netloc = urllib.parse.urlparse(site).netloc
         netloc_re = re.escape(site_netloc)
-        site_regex = r"(\[url[\=\]]https?:\/\/" + netloc_re + r"/[^\]]+])([^\[]+)(\[\/url\])?"
-        site_url_tags = re.findall(site_regex, desc)
-        if site_url_tags != []:
-            for site_url_tag in site_url_tags:
-                site_url_tag = "".join(site_url_tag)
-                url_tag_regex = r"(\[url[\=\]]https?:\/\/" + netloc_re + r"[^\]]+])"
-                url_tag_removed = re.sub(url_tag_regex, "", site_url_tag)
-                url_tag_removed = url_tag_removed.replace("[/url]", "")
-                desc = desc.replace(site_url_tag, url_tag_removed)
+        # Quita la etiqueta [url=...] del propio tracker hasta su [/url] y conserva lo de dentro (texto o [img]).
+        site_link_regex = r"\[url=https?:\/\/" + netloc_re + r"[^\]]*\]([\s\S]*?)\[\/url\]"
+        desc = re.sub(site_link_regex, r"\1", desc, flags=re.IGNORECASE)
 
         desc = desc.replace(site_netloc, site_netloc.split(".")[0])
 

@@ -578,7 +578,8 @@ class DescGenerator:
         is_pr = meta.get("personalrelease", False)
         sig_key = "anon_pr_signature" if is_anon and is_pr else "pr_signature" if is_pr else "anon_signature" if is_anon else "signature"
 
-        if not tracker_config.get(sig_key):
+        # Solo en modo default la global es el respaldo; con false se usa únicamente la del tracker.
+        if use_global_sigs not in (True, False) and not tracker_config.get(sig_key):
             sig_config = self.config["SIGNATURES"]
 
         sig_types = {

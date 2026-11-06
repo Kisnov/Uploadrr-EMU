@@ -67,6 +67,18 @@ def meta(tmp_path):
     return {"path": str(video), "filelist": [str(video)], "clean_name": "Peli", "uuid": "Peli.2020.mkv", "base_dir": str(tmp_path)}
 
 
+@pytest.fixture(autouse=True)
+def _indice_en_tmp(monkeypatch, tmp_path):
+    """Clients escribe data/qbit_index.json al buscar: que los tests no toquen el índice real del repo."""
+    original = Clients.__init__
+
+    def init(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self.index_dir = tmp_path
+
+    monkeypatch.setattr(Clients, "__init__", init)
+
+
 def _buscar(config, meta):
     return asyncio.run(Clients(config).find_existing_torrent(meta))
 

@@ -82,3 +82,10 @@ def test_descripcion_unit3d_quita_los_enlaces_al_propio_tracker():
     desc = "Ver [url=https://tracker.x/torrents/9]otra subida[/url]"
     out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
     assert out == "Ver otra subida"
+
+
+def test_descripcion_unit3d_enlace_al_tracker_con_imagen_dentro_no_deja_url_huerfano():
+    desc = "[url=https://tracker.x/torrents/9]Captura [img]https://h.x/A.png[/img][/url]"
+    out, _ = bb.clean_unit3d_description(desc, "https://tracker.x/torrents/1")
+    assert "[/url]" not in out and "[url" not in out
+    assert "[img]https://h.x/A.png[/img]" in out
