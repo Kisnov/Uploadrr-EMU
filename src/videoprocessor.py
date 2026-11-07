@@ -423,6 +423,9 @@ class VideoProcessor:
             meta["tag"] = f"-{meta['tag']}"
         if meta["category"] == "TV":
             meta = await self.get_season_episode(meta["video"], meta)
+            # Ya con la temporada: su tráiler propio, si la ficha de la serie no tenía uno (TMDbHandler).
+            if not meta.get("xxx") and str(meta.get("tmdb") or "0") != "0":
+                meta.update(await self.TMDb.trailer_de_temporada(meta))
 
         # Assign common metadata
         meta = await self._assign_common_metadata(meta)  # After TMDb for Dual/Dub/Silent

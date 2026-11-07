@@ -64,6 +64,108 @@ def test_la_peticion_a_tmdb_pide_videos_en_castellano():
     assert "videos" in capturado["append_to_response"]
 
 
+def test_sin_trailer_vale_un_teaser_y_luego_un_clip():
+    """eMuwarez exige tráiler: sin ningún «Trailer», mejor un teaser (y si no, un clip) que nada."""
+    assert _youtube(_video("CLIP", "es", tipo="Clip"), _video("TEASER", "en", tipo="Teaser")) == "TEASER"
+    assert _youtube(_video("BTS", "es", tipo="Behind the Scenes"), _video("CLIP", "en", tipo="Clip")) == "CLIP"
+    assert _youtube(_video("BTS", "es", tipo="Behind the Scenes")) is None
+
+
+def test_a_igual_tipo_castellano_luego_ingles_luego_el_resto():
+    assert _youtube(_video("KO", "ko"), _video("EN", "en")) == "EN"
+    assert _youtube(_video("KO", "ko"), _video("FR", "fr")) == "KO"
+
+
+# --- Las peticiones extra: idioma original y temporada --------------------
+
+class _Respuesta:
+    def __init__(self, datos):
+        self.datos = datos
+
+    def raise_for_status(self):
+        if isinstance(self.datos, Exception):
+            raise self.datos
+
+    def json(self):
+        return self.datos
+
+
+def _tmdb(respuestas: dict):
+    """Un TMDbHandler cuyo cliente responde por endpoint (sin red) y apunta lo que se pide."""
+    tmdb = TMDbHandler({"DEFAULT": {"tmdb": "x"}})
+    pedidas = []
+
+    async def get(endpoint, params):
+        pedidas.append((endpoint, params))
+        return _Respuesta(respuestas.get(endpoint, {"results": []}))
+
+    async def sin_espera():
+        return None
+
+    tmdb.client.get = get
+    tmdb.rate_limit = sin_espera
+    return tmdb, pedidas
+
+
+def test_sin_trailer_busca_en_el_idioma_original():
+    tmdb, pedidas = _tmdb({"/tv/7/videos": {"results": [_video("KO", "ko")]}})
+    meta = {"category": "TV", "tmdb": 7, "youtube": None, "youtube_tipo": None}
+    assert asyncio.run(tmdb._trailer_en_idioma_original(meta, {"original_language": "ko"})) == {
+        "youtube": "KO", "youtube_tipo": "Trailer"}
+    assert pedidas == [("/tv/7/videos", {"api_key": "x", "include_video_language": "ko"})]
+
+
+def test_el_idioma_original_no_quita_un_teaser_por_otro_teaser():
+    tmdb, _ = _tmdb({"/movie/7/videos": {"results": [_video("KO", "ko", tipo="Teaser")]}})
+    meta = {"category": "MOVIE", "tmdb": 7, "youtube": "ES", "youtube_tipo": "Teaser"}
+    assert asyncio.run(tmdb._trailer_en_idioma_original(meta, {"original_language": "ko"})) == {}
+
+
+@pytest.mark.parametrize("original", ["es", "en", "xx", "", None])
+def test_en_castellano_ingles_o_sin_idioma_no_hay_peticion_extra(original):
+    tmdb, pedidas = _tmdb({})
+    meta = {"category": "MOVIE", "tmdb": 7, "youtube": None, "youtube_tipo": None}
+    assert asyncio.run(tmdb._trailer_en_idioma_original(meta, {"original_language": original})) == {}
+    assert pedidas == []
+
+
+def test_una_temporada_sin_trailer_de_la_serie_usa_el_suyo():
+    tmdb, pedidas = _tmdb({"/tv/7/season/6/videos": {"results": [_video("T6", "es")]}})
+    meta = {"category": "TV", "tmdb": "7", "season_int": 6, "youtube": None, "tmdb_original_language": "ko"}
+    assert asyncio.run(tmdb.trailer_de_temporada(meta)) == {"youtube": "T6", "youtube_tipo": "Trailer"}
+    assert pedidas == [("/tv/7/season/6/videos", {"api_key": "x", "include_video_language": "es,en,ko,null"})]
+
+
+def test_el_trailer_de_la_temporada_gana_al_teaser_de_la_serie():
+    tmdb, _ = _tmdb({"/tv/7/season/2/videos": {"results": [_video("T2", "en")]}})
+    meta = {"category": "TV", "tmdb": 7, "season_int": 2, "youtube": "TEASER", "youtube_tipo": "Teaser"}
+    assert asyncio.run(tmdb.trailer_de_temporada(meta))["youtube"] == "T2"
+
+
+def test_con_un_trailer_de_la_serie_no_mira_la_temporada():
+    tmdb, pedidas = _tmdb({})
+    meta = {"category": "TV", "tmdb": 7, "season_int": 2, "youtube": "SERIE", "youtube_tipo": "Trailer"}
+    assert asyncio.run(tmdb.trailer_de_temporada(meta)) == {}
+    assert pedidas == []
+
+
+@pytest.mark.parametrize("meta", [
+    {"category": "MOVIE", "tmdb": 7, "season_int": 1},
+    {"category": "TV", "tmdb": "0", "season_int": 1},
+    {"category": "TV", "tmdb": 7},
+])
+def test_sin_serie_o_sin_temporada_no_pide_nada(meta):
+    tmdb, pedidas = _tmdb({})
+    assert asyncio.run(tmdb.trailer_de_temporada(meta)) == {}
+    assert pedidas == []
+
+
+def test_si_tmdb_falla_la_subida_sigue_sin_trailer():
+    tmdb, _ = _tmdb({"/tv/7/season/1/videos": RuntimeError("caído")})
+    meta = {"category": "TV", "tmdb": 7, "season_int": 1, "youtube": None}
+    assert asyncio.run(tmdb.trailer_de_temporada(meta)) == {}
+
+
 # --- El tráiler en la descripción ------------------------------------------
 
 def _escribir(fichero, *, categoria, add_trailer=True, tracker="EMU", youtube="KEY", control=None):
