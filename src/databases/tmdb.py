@@ -215,6 +215,9 @@ class TMDbHandler:
         aka, original_language = await imdb_task
 
         meta.update(await self._parse_tmdb_data(data, meta, aka, original_language))
+        if meta.get("youtube_tipo") != "Trailer":
+            # Sin tráiler en castellano ni en inglés: el que haya en el idioma original (anime, series coreanas…).
+            meta.update(await self._trailer_en_idioma_original(meta, data))
         meta.update(await self._process_tmdb_images(data))
 
         if not meta.get("anime", False):
@@ -240,6 +243,9 @@ class TMDbHandler:
             "adult": data["adult"],
             "overview": data["overview"],
             "youtube": self._get_youtube_trailer(data),
+            "youtube_tipo": (self._elegir_trailer(data.get("videos", {}).get("results")) or {}).get("type"),
+            # El código ISO 639-1 de TMDb: `original_language` puede venir de IMDb con el nombre del idioma.
+            "tmdb_original_language": (data.get("original_language") or "").lower(),
             "aka": aka,
             "original_language": original_language or data["original_language"],
             "original_title": data.get("original_title" if meta["category"] == "MOVIE" else "original_name", default_title),
@@ -356,19 +362,86 @@ class TMDbHandler:
         """Normalize IMDb ID format."""
         return str(int(imdb_id.replace("tt", ""))).zfill(7) if imdb_id and imdb_id != "0" else "0"
 
+    # Qué vídeo de TMDb vale como tráiler, de mejor a peor. eMuwarez exige uno en cada subida y la ficha de muchas
+    # series (realities, documentales) no tiene ningún «Trailer», pero sí un teaser o un avance: mejor eso que nada.
+    TIPOS_DE_TRAILER = ("Trailer", "Teaser", "Clip", "Featurette")
+    # Castellano primero; luego inglés; luego el resto (el idioma original, sin idioma).
+    IDIOMAS_DE_TRAILER = ("es", "en")
+
+    @classmethod
+    def _elegir_trailer(cls, videos) -> Optional[Dict]:
+        """El mejor vídeo de YouTube de una lista de TMDb: por tipo (TIPOS_DE_TRAILER) y, a igual tipo, por idioma
+        (IDIOMAS_DE_TRAILER); a igualdad, el que vino antes. None si no hay ninguno que valga."""
+        candidatos = [
+            (cls.TIPOS_DE_TRAILER.index(v.get("type")),
+             cls.IDIOMAS_DE_TRAILER.index(v.get("iso_639_1")) if v.get("iso_639_1") in cls.IDIOMAS_DE_TRAILER
+             else len(cls.IDIOMAS_DE_TRAILER),
+             i, v)
+            for i, v in enumerate(videos or [])
+            if v.get("site") == "YouTube" and v.get("key") and v.get("type") in cls.TIPOS_DE_TRAILER
+        ]
+        return min(candidatos, key=lambda c: c[:3])[3] if candidatos else None
+
     def _get_youtube_trailer(self, data: Dict) -> Optional[str]:
         """Extract YouTube trailer key from TMDb data — Spanish (Castellano)
         first if TMDb has one (needs include_video_language=es,... on the
         request, see _fetch_tmdb_metadata), otherwise whatever else TMDb
-        returned (usually English)."""
-        results = data.get("videos", {}).get("results", []) or []
-        is_trailer = lambda v: v.get("site") == "YouTube" and v.get("type") == "Trailer"  # noqa: E731
-        trailer = next((v["key"] for v in results if is_trailer(v) and v.get("iso_639_1") == "es"), None)
-        if not trailer:
-            trailer = next((v["key"] for v in results if is_trailer(v)), None)
-        if not trailer:
+        returned (usually English). Sin «Trailer», un teaser, clip o
+        featurette (TIPOS_DE_TRAILER)."""
+        video = TMDbHandler._elegir_trailer(data.get("videos", {}).get("results"))
+        if not video:
             log.debug(f"No YouTube trailer found for TMDb ID {data.get('id')}")
-        return trailer
+        return video["key"] if video else None
+
+    async def _videos(self, endpoint: str, idiomas: str) -> list:
+        """Los vídeos de un endpoint de TMDb (…/videos). Una petición extra para buscar tráiler: si falla, no
+        hay vídeos y la subida sigue sin tráiler (la app avisa), nunca se corta por esto."""
+        try:
+            await self.rate_limit()
+            response = await self.client.get(endpoint, params={"api_key": self.api_key, "include_video_language": idiomas})
+            response.raise_for_status()
+            return response.json().get("results", []) or []
+        except Exception as e:
+            log.debug(f"TMDb {endpoint}: no se pudieron leer los vídeos ({type(e).__name__})")
+            return []
+
+    @classmethod
+    def _mejor_que(cls, video: Optional[Dict], tipo_actual: Optional[str]) -> bool:
+        """Si `video` es de un tipo mejor que el tráiler que ya hay (ninguno cuenta como el peor)."""
+        if not video:
+            return False
+        if tipo_actual not in cls.TIPOS_DE_TRAILER:
+            return True
+        return cls.TIPOS_DE_TRAILER.index(video["type"]) < cls.TIPOS_DE_TRAILER.index(tipo_actual)
+
+    async def _trailer_en_idioma_original(self, meta: Dict, data: Dict) -> Dict:
+        """La petición principal solo trae vídeos en castellano, inglés o sin idioma. Si así no hay «Trailer» y el
+        idioma original es otro, se piden los de ese idioma y se queda el mejor de todos."""
+        original = (data.get("original_language") or "").lower()
+        if not original or original in self.IDIOMAS_DE_TRAILER or original == "xx":
+            return {}
+        endpoint = f"/{'movie' if meta['category'] == 'MOVIE' else 'tv'}/{meta['tmdb']}/videos"
+        video = self._elegir_trailer(await self._videos(endpoint, original))
+        if not self._mejor_que(video, meta.get("youtube_tipo")):
+            return {}
+        log.debug(f"Tráiler de TMDb en el idioma original ({original}): {video['type']} {video['key']}")
+        return {"youtube": video["key"], "youtube_tipo": video["type"]}
+
+    async def trailer_de_temporada(self, meta: Dict) -> Dict:
+        """Los vídeos de la temporada que se sube (/tv/{id}/season/{n}/videos), que ni la ficha de la serie ni
+        UNIT3D miran: una temporada nueva suele tener su propio tráiler aunque la serie no tenga ninguno. Solo si
+        no hay ya un «Trailer»; se queda el de la temporada si es de un tipo mejor que el que había. {} si no."""
+        if meta.get("category") != "TV" or meta.get("youtube_tipo") == "Trailer":
+            return {}
+        tmdb_id, temporada = meta.get("tmdb"), meta.get("season_int")
+        if not tmdb_id or str(tmdb_id) == "0" or temporada in (None, ""):
+            return {}
+        idiomas = ",".join(i for i in dict.fromkeys([*self.IDIOMAS_DE_TRAILER, meta.get("tmdb_original_language") or "", "null"]) if i)
+        video = self._elegir_trailer(await self._videos(f"/tv/{tmdb_id}/season/{int(temporada)}/videos", idiomas))
+        if not self._mejor_que(video, meta.get("youtube_tipo")):
+            return {}
+        log.debug(f"Tráiler de la temporada {temporada} en TMDb: {video['type']} {video['key']}")
+        return {"youtube": video["key"], "youtube_tipo": video["type"]}
 
     async def daily_to_tmdb_season_episode(self, tmdbid: str, date: str) -> Tuple[str, str]:
         """Map a date to season and episode for a TV show."""
