@@ -70,10 +70,13 @@ def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(Qbit, "ya_estaba", False)
     monkeypatch.setattr(Qbit, "respuesta", "Ok.")
 
-    async def sin_espera(_segundos):
-        pass
+    reloj = [0.0]  # sin esperas de verdad: el reloj avanza lo que se «duerme»
+
+    async def sin_espera(segundos):
+        reloj[0] += segundos
 
     monkeypatch.setattr(clients.asyncio, "sleep", sin_espera)
+    monkeypatch.setattr(clients.time, "monotonic", lambda: reloj[0])
     cliente = {"qbit_url": "http://127.0.0.1", "qbit_port": 8080, "qbit_user": "u", "qbit_pass": "p"}
 
     def anadir(meta=None, torrent=None, ruta=None):
@@ -215,3 +218,22 @@ def test_con_solo_cliente_no_sigue_si_qbittorrent_no_lo_anade(qbit, capsys):
     assert qbit({"solo_cliente": 42}) is False
     assert Qbit.arrancados == [] and Qbit.reanudados == []
     assert "no lo ha añadido (Fails.)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("respuesta", "esperado"), [
+    ({"success_count": 1, "failure_count": 0, "pending_count": 0}, True),
+    ({"success_count": 0, "failure_count": 0, "pending_count": 1}, True),  # 5.2: asíncrono
+    ({"success_count": 0, "failure_count": 1, "pending_count": 0}, False),
+], ids=["json-ok", "json-pendiente", "json-fallo"])
+def test_con_solo_cliente_entiende_la_respuesta_json_de_qbittorrent_5_2(qbit, respuesta, esperado):
+    Qbit.respuesta = respuesta
+    assert qbit({"solo_cliente": 42}) is esperado
+    assert Qbit.arrancados == ([Torrent.infohash] if esperado else [])
+
+
+def test_con_solo_cliente_no_toca_el_que_aparece_arrancado(qbit, capsys):
+    # El add asíncrono falló y el que aparece es el de otro, ya en marcha.
+    Qbit.estados = [("uploading", 1)]
+    assert qbit({"solo_cliente": 42}) is False
+    assert Qbit.arrancados == []
+    assert "no está parado (uploading)" in capsys.readouterr().out

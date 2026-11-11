@@ -26,6 +26,16 @@ ESTADOS_COMPROBANDO = {"checkingUP", "checkingDL", "checkingResumeData", "queued
 ESPERA_INICIO_COMPROBACION = 10
 
 
+def _add_aceptado(respuesta) -> bool:
+    """Si qBittorrent aceptó el add: «Ok.» hasta la API 2.13; desde la 2.14, un JSON con los recuentos."""
+    if isinstance(respuesta, str):
+        return respuesta == "Ok."
+    try:
+        return not respuesta.get("failure_count") and (respuesta.get("success_count", 0) + respuesta.get("pending_count", 0)) >= 1
+    except AttributeError:
+        return False
+
+
 class Clients:
     """Handles adding torrents to various torrent clients with an optimized index."""
 
@@ -451,12 +461,19 @@ class Clients:
             content_layout=client.get("content_layout", "Original"),
             category=meta.get("qbit_cat", client.get("qbit_cat")),
         )
-        if solo_cliente and respuesta != "Ok.":
+        if solo_cliente and not _add_aceptado(respuesta):
             # «Fails.»: ya estaba (alguien lo añadió entre medias) y no entró parado; no se toca.
             console.print(f"[red]--solo-cliente: qBittorrent no lo ha añadido ({respuesta}); no se toca")
             return False
 
         await self._wait_for_torrent(qbt_client, torrent.infohash, arrancar=not solo_cliente)
+        if solo_cliente:
+            # Desde la API 2.14 el add es asíncrono: lo que aparece tiene que ser el nuestro, parado o comprobándose.
+            info = qbt_client.torrents_info(torrent_hashes=torrent.infohash)
+            estado = info[0].get("state", "") if info else ""
+            if not (estado in ESTADOS_COMPROBANDO or estado.startswith(("stopped", "paused"))):
+                console.print(f"[red]--solo-cliente: el torrent de qBittorrent no está parado ({estado}); no se toca")
+                return False
         self._apply_qbit_tags(qbt_client, torrent.infohash, client, meta, tracker)
         if solo_cliente and not await self._arrancar_si_completo(qbt_client, torrent.infohash):
             return False
