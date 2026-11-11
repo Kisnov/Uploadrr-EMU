@@ -563,11 +563,12 @@ def solo_cliente(tracker, emu, upload_meta):
     """Lanza Uploadrr._solo_cliente con el EMU del tracker falso y el cliente que se le pase."""
     emu.domain = tracker.url
 
-    def lanzar(cliente, registro=None):
+    def lanzar(cliente, registro=None, ruta=None):
         app = upload.Uploadrr.__new__(upload.Uploadrr)
         app.config, app.client = emu.config, cliente
         registro = {"EMU": {"class": lambda config: emu}} if registro is None else registro
-        return run(app._solo_cliente({**upload_meta, "solo_cliente": 42}, registro))
+        ruta = ruta or Path(upload_meta["base_dir"]) / "x.bin"  # el contenido de signed_torrent
+        return run(app._solo_cliente({**upload_meta, "solo_cliente": 42, "path": str(ruta)}, registro))
 
     return lanzar
 
@@ -630,6 +631,64 @@ def test_solo_cliente_falla_si_el_cliente_no_lo_anade(tracker, signed_torrent, s
     out = capsys.readouterr().out
     assert "el torrent no se ha añadido al cliente" in out
     assert ("Torrent client add failed: Failed to connect to qBittorrent." in out) == isinstance(resultado, Exception)
+
+
+@pytest.fixture
+def carpeta(tmp_path, tracker):
+    """Una subida de carpeta con subcarpeta; el tracker sirve su .torrent."""
+    raiz = tmp_path / "Serie"
+    (raiz / "sub").mkdir(parents=True)
+    (raiz / "a.mkv").write_bytes(b"a" * SIZE)
+    (raiz / "sub" / "b.mkv").write_bytes(b"b" * SIZE)
+    torrent = torf.Torrent(path=raiz, private=True)
+    torrent.generate()
+    tracker.routes[("GET", API_TORRENT)] = lambda q: (200, {"data": {"attributes": {"download_link": download_url(tracker)}}})
+    serve_download(tracker, torrent.dump())
+    return raiz
+
+
+def test_solo_cliente_carpeta_que_coincide_se_anade(carpeta, solo_cliente):
+    (carpeta / "extra.nfo").write_text("no está en el torrent")  # lo que torf excluye no molesta
+    cliente = ClienteFalso()
+    assert solo_cliente(cliente, ruta=carpeta) is True
+    assert cliente.anadidos == [("EMU", True)]
+
+
+@pytest.mark.parametrize(
+    ("cambio", "fichero"),
+    [
+        (lambda raiz: (raiz / "sub" / "b.mkv").write_bytes(b"b" * (SIZE - 1)), "sub/b.mkv"),
+        (lambda raiz: (raiz / "sub" / "b.mkv").unlink(), "sub/b.mkv"),
+        (lambda raiz: (raiz / "a.mkv").unlink(), "a.mkv"),
+    ],
+    ids=["otro-tamano", "falta", "falta-el-primero"],
+)
+def test_solo_cliente_carpeta_distinta_no_se_anade(carpeta, upload_meta, solo_cliente, capsys, cambio, fichero):
+    cambio(carpeta)
+    cliente = ClienteFalso()
+
+    assert solo_cliente(cliente, ruta=carpeta) is False
+    assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()  # el .torrent no se queda para reusarlo
+    out = capsys.readouterr().out
+    assert f"el torrent no coincide con la subida en {fichero}" in out and str(carpeta) not in out
+
+
+@pytest.mark.parametrize(
+    "preparar",
+    [lambda base: (base / "x.bin").write_bytes(b"x" * (SIZE + 1)), lambda base: (base / "x.bin").rename(base / "y.bin")],
+    ids=["otro-tamano", "otro-nombre"],
+)
+def test_solo_cliente_fichero_distinto_no_se_anade(tracker, upload_meta, signed_torrent, solo_cliente, capsys, preparar):
+    tracker.routes[("GET", API_TORRENT)] = lambda q: (200, {"data": {"attributes": {"download_link": download_url(tracker)}}})
+    serve_download(tracker, signed_torrent)
+    base = Path(upload_meta["base_dir"])
+    preparar(base)
+    ruta = base / "x.bin" if (base / "x.bin").exists() else base / "y.bin"
+    cliente = ClienteFalso()
+
+    assert solo_cliente(cliente, ruta=ruta) is False
+    assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()
+    assert "el torrent no coincide con la subida en x.bin" in capsys.readouterr().out
 
 
 def test_solo_cliente_solo_vale_para_emu(tracker, solo_cliente):

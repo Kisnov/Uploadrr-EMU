@@ -705,7 +705,13 @@ def solo_cliente(cola, monkeypatch):
 
     async def descargar(self, meta, torrent_id):
         estado["llamadas"].append(("descargar", torrent_id))
-        return estado["descarga"]
+        if not estado["descarga"]:
+            return None
+        # Un .torrent de verdad del contenido, para que pase la comprobación de ficheros.
+        (Path(meta["path"]) / "Peli.mkv").write_bytes(b"x" * 100)
+        guardado = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / "[EMU]Peli.torrent"
+        _torrent_valido(guardado, Path(meta["path"]))
+        return guardado
 
     async def anadir(client, meta, tracker):
         estado["llamadas"].append(("cliente", tracker))

@@ -43,7 +43,8 @@ or report their errors unless they break an eMuwarez upload.
   the usual argv when the torrent is already on eMuwarez but not in qBittorrent. After prep (and the TMDb check) the item
   skips screenshots, dupe search, confirmation, hashing and upload; it implies `resume` (no wipe). It reads
   `attributes.download_link` from `GET /api/torrents/ID` (with or without the `data` wrapper), saves
-  `[EMU]<clean_name>.torrent` like an upload and calls `add_to_client`; qBittorrent rechecks only in this mode
+  `[EMU]<clean_name>.torrent` like an upload, checks its file names and sizes against `PATH` (hardlinks into the library:
+  a mismatch deletes it and exits 1) and calls `add_to_client`; qBittorrent rechecks only in this mode
   (`is_skip_checking=False`). Exit 0 only if `add_to_client` returned True (only qBittorrent reports it); any failure
   prints a reason and exits 1. `Torrent URL:` and `Torrent upload succeeded, but failed to` are never printed here.
 - Done steps: `meta["pasos_hechos"]` (list in `meta.json`) holds `screenshots` and `torrent`. Each is marked and
