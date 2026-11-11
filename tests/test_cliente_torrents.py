@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+import torf
 
 from src import clients
 from src.utils import upload
@@ -19,14 +20,18 @@ class Qbit:
     """Un qBittorrent que acepta todo y solo enseña el torrent si `aparece`."""
 
     aparece = True
+    login = True
+    anadidos: list = []
 
     def __init__(self, **_kwargs):
         self.reanudados = []
 
     def auth_log_in(self):
-        pass
+        if not self.login:
+            raise clients.qbittorrentapi.LoginFailed()
 
-    def torrents_add(self, **_kwargs):
+    def torrents_add(self, **kwargs):
+        Qbit.anadidos.append(kwargs)
         return "Ok."
 
     def torrents_info(self, torrent_hashes):
@@ -39,6 +44,7 @@ class Qbit:
 @pytest.fixture
 def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(clients.qbittorrentapi, "Client", Qbit)
+    monkeypatch.setattr(Qbit, "anadidos", [])
 
     async def sin_espera(_segundos):
         pass
@@ -46,16 +52,47 @@ def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(clients.asyncio, "sleep", sin_espera)
     cliente = {"qbit_url": "http://127.0.0.1", "qbit_port": 8080, "qbit_user": "u", "qbit_pass": "p"}
 
-    def anadir():
+    def anadir(meta=None):
         c = clients.Clients(config={"TRACKERS": {}})
-        asyncio.run(c._add_to_qbittorrent(tmp_path, tmp_path / "t.torrent", Torrent(), {}, "/l", "/r", cliente, "EMU"))
+        return asyncio.run(c._add_to_qbittorrent(tmp_path, tmp_path / "t.torrent", Torrent(), meta or {}, "/l", "/r", cliente, "EMU"))
 
     return anadir
 
 
 def test_si_qbittorrent_lo_muestra_se_da_por_anadido(qbit, capsys):
-    qbit()
+    assert qbit() is True
     assert "Added to:" in capsys.readouterr().out
+    assert Qbit.anadidos[0]["is_skip_checking"] is True  # recién hasheado: no hace falta comprobarlo
+
+
+def test_con_solo_cliente_qbittorrent_lo_comprueba(qbit):
+    assert qbit({"solo_cliente": 42}) is True
+    assert Qbit.anadidos[0]["is_skip_checking"] is False
+
+
+def test_credenciales_malas_no_se_dan_por_anadido(qbit, capsys, monkeypatch):
+    monkeypatch.setattr(Qbit, "login", False)
+    assert qbit() is False
+    assert "INCORRECT QBIT LOGIN CREDENTIALS" in capsys.readouterr().out
+    assert Qbit.anadidos == []
+
+
+@pytest.mark.parametrize(("extra", "esperado"), [({}, True), ({"no_seed": True}, False), ({"client": "none"}, False)])
+def test_add_to_client_dice_si_lo_ha_anadido(qbit, tmp_path, extra, esperado):
+    contenido = tmp_path / "Peli.mkv"
+    contenido.write_bytes(b"x" * 100)
+    (tmp_path / "tmp" / "u").mkdir(parents=True)
+    t = torf.Torrent(path=contenido, private=True)
+    t.generate()
+    t.write(tmp_path / "tmp" / "u" / "[EMU]Peli.torrent")
+    config = {
+        "DEFAULT": {"default_torrent_client": "qbit"},
+        "TORRENT_CLIENTS": {"qbit": {"torrent_client": "qbit", "qbit_url": "http://127.0.0.1", "qbit_port": 8080,
+                                     "qbit_user": "u", "qbit_pass": "p"}},
+        "TRACKERS": {},
+    }
+    meta = {"base_dir": str(tmp_path), "uuid": "u", "clean_name": "Peli", "path": str(contenido), **extra}
+    assert asyncio.run(clients.Clients(config=config).add_to_client(meta, "EMU")) is esperado
 
 
 def test_si_no_aparece_no_se_da_por_anadido(qbit, capsys, monkeypatch):

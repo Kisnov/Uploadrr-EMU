@@ -306,15 +306,51 @@ class Unit3d:
                 console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
                 return True
         try:
-            new_torrent = tmp_dir / f"[{self.tracker}]{meta['clean_name']}.torrent"
-            new_torrent.write_bytes(content)
-            url = raw_url.replace("/download", "s")
-            url = re.sub(r"/(\d+)\..*$", r"/\1", url)
-            await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
+            await self._guardar_torrent(meta, raw_url, content)
         except Exception as e:
             console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
             return True
         console.print("[bold green]Torrent uploaded successfully!")
+        return True
+
+    async def _guardar_torrent(self, meta: Dict[str, Any], raw_url: str, content: bytes) -> None:
+        """Guarda el .torrent firmado como [TRACKER]<clean_name>.torrent, con la ficha en el comentario."""
+        new_torrent = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
+        new_torrent.write_bytes(content)
+        url = raw_url.replace("/download", "s")
+        url = re.sub(r"/(\d+)\..*$", r"/\1", url)
+        await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
+
+    async def descargar_subido(self, meta: Dict[str, Any], torrent_id: int) -> bool:
+        """--solo-cliente: guarda, como tras subirlo, el .torrent firmado de un torrent que ya está en el tracker."""
+        headers = {"User-Agent": f"Uploadrr / v2.0 ({platform.system()} {platform.release()})"}
+        params = {"api_token": self.config["TRACKERS"][self.tracker]["api_key"].strip()}
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(f"{self.domain}/api/torrents/{torrent_id}", params=params, headers=headers)
+        except httpx.HTTPError as e:
+            console.print(f"[red]{self.tracker}: no se pudo consultar el torrent {torrent_id}: {type(e).__name__}")
+            return False
+        if response.status_code != 200:
+            console.print(f"[red]{self.tracker}: la API devolvió HTTP {response.status_code} para el torrent {torrent_id}")
+            return False
+        try:
+            body = response.json()
+            link = body.get("data", body)["attributes"]["download_link"]  # con o sin el envoltorio data
+        except (ValueError, KeyError, TypeError, AttributeError):
+            link = None
+        if not isinstance(link, str) or not link:
+            console.print(f"[red]{self.tracker}: la API no da enlace de descarga para el torrent {torrent_id}")
+            return False
+        content, error = await self._download_torrent(link, params, headers)
+        if error:
+            console.print(f"[red]{self.tracker}: no se pudo descargar el .torrent {torrent_id}: {error}")
+            return False
+        try:
+            await self._guardar_torrent(meta, link, content)
+        except Exception as e:
+            console.print(f"[red]{self.tracker}: no se pudo guardar el .torrent {torrent_id}: {e}")
+            return False
         return True
 
     async def _post_upload(self, data, torrent_path, nfo_file, extra_files_meta, headers, params):

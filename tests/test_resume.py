@@ -75,6 +75,20 @@ def test_un_resume_guardado_no_se_hereda_si_no_se_pasa(tmp_path):
     assert _run(load_existing_meta(tmp_path, str(item), con))["resume"] is True
 
 
+def test_un_solo_cliente_guardado_no_se_hereda(tmp_path):
+    item = tmp_path / "Peli"
+    guardado = tmp_path / "tmp" / "Peli"
+    guardado.mkdir(parents=True)
+    (guardado / "meta.json").write_text(json.dumps({"solo_cliente": 42, "tmdb": "1"}))
+
+    parser = build_parser({})
+    sin = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(parser.parse_args(["-rs"]))})
+    assert _run(load_existing_meta(tmp_path, str(item), sin))["solo_cliente"] is None
+
+    con = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(parser.parse_args(["-rs", "-sc", "7"]))})
+    assert _run(load_existing_meta(tmp_path, str(item), con))["solo_cliente"] == 7
+
+
 def test_un_aviso_de_baja_calidad_guardado_no_se_hereda_al_reanudar(tmp_path):
     item = tmp_path / "Peli"
     guardado = tmp_path / "tmp" / "Peli"
@@ -679,3 +693,54 @@ def test_la_cola_salta_el_item_si_queda_un_torrent_viejo(cola, monkeypatch, caps
         lanzar()
 
     assert subidos == []                                 # y no se subió nada
+
+
+# ---------------------------------------------------------------------------
+# --solo-cliente en la cola: solo el .torrent firmado y el cliente
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def solo_cliente(cola, monkeypatch):
+    base, lanzar = cola
+    estado = {"descarga": True, "anadido": True, "llamadas": []}
+
+    async def descargar(self, meta, torrent_id):
+        estado["llamadas"].append(("descargar", torrent_id))
+        return estado["descarga"]
+
+    async def anadir(client, meta, tracker):
+        estado["llamadas"].append(("cliente", tracker))
+        return estado["anadido"]
+
+    async def prohibido(*_a, **_k):
+        raise AssertionError("con --solo-cliente no se buscan duplicados, ni se hace el torrent, ni se sube")
+
+    monkeypatch.setattr(TrackerFalso, "descargar_subido", descargar, raising=False)
+    monkeypatch.setattr(upload, "anadir_al_cliente", anadir)
+    for paso in ("pre_upload_checks", "handle_torrent_creation", "upload_to_trackers"):
+        monkeypatch.setattr(upload, paso, prohibido)
+    # Como llega de la línea de órdenes: apply_special_logic le añade el resume.
+    return base, lambda: lanzar(**apply_special_logic({"solo_cliente": 42})), estado
+
+
+def test_solo_cliente_solo_baja_el_torrent_y_lo_anade_sin_borrar_tmp(solo_cliente, capsys):
+    base, lanzar, estado = solo_cliente
+    viejo = _estado_viejo(base)
+
+    lanzar()  # sin SystemExit: sale con 0
+
+    assert estado["llamadas"] == [("descargar", 42), ("cliente", "EMU")]
+    assert Aplicacion.fases == []  # ni capturas
+    assert (viejo / "captura.png").exists() and (viejo / "BASE.torrent").exists()
+    assert _pasos(capsys) == []
+
+
+@pytest.mark.parametrize(("descarga", "anadido"), [(False, True), (True, False)], ids=["sin-torrent", "sin-cliente"])
+def test_solo_cliente_sale_con_1_si_no_queda_anadido(solo_cliente, descarga, anadido):
+    _base, lanzar, estado = solo_cliente
+    estado.update(descarga=descarga, anadido=anadido)
+
+    with pytest.raises(SystemExit) as salida:
+        lanzar()
+
+    assert salida.value.code == 1
+    assert estado["llamadas"][-1] == (("cliente", "EMU") if descarga else ("descargar", 42))

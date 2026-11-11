@@ -280,25 +280,25 @@ class Clients:
 
         return False
 
-    async def add_to_client(self, meta: dict, tracker: str) -> None:
-        """Add a torrent to the specified client."""
+    async def add_to_client(self, meta: dict, tracker: str) -> bool:
+        """Add a torrent to the specified client. True only if it was added."""
         torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{tracker}]{meta['clean_name']}.torrent"
         log.debug(f"Attempting to add torrent at {torrent_path} to client")
 
         if meta.get("no_seed", False):
             console.print("[bold red]--no_seed passed; torrent not added to client")
             console.print("[bold yellow]Add torrent manually to the client")
-            return
+            return False
 
         if not torrent_path.exists():
             log.debug(f"Torrent file not found at {torrent_path}")
-            return
+            return False
 
         torrent = Torrent.read(torrent_path)
         torrent_client = self._get_torrent_client(meta)
         if not torrent_client or torrent_client == "none":
             log.debug("No valid torrent client specified; skipping addition")
-            return
+            return False
 
         client = self.config["TORRENT_CLIENTS"][torrent_client]
         client_type = client["torrent_client"].lower()
@@ -319,9 +319,10 @@ class Clients:
 
         client_method = client_methods.get(client_type)
         if client_method:
-            await client_method(path, torrent_path, torrent, meta, local_path, remote_path, client, tracker)
-        else:
-            console.print(f"[bold red]Unsupported torrent client: {client_type}")
+            # Solo qBittorrent dice si lo ha añadido: los demás no cuentan como añadidos.
+            return bool(await client_method(path, torrent_path, torrent, meta, local_path, remote_path, client, tracker))
+        console.print(f"[bold red]Unsupported torrent client: {client_type}")
+        return False
 
     async def remote_path_map(self, meta: dict) -> Tuple[str, str]:
         """Map local paths to remote paths based on client configuration."""
@@ -400,7 +401,7 @@ class Clients:
         remote_path: str,
         client: dict,
         tracker: str,
-    ) -> None:
+    ) -> bool:
         """Add torrent to qBittorrent with corrected tag application."""
         path_str = self._adjust_path(save_path, local_path, remote_path)
         if save_path.is_dir() and (
@@ -419,14 +420,14 @@ class Clients:
             qbt_client.auth_log_in()
         except qbittorrentapi.LoginFailed:
             console.print("[bold red]INCORRECT QBIT LOGIN CREDENTIALS")
-            return
+            return False
 
         auto_management = self._check_auto_management(path_str, client.get("automatic_management_paths", ""))
         qbt_client.torrents_add(
             torrent_files=torrent.dump(),
             save_path=path_str,
             use_auto_torrent_management=auto_management,
-            is_skip_checking=True,
+            is_skip_checking=not meta.get("solo_cliente"),  # con --solo-cliente, qBittorrent lo comprueba
             content_layout=client.get("content_layout", "Original"),
             category=meta.get("qbit_cat", client.get("qbit_cat")),
         )
@@ -434,6 +435,7 @@ class Clients:
         await self._wait_for_torrent(qbt_client, torrent.infohash)
         self._apply_qbit_tags(qbt_client, torrent.infohash, client, meta, tracker)
         console.print(f"Added to: {path_str}")
+        return True
 
     async def _add_to_deluge(
         self,

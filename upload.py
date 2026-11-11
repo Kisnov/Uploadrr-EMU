@@ -26,7 +26,7 @@ from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marc
 from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
-from src.utils.upload import get_confirmation, upload_to_trackers
+from src.utils.upload import anadir_al_cliente, get_confirmation, upload_to_trackers
 
 # Globals
 python_cmd = sys.executable
@@ -204,6 +204,16 @@ class Uploadrr:
                     skipped_tmdb.append(path)
                     continue
 
+                if item_meta.get("solo_cliente") is not None:
+                    # Ya está en el tracker: sin capturas, duplicados, torrent ni subida, solo el cliente.
+                    anadido = await self._solo_cliente(item_meta, tracker_registry)
+                    successful += int(anadido)
+                    skipped += int(not anadido)
+                    if not anadido:
+                        skipped_details.append((path, "Client add failed"))
+                    progress.update(f"Processing {item_name}: {'Re-added to client' if anadido else 'Skipped'}")
+                    continue
+
                 screens_handled = False
                 # Con generate_b4_confirm las capturas se hacen antes de saber los trackers viables: sin restricción de hosts.
                 tracker_whitelists: Dict[str, List[str]] = {}
@@ -299,6 +309,19 @@ class Uploadrr:
         # esto (emuwarez-uploadrr) lo daba por subido.
         if successful < total:
             sys.exit(1)
+
+    async def _solo_cliente(self, meta: Dict[str, Any], tracker_registry: Dict[str, Any]) -> bool:
+        """--solo-cliente: baja de EMU el .torrent firmado de un torrent ya subido y lo añade al cliente."""
+        if "EMU" not in tracker_registry:
+            console.print("[red]--solo-cliente solo funciona con -tk EMU")
+            return False
+        emu = tracker_registry["EMU"]["class"](config=self.config)
+        if not await emu.descargar_subido(meta, meta["solo_cliente"]):
+            return False
+        if not await anadir_al_cliente(self.client, meta, "EMU"):
+            console.print("[red]--solo-cliente: el torrent no se ha añadido al cliente")
+            return False
+        return True
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""

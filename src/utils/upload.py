@@ -139,13 +139,7 @@ async def upload_to_tracker(
         if client:
             # El torrent ya está en el tracker: si falla el cliente no es una
             # subida fallida, y reintentarla la duplicaría.
-            try:
-                await client.add_to_client(meta, tracker_name)
-            except Exception as e:
-                # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
-                # Va por print, así que hay que taparla a mano: el error de conexión lleva la clave de qui.
-                motivo = redactor.redact(" ".join(str(e).split()))
-                print(f"Torrent client add failed: {motivo or type(e).__name__}", flush=True)
+            await anadir_al_cliente(client, meta, tracker_name)
         return True, skipped_files
     else:
         if client and result == "DEBUG":
@@ -153,6 +147,18 @@ async def upload_to_tracker(
         skipped_files += 1
         skipped_details.append((path, f"{tracker_name} {result if isinstance(result, str) else 'Rejected Upload'}"))
         return False, skipped_files
+
+
+async def anadir_al_cliente(client: Clients, meta: Dict, tracker_name: str) -> bool:
+    """add_to_client sin dejar escapar errores: True solo si el torrent quedó añadido."""
+    try:
+        return await client.add_to_client(meta, tracker_name)
+    except Exception as e:
+        # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
+        # Va por print, así que hay que taparla a mano: el error de conexión lleva la clave de qui.
+        motivo = redactor.redact(" ".join(str(e).split()))
+        print(f"Torrent client add failed: {motivo or type(e).__name__}", flush=True)
+        return False
 
 
 async def upload_to_ar(ar, meta: Dict, path: str, skipped_details: List[Tuple], config: Dict) -> bool:
