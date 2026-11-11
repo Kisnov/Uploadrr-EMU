@@ -580,7 +580,7 @@ def test_solo_cliente_baja_el_torrent_firmado_y_lo_anade(tracker, upload_meta, s
     serve_download(tracker, signed_torrent)
     cliente = ClienteFalso()
 
-    assert solo_cliente(cliente) is True
+    assert solo_cliente(cliente) is None
     assert cliente.anadidos == [("EMU", True)]
     assert torf.Torrent.read(saved_torrent(upload_meta)).comment == f"Made by Uploadrr for: {tracker.url}/torrents/42"
     assert tracker.calls("GET", API_TORRENT)[0]["api_token"] == [TOKEN]
@@ -606,7 +606,7 @@ def test_solo_cliente_sin_enlace_no_toca_el_cliente(tracker, upload_meta, solo_c
     tracker.routes[("GET", API_TORRENT)] = lambda q: respuesta
     cliente = ClienteFalso()
 
-    assert solo_cliente(cliente) is False
+    assert solo_cliente(cliente) is not None
     assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()
     assert TOKEN not in capsys.readouterr().out
 
@@ -616,7 +616,7 @@ def test_solo_cliente_si_el_torrent_no_baja_no_toca_el_cliente(tracker, upload_m
     tracker.routes[("GET", "/torrent/download/42.rsskey")] = lambda q: (200, b"<html>login</html>")
     cliente = ClienteFalso()
 
-    assert solo_cliente(cliente) is False
+    assert solo_cliente(cliente) is not None
     assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()
     assert len(tracker.calls("GET", "/torrent/download/42.rsskey")) == 4
     assert TOKEN not in capsys.readouterr().out
@@ -627,7 +627,7 @@ def test_solo_cliente_falla_si_el_cliente_no_lo_anade(tracker, signed_torrent, s
     tracker.routes[("GET", API_TORRENT)] = lambda q: (200, {"data": {"attributes": {"download_link": download_url(tracker)}}})
     serve_download(tracker, signed_torrent)
 
-    assert solo_cliente(ClienteFalso(resultado)) is False
+    assert solo_cliente(ClienteFalso(resultado)) is not None
     out = capsys.readouterr().out
     assert "el torrent no se ha añadido al cliente" in out
     assert ("Torrent client add failed: Failed to connect to qBittorrent." in out) == isinstance(resultado, Exception)
@@ -650,7 +650,7 @@ def carpeta(tmp_path, tracker):
 def test_solo_cliente_carpeta_que_coincide_se_anade(carpeta, solo_cliente):
     (carpeta / "extra.nfo").write_text("no está en el torrent")  # lo que torf excluye no molesta
     cliente = ClienteFalso()
-    assert solo_cliente(cliente, ruta=carpeta) is True
+    assert solo_cliente(cliente, ruta=carpeta) is None
     assert cliente.anadidos == [("EMU", True)]
 
 
@@ -667,7 +667,7 @@ def test_solo_cliente_carpeta_distinta_no_se_anade(carpeta, upload_meta, solo_cl
     cambio(carpeta)
     cliente = ClienteFalso()
 
-    assert solo_cliente(cliente, ruta=carpeta) is False
+    assert solo_cliente(cliente, ruta=carpeta) is not None
     assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()  # el .torrent no se queda para reusarlo
     out = capsys.readouterr().out
     assert f"el torrent no coincide con la subida en {fichero}" in out and str(carpeta) not in out
@@ -686,13 +686,20 @@ def test_solo_cliente_fichero_distinto_no_se_anade(tracker, upload_meta, signed_
     ruta = base / "x.bin" if (base / "x.bin").exists() else base / "y.bin"
     cliente = ClienteFalso()
 
-    assert solo_cliente(cliente, ruta=ruta) is False
+    assert solo_cliente(cliente, ruta=ruta) is not None
     assert cliente.anadidos == [] and not saved_torrent(upload_meta).exists()
     assert "el torrent no coincide con la subida en x.bin" in capsys.readouterr().out
 
 
+def test_solo_cliente_carpeta_con_otra_raiz_no_se_anade(carpeta, solo_cliente):
+    otra = carpeta.rename(carpeta.parent / "OtraSerie")  # mismos ficheros, otra carpeta: qBittorrent iría a otra ruta
+    cliente = ClienteFalso()
+    assert solo_cliente(cliente, ruta=otra) == f"El torrent no coincide con la subida en {carpeta.name}"
+    assert cliente.anadidos == []
+
+
 def test_solo_cliente_solo_vale_para_emu(tracker, solo_cliente):
-    assert solo_cliente(ClienteFalso(), registro={}) is False
+    assert solo_cliente(ClienteFalso(), registro={}) is not None
     assert tracker.requests == []
 
 

@@ -45,6 +45,8 @@ def fichero_distinto(torrent_path: Path, contenido: Path) -> Optional[str]:
         if "length" in info:  # un solo fichero
             iguales = contenido.is_file() and contenido.name == info["name"] and contenido.stat().st_size == info["length"]
             return None if iguales else info["name"]
+        if contenido.name != info["name"]:  # la raíz del torrent es parte de la ruta en qBittorrent
+            return info["name"]
         for fichero in info["files"]:
             relativo = Path(*fichero["path"])
             local = contenido / relativo
@@ -224,12 +226,12 @@ class Uploadrr:
 
                 if item_meta.get("solo_cliente") is not None:
                     # Ya está en el tracker: sin capturas, duplicados, torrent ni subida, solo el cliente.
-                    anadido = await self._solo_cliente(item_meta, tracker_registry)
-                    successful += int(anadido)
-                    skipped += int(not anadido)
-                    if not anadido:
-                        skipped_details.append((path, "Client add failed"))
-                    progress.update(f"Processing {item_name}: {'Re-added to client' if anadido else 'Skipped'}")
+                    fallo = await self._solo_cliente(item_meta, tracker_registry)
+                    successful += int(fallo is None)
+                    skipped += int(fallo is not None)
+                    if fallo is not None:
+                        skipped_details.append((path, fallo))  # el motivo sale en el resumen también con --quiet
+                    progress.update(f"Processing {item_name}: {'Skipped' if fallo else 'Re-added to client'}")
                     continue
 
                 screens_handled = False
@@ -328,25 +330,26 @@ class Uploadrr:
         if successful < total:
             sys.exit(1)
 
-    async def _solo_cliente(self, meta: Dict[str, Any], tracker_registry: Dict[str, Any]) -> bool:
-        """--solo-cliente: baja de EMU el .torrent firmado de un torrent ya subido y lo añade al cliente."""
+    async def _solo_cliente(self, meta: Dict[str, Any], tracker_registry: Dict[str, Any]) -> Optional[str]:
+        """--solo-cliente: baja de EMU el .torrent firmado de un torrent ya subido y lo añade al cliente.
+        Devuelve None si se añadió, o el motivo por el que no."""
         if "EMU" not in tracker_registry:
             console.print("[red]--solo-cliente solo funciona con -tk EMU")
-            return False
+            return "--solo-cliente necesita -tk EMU"
         emu = tracker_registry["EMU"]["class"](config=self.config)
         torrent = await emu.descargar_subido(meta, meta["solo_cliente"])
         if torrent is None:
-            return False
+            return "No se pudo bajar el .torrent de EMU"
         # La subida son hardlinks a la biblioteca: con otros ficheros, qBittorrent descargaría encima de los originales.
         distinto = fichero_distinto(torrent, Path(meta["path"]))
         if distinto:
             console.print(f"[red]--solo-cliente: el torrent no coincide con la subida en {distinto}")
             torrent.unlink(missing_ok=True)
-            return False
+            return f"El torrent no coincide con la subida en {distinto}"
         if not await anadir_al_cliente(self.client, meta, "EMU"):
             console.print("[red]--solo-cliente: el torrent no se ha añadido al cliente")
-            return False
-        return True
+            return "El torrent no se ha añadido al cliente"
+        return None
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""

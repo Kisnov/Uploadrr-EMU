@@ -750,3 +750,20 @@ def test_solo_cliente_sale_con_1_si_no_queda_anadido(solo_cliente, descarga, ana
 
     assert salida.value.code == 1
     assert estado["llamadas"][-1] == (("cliente", "EMU") if descarga else ("descargar", 42))
+
+
+@pytest.mark.parametrize(("descarga", "anadido", "motivo"), [
+    (False, True, "No se pudo bajar el .torrent de EMU"),
+    (True, False, "El torrent no se ha añadido al cliente"),
+], ids=["sin-torrent", "sin-cliente"])
+def test_solo_cliente_deja_el_motivo_en_el_resumen(solo_cliente, monkeypatch, descarga, anadido, motivo):
+    # Con --quiet los console.print no salen: el resumen es lo que queda.
+    _base, lanzar, estado = solo_cliente
+    estado.update(descarga=descarga, anadido=anadido)
+    resumenes = []
+    monkeypatch.setattr(upload, "print_summary", lambda *a: resumenes.append(a[3]))
+
+    with pytest.raises(SystemExit):
+        lanzar()
+
+    assert [m for _ruta, m in resumenes[0]] == [motivo]

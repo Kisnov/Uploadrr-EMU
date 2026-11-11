@@ -11,6 +11,8 @@ from src.utils import upload
 
 class Torrent:
     infohash = "a" * 40
+    mode = "singlefile"
+    name = "x"
 
     def dump(self):
         return b"d4:infod4:name1:xee"
@@ -22,9 +24,13 @@ class Qbit:
     aparece = True
     login = True
     anadidos: list = []
+    # Lo que va enseñando torrents_info tras la comprobación: (state, progress) por consulta; el último se repite.
+    estados: list = [("stoppedUP", 1)]
+    arrancados: list = []
+    reanudados: list = []
 
     def __init__(self, **_kwargs):
-        self.reanudados = []
+        self._consultas = 0
 
     def auth_log_in(self):
         if not self.login:
@@ -35,16 +41,29 @@ class Qbit:
         return "Ok."
 
     def torrents_info(self, torrent_hashes):
-        return [{"hash": torrent_hashes}] if self.aparece else []
+        if not self.aparece:
+            return []
+        estado, progreso = Qbit.estados[min(self._consultas, len(Qbit.estados) - 1)]
+        self._consultas += 1
+        return [{"hash": torrent_hashes, "state": estado, "progress": progreso}]
 
     def torrents_resume(self, infohash):
-        self.reanudados.append(infohash)
+        Qbit.reanudados.append(infohash)
+
+    def torrents_recheck(self, torrent_hashes):
+        pass
+
+    def torrents_start(self, torrent_hashes):
+        Qbit.arrancados.append(torrent_hashes)
 
 
 @pytest.fixture
 def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(clients.qbittorrentapi, "Client", Qbit)
     monkeypatch.setattr(Qbit, "anadidos", [])
+    monkeypatch.setattr(Qbit, "arrancados", [])
+    monkeypatch.setattr(Qbit, "reanudados", [])
+    monkeypatch.setattr(Qbit, "estados", [("stoppedUP", 1)])
 
     async def sin_espera(_segundos):
         pass
@@ -52,9 +71,10 @@ def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(clients.asyncio, "sleep", sin_espera)
     cliente = {"qbit_url": "http://127.0.0.1", "qbit_port": 8080, "qbit_user": "u", "qbit_pass": "p"}
 
-    def anadir(meta=None):
+    def anadir(meta=None, torrent=None, ruta=None):
         c = clients.Clients(config={"TRACKERS": {}})
-        return asyncio.run(c._add_to_qbittorrent(tmp_path, tmp_path / "t.torrent", Torrent(), meta or {}, "/l", "/r", cliente, "EMU"))
+        return asyncio.run(c._add_to_qbittorrent(ruta or tmp_path, tmp_path / "t.torrent", torrent or Torrent(), meta or {},
+                                                 "/l", "/r", cliente, "EMU"))
 
     return anadir
 
@@ -65,9 +85,45 @@ def test_si_qbittorrent_lo_muestra_se_da_por_anadido(qbit, capsys):
     assert Qbit.anadidos[0]["is_skip_checking"] is True  # recién hasheado: no hace falta comprobarlo
 
 
-def test_con_solo_cliente_qbittorrent_lo_comprueba(qbit):
+def test_sin_solo_cliente_entra_arrancado(qbit):
+    assert qbit() is True
+    assert Qbit.anadidos[0]["is_stopped"] is False and Qbit.reanudados and Qbit.arrancados == []
+
+
+def test_con_solo_cliente_entra_parado_y_arranca_si_la_comprobacion_da_100(qbit, capsys):
+    Qbit.estados = [("checkingUP", 0.4), ("checkingUP", 0.9), ("stoppedUP", 1)]
     assert qbit({"solo_cliente": 42}) is True
-    assert Qbit.anadidos[0]["is_skip_checking"] is False
+    assert Qbit.anadidos[0]["is_skip_checking"] is False and Qbit.anadidos[0]["is_stopped"] is True
+    assert Qbit.reanudados == [] and Qbit.arrancados == [Torrent.infohash]
+    assert "Added to:" in capsys.readouterr().out
+
+
+def test_con_solo_cliente_se_queda_parado_si_faltan_piezas(qbit, capsys):
+    # Mismo nombre y tamaño pero otros bytes: arrancarlo bajaría piezas encima de los hardlinks.
+    Qbit.estados = [("checkingDL", 0.5), ("stoppedDL", 0.97)]
+    assert qbit({"solo_cliente": 42}) is False
+    assert Qbit.arrancados == [] and Qbit.reanudados == []
+    out = capsys.readouterr().out
+    assert "se queda parado" in out and "Added to:" not in out
+
+
+def test_con_solo_cliente_espera_a_que_empiece_la_comprobacion(qbit, monkeypatch):
+    # Justo tras pedirla, qBittorrent aún enseña el estado de antes: no se decide con eso.
+    reloj = iter(range(0, 1000, 3))
+    monkeypatch.setattr(clients.time, "monotonic", lambda: next(reloj))
+    Qbit.estados = [("stoppedDL", 0), ("checkingDL", 0.2), ("stoppedUP", 1)]
+    assert qbit({"solo_cliente": 42}) is True
+
+
+def test_un_torrent_de_carpeta_cuya_raiz_es_path_va_en_la_carpeta_de_encima(qbit, tmp_path):
+    serie = tmp_path / "Serie"
+    serie.mkdir()
+
+    class DeCarpeta(Torrent):
+        mode, name = "multifile", "Serie"
+
+    assert qbit({"category": "TV", "video_files": ["uno.mkv"]}, torrent=DeCarpeta(), ruta=serie) is True
+    assert Qbit.anadidos[0]["save_path"].rstrip("/").endswith(tmp_path.name)  # no .../Serie/Serie
 
 
 def test_credenciales_malas_no_se_dan_por_anadido(qbit, capsys, monkeypatch):

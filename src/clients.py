@@ -18,6 +18,12 @@ from torf import Torrent
 
 from src.utils.console import console, log
 
+# --solo-cliente: lo que puede tardar qBittorrent en comprobar un pack grande, y sus estados mientras lo hace.
+ESPERA_COMPROBACION = 30 * 60
+ESTADOS_COMPROBANDO = {"checkingUP", "checkingDL", "checkingResumeData", "queuedForChecking", "allocating", "moving"}
+# Tras pedir la comprobación, qBittorrent puede tardar un poco en pasar a «checking»: hasta entonces no se decide.
+ESPERA_INICIO_COMPROBACION = 10
+
 
 class Clients:
     """Handles adding torrents to various torrent clients with an optimized index."""
@@ -408,6 +414,8 @@ class Clients:
             (meta.get("category") in {"Anime", "MOVIE", "TV", "XXX"} and len(meta.get("video_files", [])) > 1)
             or meta.get("category") == "MUSIC"
             and len(meta.get("music_files", [])) > 1
+            # Un torrent de carpeta cuya raíz ya es PATH (p. ej. un vídeo y un subtítulo) va en la carpeta de encima.
+            or (torrent.mode == "multifile" and torrent.name == save_path.name)
         ):
             path_str = str(Path(path_str).parent)
         if not path_str.endswith("/"):
@@ -422,18 +430,23 @@ class Clients:
             console.print("[bold red]INCORRECT QBIT LOGIN CREDENTIALS")
             return False
 
+        solo_cliente = meta.get("solo_cliente") is not None
         auto_management = self._check_auto_management(path_str, client.get("automatic_management_paths", ""))
         qbt_client.torrents_add(
             torrent_files=torrent.dump(),
             save_path=path_str,
             use_auto_torrent_management=auto_management,
-            is_skip_checking=not meta.get("solo_cliente"),  # con --solo-cliente, qBittorrent lo comprueba
+            # Con --solo-cliente entra parado y se comprueba: solo arranca si los ficheros están completos.
+            is_skip_checking=not solo_cliente,
+            is_stopped=solo_cliente,
             content_layout=client.get("content_layout", "Original"),
             category=meta.get("qbit_cat", client.get("qbit_cat")),
         )
 
-        await self._wait_for_torrent(qbt_client, torrent.infohash)
+        await self._wait_for_torrent(qbt_client, torrent.infohash, arrancar=not solo_cliente)
         self._apply_qbit_tags(qbt_client, torrent.infohash, client, meta, tracker)
+        if solo_cliente and not await self._arrancar_si_completo(qbt_client, torrent.infohash):
+            return False
         console.print(f"Added to: {path_str}")
         return True
 
@@ -623,14 +636,42 @@ class Clients:
             return any(Path(each).as_posix().lower() in path.lower() for each in am_config)
         return bool(am_config.strip() and Path(am_config).as_posix().lower() in path.lower())
 
-    async def _wait_for_torrent(self, qbt_client: qbittorrentapi.Client, infohash: str) -> None:
+    async def _wait_for_torrent(self, qbt_client: qbittorrentapi.Client, infohash: str, arrancar: bool = True) -> None:
         """Wait for qBittorrent to recognize the added torrent."""
         for _ in range(30):
             if qbt_client.torrents_info(torrent_hashes=infohash):
-                qbt_client.torrents_resume(infohash)
+                if arrancar:
+                    qbt_client.torrents_resume(infohash)
                 return
             await asyncio.sleep(1)
         raise RuntimeError(f"qBittorrent no muestra el torrent {infohash} 30 s después de añadirlo")
+
+    async def _arrancar_si_completo(self, qbt_client: qbittorrentapi.Client, infohash: str) -> bool:
+        """--solo-cliente: espera a que qBittorrent compruebe el torrent parado y lo arranca solo si está al 100 %.
+        Si le falta algo se queda parado: arrancarlo bajaría piezas encima de los ficheros (hardlinks a la biblioteca)."""
+        qbt_client.torrents_recheck(torrent_hashes=infohash)
+        inicio = time.monotonic()
+        limite = inicio + ESPERA_COMPROBACION
+        visto = False
+        while True:
+            await asyncio.sleep(2)
+            info = qbt_client.torrents_info(torrent_hashes=infohash)
+            if not info:
+                console.print("[red]--solo-cliente: el torrent ha desaparecido de qBittorrent mientras se comprobaba")
+                return False
+            estado, progreso = info[0].get("state", ""), float(info[0].get("progress", 0))
+            if estado in ESTADOS_COMPROBANDO:
+                visto = True
+            elif visto or time.monotonic() - inicio >= ESPERA_INICIO_COMPROBACION:
+                break
+            if time.monotonic() > limite:
+                console.print(f"[red]--solo-cliente: qBittorrent no ha terminado de comprobar en {ESPERA_COMPROBACION // 60} min; se queda parado")
+                return False
+        if progreso < 1:
+            console.print(f"[red]--solo-cliente: los ficheros no coinciden con el torrent ({progreso:.0%}); se queda parado en qBittorrent")
+            return False
+        qbt_client.torrents_start(torrent_hashes=infohash)
+        return True
 
     def _apply_qbit_tags(self, qbt_client: qbittorrentapi.Client, infohash: str, client: dict, meta: dict, tracker: str) -> None:
         """Apply tags to a qBittorrent torrent with corrected tracker tag retrieval."""
