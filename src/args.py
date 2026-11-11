@@ -192,6 +192,10 @@ def apply_special_logic(meta: Dict[str, Any]) -> Dict[str, Any]:
         meta["auto_desc"] = True
         meta["auto_queue"] = meta["full_auto"]  # could be str (dir) or True
 
+    # --- Solo cliente: tmp/<uuid> se conserva como con --resume ---
+    if meta.get("solo_cliente") is not None:
+        meta["resume"] = True
+
     # --- Debug mode settings ---
     if meta.get("debug") or meta.get("deep_debug"):
         meta["qbit_cat"] = "DEBUG"
@@ -430,6 +434,9 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("-blu", "--blu", nargs="*", help="BLU torrent ID or URL")
     parser.add_argument("-hdb", "--hdb", nargs="*", help="HDB torrent ID or URL")
     parser.add_argument("-th", "--torrenthash", nargs="*", help="Reuse existing torrent hash")
+    parser.add_argument(
+        "-sc", "--solo-cliente", dest="solo_cliente", type=int, help="EMU torrent id already uploaded: only re-add it to the client"
+    )
     parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
     parser.add_argument("-reg", "--region", nargs="*", help="Region (for discs)")
     parser.add_argument("-mt", "--manual-title", dest="manual_name", nargs="*", help="Override generated name")

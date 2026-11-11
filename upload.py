@@ -5,10 +5,11 @@ import asyncio
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import inspect
 
 import requests
+from torf import Torrent
 
 import src.utils.imports  # noqa: F401
 from src.args import apply_special_logic, build_parser, enforce_global_only, group_args_by_path, normalize_args, supplied_args
@@ -26,7 +27,7 @@ from src.utils.meta import edit_meta, limpiar_tmp_item, load_existing_meta, marc
 from src.utils.queue import apply_delay, expand_auto_queue, normalize_trackers
 from src.utils.torrentman import handle_torrent_creation
 from src.utils.ui import print_banner, print_summary
-from src.utils.upload import get_confirmation, upload_to_trackers
+from src.utils.upload import anadir_al_cliente, get_confirmation, upload_to_trackers
 
 # Globals
 python_cmd = sys.executable
@@ -35,6 +36,25 @@ data_dir = base_dir / "data"
 config_path = data_dir / "config.yaml"
 legacy_config = data_dir / "config.py"
 old_config_path = data_dir / "backup" / "old_config.py"
+
+
+def fichero_distinto(torrent_path: Path, contenido: Path) -> Optional[str]:
+    """El primer fichero del torrent que falta en contenido o tiene otro tamaño (relativo a su raíz), o None."""
+    try:
+        info = Torrent.read(torrent_path, validate=False).metainfo["info"]
+        if "length" in info:  # un solo fichero
+            iguales = contenido.is_file() and contenido.name == info["name"] and contenido.stat().st_size == info["length"]
+            return None if iguales else info["name"]
+        if contenido.name != info["name"]:  # la raíz del torrent es parte de la ruta en qBittorrent
+            return info["name"]
+        for fichero in info["files"]:
+            relativo = Path(*fichero["path"])
+            local = contenido / relativo
+            if not local.is_file() or local.stat().st_size != fichero["length"]:
+                return relativo.as_posix()
+    except Exception as e:
+        return f"el .torrent ({type(e).__name__})"
+    return None
 
 
 class Uploadrr:
@@ -204,6 +224,16 @@ class Uploadrr:
                     skipped_tmdb.append(path)
                     continue
 
+                if item_meta.get("solo_cliente") is not None:
+                    # Ya está en el tracker: sin capturas, duplicados, torrent ni subida, solo el cliente.
+                    fallo = await self._solo_cliente(item_meta, tracker_registry)
+                    successful += int(fallo is None)
+                    skipped += int(fallo is not None)
+                    if fallo is not None:
+                        skipped_details.append((path, fallo))  # el motivo sale en el resumen también con --quiet
+                    progress.update(f"Processing {item_name}: {'Skipped' if fallo else 'Re-added to client'}")
+                    continue
+
                 screens_handled = False
                 # Con generate_b4_confirm las capturas se hacen antes de saber los trackers viables: sin restricción de hosts.
                 tracker_whitelists: Dict[str, List[str]] = {}
@@ -299,6 +329,27 @@ class Uploadrr:
         # esto (emuwarez-uploadrr) lo daba por subido.
         if successful < total:
             sys.exit(1)
+
+    async def _solo_cliente(self, meta: Dict[str, Any], tracker_registry: Dict[str, Any]) -> Optional[str]:
+        """--solo-cliente: baja de EMU el .torrent firmado de un torrent ya subido y lo añade al cliente.
+        Devuelve None si se añadió, o el motivo por el que no."""
+        if "EMU" not in tracker_registry:
+            console.print("[red]--solo-cliente solo funciona con -tk EMU")
+            return "--solo-cliente necesita -tk EMU"
+        emu = tracker_registry["EMU"]["class"](config=self.config)
+        torrent = await emu.descargar_subido(meta, meta["solo_cliente"])
+        if torrent is None:
+            return "No se pudo bajar el .torrent de EMU"
+        # La subida son hardlinks a la biblioteca: con otros ficheros, qBittorrent descargaría encima de los originales.
+        distinto = fichero_distinto(torrent, Path(meta["path"]))
+        if distinto:
+            console.print(f"[red]--solo-cliente: el torrent no coincide con la subida en {distinto}")
+            torrent.unlink(missing_ok=True)
+            return f"El torrent no coincide con la subida en {distinto}"
+        if not await anadir_al_cliente(self.client, meta, "EMU"):
+            console.print("[red]--solo-cliente: el torrent no se ha añadido al cliente")
+            return "El torrent no se ha añadido al cliente"
+        return None
 
     async def shutdown(self) -> None:
         """Clean up resources on shutdown."""

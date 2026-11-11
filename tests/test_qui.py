@@ -35,6 +35,7 @@ def sin_red_ni_procesos(monkeypatch):
 
 class Torrent:
     infohash = HASH
+    mode, name = "singlefile", "x"
 
     def dump(self):
         return b"d4:infod4:name1:xee"

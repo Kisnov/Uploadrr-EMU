@@ -42,6 +42,19 @@ def test_el_argv_de_emuwarez_uploadrr_llega_al_meta(tmp_path, extra, esperado):
     assert meta.get("season") is None and meta.get("episode") is None
 
 
+def test_solo_cliente_lleva_el_id_y_conserva_tmp_como_resume(tmp_path):
+    video = tmp_path / "Peli.mkv"
+    video.write_bytes(b"")
+    # Lo que añade emuwarez-uploadrr al argv de siempre.
+    items, global_argv = group_args_by_path([str(video), "-tk", "EMU", "-ua", "--resume", "-sc", "123"])
+    meta = apply_special_logic(normalize_args(build_parser({}).parse_args(global_argv)))
+
+    assert items == [([], str(video.resolve()))]
+    assert meta["solo_cliente"] == 123 and meta["resume"] is True
+    assert _meta(["--solo-cliente", "7"])["resume"] is True  # sin --resume tampoco se borra tmp/<uuid>
+    assert _meta([])["solo_cliente"] is None and _meta([])["resume"] is False
+
+
 def test_las_banderas_antes_de_una_ruta_son_de_esa_ruta(tmp_path):
     a, b = tmp_path / "a.mkv", tmp_path / "b.mkv"
     a.write_bytes(b"")
