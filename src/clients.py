@@ -441,7 +441,7 @@ class Clients:
             console.print("[red]--solo-cliente: el torrent ya está en qBittorrent; no se toca")
             return False
         auto_management = self._check_auto_management(path_str, client.get("automatic_management_paths", ""))
-        qbt_client.torrents_add(
+        respuesta = qbt_client.torrents_add(
             torrent_files=torrent.dump(),
             save_path=path_str,
             use_auto_torrent_management=auto_management,
@@ -451,6 +451,10 @@ class Clients:
             content_layout=client.get("content_layout", "Original"),
             category=meta.get("qbit_cat", client.get("qbit_cat")),
         )
+        if solo_cliente and respuesta != "Ok.":
+            # «Fails.»: ya estaba (alguien lo añadió entre medias) y no entró parado; no se toca.
+            console.print(f"[red]--solo-cliente: qBittorrent no lo ha añadido ({respuesta}); no se toca")
+            return False
 
         await self._wait_for_torrent(qbt_client, torrent.infohash, arrancar=not solo_cliente)
         self._apply_qbit_tags(qbt_client, torrent.infohash, client, meta, tracker)

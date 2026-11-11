@@ -37,9 +37,11 @@ class Qbit:
         if not self.login:
             raise clients.qbittorrentapi.LoginFailed()
 
+    respuesta = "Ok."
+
     def torrents_add(self, **kwargs):
         Qbit.anadidos.append(kwargs)
-        return "Ok."
+        return Qbit.respuesta
 
     def torrents_info(self, torrent_hashes):
         if not self.aparece or not (Qbit.anadidos or Qbit.ya_estaba):
@@ -66,6 +68,7 @@ def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(Qbit, "reanudados", [])
     monkeypatch.setattr(Qbit, "estados", [("stoppedUP", 1)])
     monkeypatch.setattr(Qbit, "ya_estaba", False)
+    monkeypatch.setattr(Qbit, "respuesta", "Ok.")
 
     async def sin_espera(_segundos):
         pass
@@ -204,3 +207,11 @@ def test_con_solo_cliente_otro_cliente_ni_se_intenta(tmp_path, monkeypatch, caps
     meta = {"base_dir": str(tmp_path), "uuid": "u", "clean_name": "x", "path": str(tmp_path / "x.mkv"), "solo_cliente": 42}
     assert asyncio.run(c.add_to_client(meta, "EMU")) is False
     assert llamados == [] and "solo funciona con qBittorrent" in capsys.readouterr().out
+
+
+def test_con_solo_cliente_no_sigue_si_qbittorrent_no_lo_anade(qbit, capsys):
+    # Otro lo añadió entre la consulta y el add: «Fails.» y ese torrent no entró parado.
+    Qbit.respuesta = "Fails."
+    assert qbit({"solo_cliente": 42}) is False
+    assert Qbit.arrancados == [] and Qbit.reanudados == []
+    assert "no lo ha añadido (Fails.)" in capsys.readouterr().out
