@@ -28,6 +28,7 @@ class Qbit:
     estados: list = [("stoppedUP", 1)]
     arrancados: list = []
     reanudados: list = []
+    ya_estaba = False
 
     def __init__(self, **_kwargs):
         self._consultas = 0
@@ -41,7 +42,7 @@ class Qbit:
         return "Ok."
 
     def torrents_info(self, torrent_hashes):
-        if not self.aparece:
+        if not self.aparece or not (Qbit.anadidos or Qbit.ya_estaba):
             return []
         estado, progreso = Qbit.estados[min(self._consultas, len(Qbit.estados) - 1)]
         self._consultas += 1
@@ -64,6 +65,7 @@ def qbit(tmp_path, monkeypatch):
     monkeypatch.setattr(Qbit, "arrancados", [])
     monkeypatch.setattr(Qbit, "reanudados", [])
     monkeypatch.setattr(Qbit, "estados", [("stoppedUP", 1)])
+    monkeypatch.setattr(Qbit, "ya_estaba", False)
 
     async def sin_espera(_segundos):
         pass
@@ -171,3 +173,34 @@ def test_subido_pero_el_cliente_falla_deja_la_linea_fija(capsys):
 
     assert resultado == (True, 0)
     assert "Torrent client add failed: Failed to connect to qBittorrent. Connection refused\n" in capsys.readouterr().out
+
+
+def test_con_solo_cliente_no_toca_un_torrent_que_ya_esta(qbit, capsys):
+    # Su 100 % sería de antes, no de esta comprobación.
+    Qbit.ya_estaba = True
+    assert qbit({"solo_cliente": 42}) is False
+    assert Qbit.anadidos == [] and Qbit.arrancados == []
+    assert "ya está en qBittorrent" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("tipo", ["rtorrent", "deluge", "transmission", "watch"])
+def test_con_solo_cliente_otro_cliente_ni_se_intenta(tmp_path, monkeypatch, capsys, tipo):
+    contenido = tmp_path / "x.mkv"
+    contenido.write_bytes(b"x" * 100)
+    (tmp_path / "tmp" / "u").mkdir(parents=True)
+    torrent = torf.Torrent(path=contenido, private=True)
+    torrent.generate()
+    torrent.write(tmp_path / "tmp" / "u" / "[EMU]x.torrent")
+    c = clients.Clients(config={"TRACKERS": {}, "DEFAULT": {"default_torrent_client": "c"},
+                                "TORRENT_CLIENTS": {"c": {"torrent_client": tipo}}})
+    llamados = []
+
+    async def metodo(*_a):
+        llamados.append(tipo)
+        return True
+
+    for nombre in ("_add_to_rtorrent", "_add_to_deluge", "_add_to_transmission", "_add_to_watch_folder"):
+        monkeypatch.setattr(c, nombre, metodo)
+    meta = {"base_dir": str(tmp_path), "uuid": "u", "clean_name": "x", "path": str(tmp_path / "x.mkv"), "solo_cliente": 42}
+    assert asyncio.run(c.add_to_client(meta, "EMU")) is False
+    assert llamados == [] and "solo funciona con qBittorrent" in capsys.readouterr().out

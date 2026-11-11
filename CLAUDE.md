@@ -46,7 +46,8 @@ or report their errors unless they break an eMuwarez upload.
   `[EMU]<clean_name>.torrent` like an upload, checks its root name, file names and sizes against `PATH` (hardlinks into
   the library: a mismatch deletes it and exits 1) and calls `add_to_client`. Only in this mode qBittorrent gets it
   stopped and unchecked-skip (`is_stopped=True`, `is_skip_checking=False`), it is rechecked, and it is started only at
-  100 %; otherwise it stays stopped (starting it would download into the hardlinks). Exit 0 only if `add_to_client`
+  100 %; otherwise it stays stopped (starting it would download into the hardlinks). Other clients are refused, and so
+  is a torrent already in qBittorrent (its 100 % would be an old one). Exit 0 only if `add_to_client`
   returned True (only qBittorrent reports it); any failure prints a reason, puts it in the summary and exits 1. `Torrent URL:` and `Torrent upload succeeded, but failed to` are never printed here.
 - Done steps: `meta["pasos_hechos"]` (list in `meta.json`) holds `screenshots` and `torrent`. Each is marked and
   saved first, then printed with plain `print(..., flush=True)` as `Step done: screenshots` / `Step done: torrent`

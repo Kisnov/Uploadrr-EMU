@@ -22,6 +22,7 @@ from src.utils.console import console, log
 ESPERA_COMPROBACION = 30 * 60
 ESTADOS_COMPROBANDO = {"checkingUP", "checkingDL", "checkingResumeData", "queuedForChecking", "allocating", "moving"}
 # Tras pedir la comprobación, qBittorrent puede tardar un poco en pasar a «checking»: hasta entonces no se decide.
+# Si fue tan rápida que no se vio, vale el progreso: un torrent recién añadido solo llega al 100 % comprobándolo.
 ESPERA_INICIO_COMPROBACION = 10
 
 
@@ -323,6 +324,10 @@ class Clients:
             "watch": self._add_to_watch_folder,
         }
 
+        if meta.get("solo_cliente") is not None and client_type != "qbit":
+            # Solo con qBittorrent se añade parado y se arranca tras comprobarlo: los demás arrancarían sin más.
+            console.print(f"[red]--solo-cliente solo funciona con qBittorrent (este cliente es {client_type})")
+            return False
         client_method = client_methods.get(client_type)
         if client_method:
             # Solo qBittorrent dice si lo ha añadido: los demás no cuentan como añadidos.
@@ -431,6 +436,10 @@ class Clients:
             return False
 
         solo_cliente = meta.get("solo_cliente") is not None
+        if solo_cliente and qbt_client.torrents_info(torrent_hashes=torrent.infohash):
+            # Recién añadido, un 100 % solo puede salir de comprobarlo; uno que ya estaba trae el suyo de antes.
+            console.print("[red]--solo-cliente: el torrent ya está en qBittorrent; no se toca")
+            return False
         auto_management = self._check_auto_management(path_str, client.get("automatic_management_paths", ""))
         qbt_client.torrents_add(
             torrent_files=torrent.dump(),
