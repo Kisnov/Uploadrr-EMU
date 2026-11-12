@@ -91,7 +91,7 @@ class COMMON:
                     words.add(attached.group(1))
             search =each.lower().replace("-", "").replace(" ", "").replace(".", "")
             required = []
-            if meta.get("sd", 0) != 1 and resolution:
+            if meta.get("sd", 0) != 1 and resolution and resolution != "other":  # «other» no sale en el nombre
                 required.append(any(_same_resolution(w, resolutions) for w in words))
             if needs_hdr:
                 required.append(bool({"hdr", "hdr10", "hdr10+", "hdr10plus", "pq10"} & words))

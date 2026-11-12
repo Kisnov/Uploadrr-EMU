@@ -24,6 +24,11 @@ def test_otra_resolucion_no_es_duplicado():
     assert _filtrar(["Peli 2020 2160p UHD BluRay HEVC-GRP"], resolution="2160p") == ["Peli 2020 2160p UHD BluRay HEVC-GRP"]
 
 
+def test_resolucion_other_no_descarta_candidatos():
+    nombres = ["Peli 2020 1440p BluRay x264-GRP", "Peli 2020 720p BluRay x264-GRP"]
+    assert _filtrar(nombres, resolution="other") == sorted(nombres)
+
+
 def test_sd_no_mira_la_resolucion():
     assert _filtrar(["Peli 2001 576p SD DVD-GRP"], resolution="480p", sd=1) == ["Peli 2001 576p SD DVD-GRP"]
 
