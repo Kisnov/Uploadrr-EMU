@@ -103,6 +103,20 @@ def test_resolucion_y_temporada_guardadas_no_se_heredan_si_cambian(tmp_path):
     assert (resultado["resolution"], resultado["manual_season"], resultado["manual_episode"]) == ("1080p", "S02", "E05")
 
 
+def test_save_meta_escribe_atomico_sin_dejar_temporales(tmp_path, monkeypatch):
+    assert _run(meta_mod.save_meta({"a": 1}, tmp_path, "Peli")) is True
+    destino = tmp_path / "tmp" / "Peli"
+    assert json.loads((destino / "meta.json").read_text(encoding="utf-8")) == {"a": 1}
+    assert [p.name for p in destino.iterdir()] == ["meta.json"]
+
+    def falla(origen, destino_):
+        raise OSError("corte")
+
+    monkeypatch.setattr(meta_mod.os, "replace", falla)  # un corte antes del reemplazo deja el meta.json anterior intacto
+    assert _run(meta_mod.save_meta({"a": 2}, tmp_path, "Peli")) is False
+    assert json.loads((destino / "meta.json").read_text(encoding="utf-8")) == {"a": 1}
+
+
 def test_un_aviso_de_baja_calidad_guardado_no_se_hereda_al_reanudar(tmp_path):
     item = tmp_path / "Peli"
     guardado = tmp_path / "tmp" / "Peli"

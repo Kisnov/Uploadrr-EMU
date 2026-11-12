@@ -19,8 +19,11 @@ async def save_meta(meta: Dict, base_dir: Path, uuid: str) -> bool:
         meta_dir = base_dir / "tmp" / uuid
         meta_dir.mkdir(parents=True, exist_ok=True)
         meta_path = meta_dir / "meta.json"
-        with meta_path.open("w", encoding="utf-8") as f:
+        # Escritura atómica: un corte a mitad no deja meta.json truncado.
+        tmp_path = meta_path.with_name(meta_path.name + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=4)
+        os.replace(tmp_path, meta_path)
         log.debug(f"Saved meta.json to {meta_path}")
         return True
     except Exception as e:
