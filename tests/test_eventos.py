@@ -298,6 +298,8 @@ def test_el_aviso_de_pack_incompleto(monkeypatch, tmp_path):
 
 
 def test_una_ruta_relativa_no_se_parte_al_cambiar_de_directorio(tmp_path, monkeypatch):
+    from src.utils import eventos
+
     (tmp_path / "otra").mkdir()
     monkeypatch.chdir(tmp_path)
     eventos.configurar("e.jsonl")
