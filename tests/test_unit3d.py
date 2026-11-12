@@ -795,3 +795,40 @@ def test_ids_de_resolucion_del_formulario_de_emu(emu, meta, resolucion, res_id):
 )
 def test_ids_de_tipo_del_formulario_de_emu(emu, meta, tipo, type_id):
     assert run(emu.get_type_id({**meta, "type": tipo})) == type_id
+
+
+# Eventos: la subida recuperada tras perder la respuesta se anuncia una sola vez
+
+
+def test_upload_recuperada_emite_subido_una_vez_y_lo_guarda_en_meta(tracker, emu, upload_meta, signed_torrent, tmp_path):
+    import json
+
+    from src.utils import eventos
+
+    emu.timeout = httpx.Timeout(0.5)
+    landed = []
+
+    def upload(query):
+        if not landed:
+            landed.append(NAME)
+            time.sleep(1)  # entra, pero contesta tarde
+            return 200, {"success": True, "data": download_url(tracker)}
+        return 404, {"success": False, "message": "Validation Error.", "data": {"name": ["The name has already been taken."]}}
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        200,
+        {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed if n == q["name"][0]], "links": {"next": None}},
+    )
+    serve_download(tracker, resigned(signed_torrent))
+    fichero = tmp_path / "eventos.jsonl"
+    eventos.configurar(str(fichero))
+    try:
+        assert run(emu.upload(upload_meta)) is True
+    finally:
+        eventos.configurar(None)
+
+    lineas = [json.loads(x) for x in fichero.read_text(encoding="utf-8").splitlines()]
+    assert [(e["torrent_id"], e["url"]) for e in lineas if e["ev"] == "subido"] == [(42, f"{emu.domain}/torrents/42")]
+    guardado = json.loads((tmp_path / "tmp" / "u" / "meta.json").read_text(encoding="utf-8"))
+    assert guardado["subido"] == {"id": 42, "url": f"{emu.domain}/torrents/42"}
