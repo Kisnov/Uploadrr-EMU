@@ -259,7 +259,7 @@ class Unit3d:
         # Un intento sin respuesta o con 5xx pudo entrar igualmente: lo busco antes de darlo por fallido. El
         # siguiente intento, en cambio, choca con el nombre ya usado. El tracker reescribe el .torrent y no da un
         # id de la subida, así que solo vale uno nuevo con este nombre, este tamaño y las mismas piezas.
-        if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and "has already been taken" in response.text):
+        if response is None or response.status_code in RETRY_STATUSES or (attempts > 1 and (response.status_code == 429 or "has already been taken" in response.text)):
             size = extract_size_from_torrent(meta["base_dir"], meta["uuid"])
             current = await self._links_named(meta, name) if previous is not None and size else None
             new = sorted(link for link, found in current - previous if found == size) if current is not None else []
