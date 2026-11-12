@@ -35,7 +35,7 @@ def test_el_argv_de_emuwarez_uploadrr_llega_al_meta(tmp_path, extra, esperado):
 
     assert items == [([], str(video.resolve()))]
     assert meta["trackers"] == ["EMU"]
-    assert meta["manual_name"] == [nombre]
+    assert meta["manual_name"] == nombre
     assert meta["tmdb_manual"] == "123"
     assert meta["unattended"] is True
     assert esperado.items() <= meta.items()

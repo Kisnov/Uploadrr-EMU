@@ -82,6 +82,7 @@ def test_mkbrr_solo_ve_los_ficheros_que_elige_torf(monkeypatch, mensajes, pack, 
     assert recibidos == [["Serie S01E01.mkv", "Serie S01E02.mkv"]]
     assert sorted(enlaces) == sorted(Path(p).resolve() for p in torrent.filepaths)
     assert [str(f) for f in Torrent.read(salida).files] == ["Serie S01/Serie S01E01.mkv", "Serie S01/Serie S01E02.mkv"]
+    assert Torrent.read(salida).created_by == "eMuwarr"  # no el «mkbrr/x.y.z» que deja mkbrr
     assert "mkbrr hashing complete" in mensajes.vistos
     assert not any("torf" in m for m in mensajes.vistos)
 

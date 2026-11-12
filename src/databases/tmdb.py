@@ -167,9 +167,11 @@ class TMDbHandler:
                 return result
             except httpx.HTTPStatusError as e:
                 await self._handle_tmdb_error(e, meta, attempt, max_retries)
+                if meta.get("tmdb_not_found"):
+                    return meta
             except Exception as e:
                 log.error(f"Unexpected error in attempt {attempt + 1}: {str(e)}", exc_info=True)
-                if attempt == 0:
+                if attempt == 0 and not meta.get("tmdb_manual"):  # con -tmdb el id es de esa categoría
                     log.debug(f"Switching category from {meta['category']} to {'TV' if meta['category'] == 'MOVIE' else 'MOVIE'}")
                     meta["category"] = "TV" if meta["category"] == "MOVIE" else "MOVIE"
                 if attempt == max_retries - 1:
@@ -352,6 +354,9 @@ class TMDbHandler:
             await asyncio.sleep(2**attempt)
         elif error.response.status_code == 404:
             console.print("[red]Invalid TMDb ID.")
+            if meta.get("unattended"):
+                meta["tmdb_not_found"] = True
+                return
             tmdb_id = Prompt.ask("Please enter TMDb ID (tv/12345 or movie/12345): ")
             meta["category"], meta["tmdb"] = parse_tmdb_id(tmdb_id, meta.get("category"))
             meta["tmdb_manual"] = meta["tmdb"]

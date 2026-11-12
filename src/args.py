@@ -150,6 +150,10 @@ def normalize_args(ns: argparse.Namespace) -> Dict[str, Any]:
     elif meta.get("freeleech"):
         meta["freeleech"] = int(meta["freeleech"][0]) if isinstance(meta["freeleech"], list) else int(meta["freeleech"])
 
+    # --- Manual title: list → space-joined string (the tracker's names are compared with it) ---
+    if isinstance(meta.get("manual_name"), list):
+        meta["manual_name"] = " ".join(meta["manual_name"]) or None
+
     # --- Edition: list → space-joined string ---
     if isinstance(meta.get("manual_edition"), list):
         meta["manual_edition"] = " ".join(meta["manual_edition"]) or ""
