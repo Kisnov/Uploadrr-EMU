@@ -1,0 +1,37 @@
+✔ Item 1: Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv
+INFO     Starting queue processing
+Ready to process 1 files
+Processing Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv (1/1)
+Analyzing Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv...
+Analyzing file Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv...
+Analysis complete for Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv
+Processing as video
+Processing video metadata...
+Exporting MediaInfo...
+MediaInfo JSON Exported.
+MediaInfo text Exported.
+Video processing complete
+Generating description...
+Description generation complete
+Integrating tracker APIs...
+Tracker integration complete
+Pre-Upload Checks..
+Searching for existing torrents on EMU...
+Dupe Check..
+Exact size match. Aborting..
+Processing Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv: Skipped 
+(pre-upload checks failed)
+╭─────────────────────────────── Upload Summary ───────────────────────────────╮
+│ Processed 1 Unique Uploads                                                   │
+│ Successful Uploads: 0                                                        │
+│ Failed Uploads: 1                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────── Potential duplicate on EMU ─────────────────────────╮
+│ Path: /tmp/emu-00000000/biblioteca/                                          │
+│ • Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────── Pre-upload checks failed ──────────────────────────╮
+│ Path: /tmp/emu-00000000/biblioteca/                                          │
+│ • Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                                see you soon ^.<                                

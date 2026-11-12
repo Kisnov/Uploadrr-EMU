@@ -2,14 +2,10 @@
 
 import asyncio
 import io
-import json
 import socket
 import subprocess
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -19,6 +15,7 @@ import src.trackers.UNIT3D as unit3d
 import upload
 from src.trackers.EMU import EMU
 from src.trackers.UNIT3D import DupeSearchError
+from tracker_falso import FakeTracker
 
 TOKEN = "clave-de-prueba"
 SEARCH = "/api/torrents/filter"
@@ -45,46 +42,6 @@ def sin_red_ni_procesos(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", _sin_procesos)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _sin_procesos)
     monkeypatch.setattr(asyncio, "create_subprocess_shell", _sin_procesos)
-
-
-class FakeTracker:
-    """Cada prueba pone en routes[(método, ruta)] una función query -> (status, cuerpo, *(cabecera, valor))."""
-
-    def __init__(self):
-        self.requests = []
-        self.routes = {}
-        tracker = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def _serve(self):
-                parts = urlsplit(self.path)
-                query = parse_qs(parts.query, keep_blank_values=True)
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                tracker.requests.append((self.command, parts.path, query))
-                status, body, *headers = tracker.routes[(self.command, parts.path)](query)
-                if isinstance(body, (dict, list)):
-                    body = json.dumps(body).encode()
-                try:
-                    self.send_response(status)
-                    for name, value in headers:
-                        self.send_header(name, value)
-                    self.end_headers()
-                    self.wfile.write(body)
-                except OSError:
-                    pass  # el cliente ya se fue por timeout
-
-            do_GET = do_POST = _serve
-
-            def log_message(self, *args):
-                pass
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        # Con la IP, "/127." pasaría por el id del torrent que se saca de la URL.
-        self.url = f"http://localhost:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def calls(self, method, path):
-        return [query for m, p, query in self.requests if (m, p) == (method, path)]
 
 
 def item(name, size=1, **extra):
