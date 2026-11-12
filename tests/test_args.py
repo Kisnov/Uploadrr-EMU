@@ -182,3 +182,78 @@ def test_una_fecha_manual_en_texto_se_convierte_o_se_descarta(fecha, esperada):
 def test_un_valor_invalido_aborta(argv):
     with pytest.raises(SystemExit):
         build_parser({}).parse_args(argv)
+
+
+# El argv que de verdad manda la app, con el tipo (str, lista, bool, int) y la grafía de cada campo que lee la ruta de EMU.
+NOMBRE = "Peli 2020 1080p WEB-DL DUAL-GRP"
+PELICULA = ["-tk", "EMU", "-mt", NOMBRE, "-tmdb", "123", "-ua", "-c", "movie", "-res", "1080p"]
+SERIE = ["-tk", "EMU", "-mt", NOMBRE, "-tmdb", "tv/55", "-ua", "-c", "tv", "-res", "720p", "-season", "S01", "-episode", "E02"]
+
+
+def _meta_del_item(argv, tmp_path):
+    """Lo que hace upload.py con el argv: agrupar, parsear, normalizar y aplicar la lógica especial (global y del ítem)."""
+    video = tmp_path / "Peli.mkv"
+    video.write_bytes(b"")
+    items, global_argv = group_args_by_path([str(video), *argv])
+    parser = build_parser({})
+    ns = parser.parse_args(global_argv)
+    enforce_global_only(ns, is_global=True, parser=parser)
+    meta = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(ns)})
+    meta = apply_special_logic({**meta, "path": items[0][1]})
+    return meta
+
+
+def _campos_de_emu(meta):
+    return {
+        "category": meta["category"],
+        "resolution": meta["resolution"],
+        "manual_name": meta["manual_name"],
+        "tmdb": meta["tmdb"],
+        "tmdb_manual": meta["tmdb_manual"],
+        "trackers": meta["trackers"],
+        "unattended": meta["unattended"],
+        "resume": meta["resume"],
+        "aviso_baja_calidad": meta["aviso_baja_calidad"],
+        "solo_cliente": meta["solo_cliente"],
+        "manual_season": meta.get("manual_season"),
+        "manual_episode": meta.get("manual_episode"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("extra", "esperado"),
+    [
+        (
+            PELICULA,
+            {"category": "MOVIE", "resolution": "1080p", "manual_name": NOMBRE, "tmdb": ["123"], "tmdb_manual": "123", "trackers": ["EMU"],
+             "unattended": True, "resume": False, "aviso_baja_calidad": False, "solo_cliente": None, "manual_season": None,
+             "manual_episode": None},
+        ),
+        (
+            SERIE,
+            {"category": "TV", "resolution": "720p", "manual_name": NOMBRE, "tmdb": ["tv/55"], "tmdb_manual": "55", "trackers": ["EMU"],
+             "unattended": True, "resume": False, "aviso_baja_calidad": False, "solo_cliente": None, "manual_season": "S01",
+             "manual_episode": "E02"},
+        ),
+        (
+            [*SERIE, "--resume", "-avbc", "--solo-cliente", "123"],
+            {"category": "TV", "resolution": "720p", "manual_name": NOMBRE, "tmdb": ["tv/55"], "tmdb_manual": "55", "trackers": ["EMU"],
+             "unattended": True, "resume": True, "aviso_baja_calidad": True, "solo_cliente": 123, "manual_season": "S01",
+             "manual_episode": "E02"},
+        ),
+    ],
+    ids=["pelicula", "serie", "serie-con-resume-avbc-y-solo-cliente"],
+)
+def test_cada_campo_de_emu_llega_con_su_tipo(tmp_path, extra, esperado):
+    campos = _campos_de_emu(_meta_del_item(extra, tmp_path))
+
+    assert campos == esperado
+    assert {k: type(v) for k, v in campos.items()} == {k: type(v) for k, v in esperado.items()}  # 1 != True, "123" != 123
+
+
+def test_el_id_de_solo_cliente_es_un_entero_y_la_temporada_en_mayusculas(tmp_path):
+    meta = _meta_del_item([*SERIE[:-4], "-season", "s1", "-episode", "e2", "-sc", "007"], tmp_path)
+
+    assert type(meta["solo_cliente"]) is int and meta["solo_cliente"] == 7
+    assert (meta["manual_season"], meta["manual_episode"]) == ("S01", "E02")
+    assert "season" not in meta and "episode" not in meta  # lo crudo se retira: solo queda manual_*

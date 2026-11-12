@@ -1,0 +1,57 @@
+✔ Item 1: Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv
+INFO     Starting queue processing
+Ready to process 1 files
+Processing Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv (1/1)
+Analyzing Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv...
+Analyzing file Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv...
+Analysis complete for Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv
+Processing as video
+Processing video metadata...
+Exporting MediaInfo...
+MediaInfo JSON Exported.
+MediaInfo text Exported.
+Video processing complete
+Generating description...
+Description generation complete
+Integrating tracker APIs...
+Tracker integration complete
+Pre-Upload Checks..
+Searching for existing torrents on EMU...
+Dupe Check..
+No dupes found
+Unattended mode: Skipping confirmation for 
+/tmp/emu-00000000/biblioteca/Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP
+.mkv
+Starting screenshot generation for Serie de Prueba 2020 S01E02 1080p WEB-DL DUAL
+AAC 5.1 H.264-GRP
+Generating screenshots
+Screenshot generation complete
+Uploading screenshots: 0/6
+Uploading screenshots: 1/6
+Uploading screenshots: 2/6
+Uploading screenshots: 3/6
+Uploading screenshots: 4/6
+Uploading screenshots: 5/6
+Uploading screenshots: 6/6
+All screenshots uploaded
+Step done: screenshots
+No valid .torrent found
+Creating .torrent with piece size 256KiB...
+Starting torf hashing...
+Hashing with torf: 100.0% (1/1 pieces)
+Torf hashing complete
+.torrent created
+Step done: torrent
+Uploading to EMU 
+Torrent URL: https://emu-warez.com/torrents/42
+Torrent uploaded successfully!
+Adding to qbit
+Adding and rechecking torrent
+Added to: /tmp/emu-00000000/biblioteca/
+Processing Serie.de.Prueba.S01E02.1080p.WEB-DL.DD5.1.H.264-GRP.mkv: Uploaded
+╭─────────────────────────────── Upload Summary ───────────────────────────────╮
+│ Processed 1 Unique Uploads                                                   │
+│ Successful Uploads: 1                                                        │
+│ Failed Uploads: 0                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                                see you soon ^.<                                

@@ -103,6 +103,21 @@ def test_resolucion_y_temporada_guardadas_no_se_heredan_si_cambian(tmp_path):
     assert (resultado["resolution"], resultado["manual_season"], resultado["manual_episode"]) == ("1080p", "S02", "E05")
 
 
+def test_un_meta_json_truncado_no_aborta_ni_da_pasos_por_hechos(tmp_path):
+    item = tmp_path / "Peli"
+    guardado = tmp_path / "tmp" / "Peli"
+    guardado.mkdir(parents=True)
+    completo = json.dumps({"resume": True, "pasos_hechos": ["screenshots", "torrent"], "tmdb": "1", "resolution": "720p"})
+    (guardado / "meta.json").write_text(completo[: len(completo) // 2])  # un corte a mitad de escritura
+
+    parser = build_parser({})
+    nuevo = apply_special_logic({"base_dir": str(tmp_path), **normalize_args(parser.parse_args(["-rs", "-res", "1080p"]))})
+    resultado = _run(load_existing_meta(tmp_path, str(item), nuevo))
+
+    assert (resultado["resume"], resultado["resolution"]) == (True, "1080p")  # lo de la línea de órdenes sigue valiendo
+    assert not resultado.get("pasos_hechos")  # y nada se da por hecho: capturas y torrent se rehacen
+
+
 def test_save_meta_escribe_atomico_sin_dejar_temporales(tmp_path, monkeypatch):
     assert _run(meta_mod.save_meta({"a": 1}, tmp_path, "Peli")) is True
     destino = tmp_path / "tmp" / "Peli"

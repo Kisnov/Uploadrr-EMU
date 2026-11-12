@@ -2,14 +2,10 @@
 
 import asyncio
 import io
-import json
 import socket
 import subprocess
-import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -19,6 +15,7 @@ import src.trackers.UNIT3D as unit3d
 import upload
 from src.trackers.EMU import EMU
 from src.trackers.UNIT3D import DupeSearchError
+from tracker_falso import FakeTracker
 
 TOKEN = "clave-de-prueba"
 SEARCH = "/api/torrents/filter"
@@ -45,46 +42,6 @@ def sin_red_ni_procesos(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", _sin_procesos)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _sin_procesos)
     monkeypatch.setattr(asyncio, "create_subprocess_shell", _sin_procesos)
-
-
-class FakeTracker:
-    """Cada prueba pone en routes[(método, ruta)] una función query -> (status, cuerpo, *(cabecera, valor))."""
-
-    def __init__(self):
-        self.requests = []
-        self.routes = {}
-        tracker = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def _serve(self):
-                parts = urlsplit(self.path)
-                query = parse_qs(parts.query, keep_blank_values=True)
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                tracker.requests.append((self.command, parts.path, query))
-                status, body, *headers = tracker.routes[(self.command, parts.path)](query)
-                if isinstance(body, (dict, list)):
-                    body = json.dumps(body).encode()
-                try:
-                    self.send_response(status)
-                    for name, value in headers:
-                        self.send_header(name, value)
-                    self.end_headers()
-                    self.wfile.write(body)
-                except OSError:
-                    pass  # el cliente ya se fue por timeout
-
-            do_GET = do_POST = _serve
-
-            def log_message(self, *args):
-                pass
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        # Con la IP, "/127." pasaría por el id del torrent que se saca de la URL.
-        self.url = f"http://localhost:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def calls(self, method, path):
-        return [query for m, p, query in self.requests if (m, p) == (method, path)]
 
 
 def item(name, size=1, **extra):
@@ -201,6 +158,28 @@ def test_search_page_limit(tracker, emu, meta, monkeypatch):
     with pytest.raises(DupeSearchError):
         run(emu.search_existing(meta))
     assert len(tracker.requests) == 3
+
+
+def test_search_timeout_raises(tracker, emu, meta):
+    emu.timeout = httpx.Timeout(0.2)
+
+    def search(query):
+        time.sleep(0.4)
+        return 200, {"data": [], "links": {"next": None}}
+
+    tracker.routes[("GET", SEARCH)] = search
+    with pytest.raises(DupeSearchError):
+        run(emu.search_existing(meta))
+
+
+def test_search_connection_refused_raises(emu, meta):
+    with socket.socket() as libre:
+        libre.bind(("127.0.0.1", 0))
+        puerto = libre.getsockname()[1]
+    emu.search_url = f"http://localhost:{puerto}{SEARCH}"  # nadie escucha ahí
+    with pytest.raises(DupeSearchError) as error:
+        run(emu.search_existing(meta))
+    assert TOKEN not in str(error.value)
 
 
 @pytest.fixture
@@ -327,6 +306,29 @@ def test_upload_ok_downloads_signed_torrent(tracker, emu, upload_meta, signed_to
     assert f"Torrent URL: {emu.domain}/torrents/42" in out
     assert "Torrent uploaded successfully" in out
     assert len(tracker.calls("POST", UPLOAD)) == 1
+
+
+def test_upload_sends_the_form_fields_of_a_movie(tracker, emu, upload_meta, signed_torrent):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload({**upload_meta, "resolution": "720p", "type": "REMUX"})) is True
+
+    (fields, files), = tracker.bodies
+    assert (fields["name"], fields["category_id"], fields["type_id"], fields["resolution_id"]) == (NAME, "1", "2", "5")
+    assert fields["tmdb"] == "1" and "season_number" not in fields and "episode_number" not in fields
+    assert files["torrent"] == signed_torrent
+
+
+def test_upload_sends_season_and_episode_of_an_episode(tracker, emu, upload_meta, signed_torrent):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload({**upload_meta, "category": "TV", "season_int": 2, "episode_int": 7})) is True
+
+    (fields, _), = tracker.bodies
+    assert (fields["category_id"], fields["type_id"], fields["resolution_id"]) == ("2", "4", "3")
+    assert (fields["season_number"], fields["episode_number"]) == ("2", "7")
 
 
 def test_upload_retries_server_errors(tracker, emu, upload_meta, signed_torrent):
@@ -584,6 +586,23 @@ def test_upload_ok_but_torrent_never_downloads(tracker, emu, upload_meta, capsys
     assert not saved_torrent(upload_meta).exists()
     assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
     assert len(tracker.calls("GET", "/torrent/download/42.rsskey")) == 4
+
+
+def test_upload_ok_but_download_times_out_counts_as_uploaded(tracker, emu, upload_meta, capsys):
+    emu.timeout = httpx.Timeout(0.2)
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+
+    def download(query):
+        time.sleep(0.4)
+        return 200, b"d4:infode"
+
+    tracker.routes[("GET", "/torrent/download/42.rsskey")] = download
+
+    assert run(emu.upload(upload_meta)) is True  # ya está en el tracker: reintentarlo lo duplicaría
+    assert not saved_torrent(upload_meta).exists()
+    out = capsys.readouterr().out
+    assert "Torrent upload succeeded, but failed to download the torrent file: ReadTimeout" in out
+    assert TOKEN not in out
 
 
 # --solo-cliente: el torrent ya está subido y solo se vuelve a añadir al cliente
