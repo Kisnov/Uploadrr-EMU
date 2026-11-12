@@ -582,7 +582,7 @@ def test_solo_cliente_baja_el_torrent_firmado_y_lo_anade(tracker, upload_meta, s
 
     assert solo_cliente(cliente) is None
     assert cliente.anadidos == [("EMU", True)]
-    assert torf.Torrent.read(saved_torrent(upload_meta)).comment == f"Made by Uploadrr for: {tracker.url}/torrents/42"
+    assert torf.Torrent.read(saved_torrent(upload_meta)).comment == "Torrent descargado de la comunidad eMuwarez."
     assert tracker.calls("GET", API_TORRENT)[0]["api_token"] == [TOKEN]
     assert tracker.calls("POST", UPLOAD) == [] and tracker.calls("GET", SEARCH) == []  # ni subida ni duplicados
     out = capsys.readouterr().out

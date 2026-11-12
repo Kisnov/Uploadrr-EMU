@@ -23,6 +23,8 @@ from src.progress import ProgressManager
 from src.utils.console import log
 from src.utils.meta import marcar_paso_hecho
 
+CREADO_POR = "eMuwarr"  # el tracker le añade su firma al descargarlo
+
 
 class TorrentMaker:
     def __init__(self, config):
@@ -96,7 +98,7 @@ class TorrentMaker:
             include_globs=include or [],
             creation_date=datetime.now(),
             comment="Created by Uploadrr",
-            created_by="Created by Uploadrr",
+            created_by=CREADO_POR,
         )
 
     def _calculate_piece_size(self, file_size: int, piece_size_max: Optional[int]) -> Tuple[int, str]:
@@ -301,6 +303,9 @@ class TorrentMaker:
                 await self.use_torf(torrent, path, output_path, piece_size)
                 return
         if returncode == 0 and self._same_files(output_path, torrent):
+            hecho = Torrent.read(output_path)
+            hecho.metainfo["created by"] = CREADO_POR  # mkbrr pone el suyo y no deja cambiarlo
+            hecho.write(output_path, overwrite=True)
             ProgressManager.get_instance().update("mkbrr hashing complete")
             return
         log.warning("mkbrr failed or listed other files, falling back to torf...")
@@ -510,7 +515,7 @@ class TorrentMaker:
         base_torrent.creation_date = datetime.now()
         base_torrent.trackers = [self.tracker]
         base_torrent.comment = "Created by Uploadrr"
-        base_torrent.created_by = "Created by Uploadrr"
+        base_torrent.created_by = CREADO_POR
         base_torrent.source = "Uploadrr"
         base_torrent.private = True
 

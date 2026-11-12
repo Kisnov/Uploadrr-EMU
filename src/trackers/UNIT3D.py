@@ -23,6 +23,7 @@ SEARCH_RETRY_DELAYS = (60, 60, 60)  # tras un 429 sin Retry-After: la API admite
 # Errores del servidor o de Cloudflare en los que la subida se repite.
 RETRY_STATUSES = {500, 502, 503, 504, 520, 521, 522, 523, 524}
 MAX_SEARCH_PAGES = 20
+COMENTARIO_TORRENT = "Torrent descargado de la comunidad eMuwarez."
 
 
 class DupeSearchError(RuntimeError):
@@ -306,20 +307,18 @@ class Unit3d:
                 console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
                 return True
         try:
-            await self._guardar_torrent(meta, raw_url, content)
+            await self._guardar_torrent(meta, content)
         except Exception as e:
             console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
             return True
         console.print("[bold green]Torrent uploaded successfully!")
         return True
 
-    async def _guardar_torrent(self, meta: Dict[str, Any], raw_url: str, content: bytes) -> Path:
-        """Guarda el .torrent firmado como [TRACKER]<clean_name>.torrent, con la ficha en el comentario."""
+    async def _guardar_torrent(self, meta: Dict[str, Any], content: bytes) -> Path:
+        """Guarda el .torrent firmado como [TRACKER]<clean_name>.torrent, con el comentario que se ve en el cliente."""
         new_torrent = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
         new_torrent.write_bytes(content)
-        url = raw_url.replace("/download", "s")
-        url = re.sub(r"/(\d+)\..*$", r"/\1", url)
-        await edit_torrent(torrent_path=new_torrent, comment=f"Made by Uploadrr for: {url}")
+        await edit_torrent(torrent_path=new_torrent, comment=COMENTARIO_TORRENT)
         return new_torrent
 
     async def descargar_subido(self, meta: Dict[str, Any], torrent_id: int) -> Optional[Path]:
@@ -348,7 +347,7 @@ class Unit3d:
             console.print(f"[red]{self.tracker}: no se pudo descargar el .torrent {torrent_id}: {error}")
             return None
         try:
-            return await self._guardar_torrent(meta, link, content)
+            return await self._guardar_torrent(meta, content)
         except Exception as e:
             console.print(f"[red]{self.tracker}: no se pudo guardar el .torrent {torrent_id}: {e}")
             return None
