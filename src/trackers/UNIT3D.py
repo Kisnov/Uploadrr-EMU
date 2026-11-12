@@ -20,6 +20,7 @@ from src.utils.torrentman import edit_torrent, extract_size_from_torrent
 UPLOAD_RETRY_DELAYS = (5, 15)
 DOWNLOAD_RETRY_DELAYS = (5, 15, 30)
 SEARCH_RETRY_DELAYS = (60, 60, 60)  # tras un 429 sin Retry-After: la API admite 30 peticiones por minuto
+UPLOAD_429_MAX_WAIT = 60  # tope de la espera pedida por Retry-After en la subida
 # Errores del servidor o de Cloudflare en los que la subida se repite.
 RETRY_STATUSES = {500, 502, 503, 504, 520, 521, 522, 523, 524}
 MAX_SEARCH_PAGES = 20
@@ -365,12 +366,16 @@ class Unit3d:
                         files[field] = (fname, stack.enter_context(open(path, "rb")), mime)
                     try:
                         response = await client.post(self.upload_url, data=data, files=files, headers=headers, params=params)
-                        error = f"HTTP {response.status_code}" if response.status_code in RETRY_STATUSES else None
+                        error = f"HTTP {response.status_code}" if response.status_code in RETRY_STATUSES | {429} else None
                     except httpx.HTTPError as e:
                         response, error = None, type(e).__name__
                 if error is None or attempt == attempts:
                     return response, attempt
                 delay = UPLOAD_RETRY_DELAYS[attempt - 1]
+                # Un 429 se rechazó sin procesar: es seguro repetirlo, respetando Retry-After.
+                retry_after = response.headers.get("Retry-After", "") if response is not None and response.status_code == 429 else ""
+                if retry_after.isdecimal():
+                    delay = min(int(retry_after) + 1, UPLOAD_429_MAX_WAIT)
                 console.print(f"[yellow]{self.tracker}: {error} al subir, reintento en {delay}s ({attempt}/{attempts})")
                 await asyncio.sleep(delay)
 

@@ -338,6 +338,30 @@ def test_upload_retries_server_errors(tracker, emu, upload_meta, signed_torrent)
     assert len(tracker.calls("POST", UPLOAD)) == 3
 
 
+def test_upload_retries_rate_limit_respecting_retry_after(tracker, emu, upload_meta, signed_torrent, sleeps):
+    answers = iter([(429, b"", ("Retry-After", "7")), (429, b"", ("Retry-After", "9999")), (200, {"success": True, "data": download_url(tracker)})])
+    tracker.routes[("POST", UPLOAD)] = lambda q: next(answers)
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload(upload_meta)) is True
+    assert len(tracker.calls("POST", UPLOAD)) == 3
+    assert sleeps == [8, unit3d.UPLOAD_429_MAX_WAIT]  # Retry-After y un segundo; y el tope si pide demasiado
+
+
+def test_upload_rate_limit_that_persists_gives_up(tracker, emu, upload_meta, sleeps):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (429, b"", ("Retry-After", "3"))
+
+    assert run(emu.upload(upload_meta)) is False
+    assert len(tracker.calls("POST", UPLOAD)) == 3 and sleeps == [4, 4]
+
+
+def test_upload_other_4xx_is_not_repeated(tracker, emu, upload_meta, sleeps):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (422, {"success": False, "message": "mal"})
+
+    assert run(emu.upload(upload_meta)) is False
+    assert len(tracker.calls("POST", UPLOAD)) == 1 and sleeps == []
+
+
 def test_upload_timeout_that_landed_is_recovered(tracker, emu, upload_meta, signed_torrent, capsys):
     emu.timeout = httpx.Timeout(0.5)
     landed = []
