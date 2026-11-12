@@ -362,6 +362,28 @@ def test_upload_other_4xx_is_not_repeated(tracker, emu, upload_meta, sleeps):
     assert len(tracker.calls("POST", UPLOAD)) == 1 and sleeps == []
 
 
+def test_upload_timeout_that_landed_is_recovered_behind_a_rate_limit(tracker, emu, upload_meta, signed_torrent, capsys, sleeps):
+    emu.timeout = httpx.Timeout(0.5)
+    landed = []
+
+    def upload(query):
+        if not landed:
+            landed.append(NAME)
+            time.sleep(1)  # entra, pero contesta tarde
+            return 200, {"success": True, "data": download_url(tracker)}
+        return 429, b"", ("Retry-After", "1")
+
+    tracker.routes[("POST", UPLOAD)] = upload
+    tracker.routes[("GET", SEARCH)] = lambda q: (
+        200,
+        {"data": [item(n, SIZE, download_link=download_url(tracker)) for n in landed if n == q["name"][0]], "links": {"next": None}},
+    )
+    serve_download(tracker, resigned(signed_torrent))
+
+    assert run(emu.upload(upload_meta)) is True  # el 429 final no tapa el intento que sí entró
+    assert f"Torrent URL: {emu.domain}/torrents/42" in capsys.readouterr().out
+
+
 def test_upload_timeout_that_landed_is_recovered(tracker, emu, upload_meta, signed_torrent, capsys):
     emu.timeout = httpx.Timeout(0.5)
     landed = []
