@@ -93,10 +93,10 @@ async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:
     overwrite_keys = [
         "anon", "aviso_baja_calidad", "base_dir", "blu", "category", "client", "debug","deezer_manual", "desc",
         "descfile", "desclink", "draft", "dupe", "episode", "ffdebug", "freeleech", "full_dir",
-        "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_name",
-        "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
+        "hardcoded-subs", "hdb", "imdb", "imghost", "mal", "manual", "manual_edition", "manual_episode", "manual_name",
+        "manual_season", "manual_source", "manual_type", "mbid_manual", "no_aka", "no_dub", "no_seed", "no_season", "no_tag",  "no_year",
         "nohash", "path", "personalrelease", "ptp", "qbit_cat", "qbit_tag", "randomized", "rehash",
-        "region", "resume", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "solo_cliente", "tag", "torrent_creation",
+        "region", "resolution", "resume", "screens", "season", "skip_dupe_check", "skip_imghost_upload", "solo_cliente", "tag", "torrent_creation",
         "trackers", "tmdb_manual", "unattended", "webdv",
         # XXX keys
          "jav", "pack", "pdb_manual", "user_cover", "user_banner", "user_trailer", "xmovies", "xscene", "xxx"
