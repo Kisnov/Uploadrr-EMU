@@ -10,6 +10,7 @@ from rich.text import Text
 
 from src.args import apply_special_logic, build_parser, enforce_global_only, supplied_args
 from src.name import NameGenerator
+from src.utils import eventos
 from src.utils.console import console, log
 
 
@@ -87,6 +88,7 @@ async def marcar_paso_hecho(meta: Dict, paso: str, base_dir: Optional[Path] = No
     guardado = await save_meta(meta, Path(base_dir if base_dir is not None else meta["base_dir"]), meta["uuid"])
     if guardado:  # sin la marca en meta.json, un --resume no la encontraría: no se anuncia
         print(f"Step done: {paso}", flush=True)
+        eventos.emitir("paso_hecho", paso=paso)
 
 
 async def load_existing_meta(base_dir: Path, path: str, new_meta: Dict) -> Dict:

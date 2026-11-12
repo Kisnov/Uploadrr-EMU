@@ -12,8 +12,10 @@ import httpx
 import torf
 from rich.pretty import Pretty
 
+from src.utils import eventos
 from src.utils.console import console, log
 from src.utils.descgen import DescGenerator
+from src.utils.meta import save_meta
 from src.utils.torrentman import edit_torrent, extract_size_from_torrent
 
 # Segundos de espera antes de cada reintento.
@@ -299,7 +301,11 @@ class Unit3d:
         torrent_id = re.search(r"/(\d+)\.", raw_url)
         if torrent_id:
             # Línea fija para quien lanza esto: la ficha del torrent subido.
-            print(f"Torrent URL: {self.domain}/torrents/{torrent_id.group(1)}", flush=True)
+            url = f"{self.domain}/torrents/{torrent_id.group(1)}"
+            meta["subido"] = {"id": int(torrent_id.group(1)), "url": url}
+            await save_meta(meta, Path(meta["base_dir"]), meta["uuid"])  # antes de anunciarlo: «subido» no existía fuera de stdout
+            eventos.emitir("subido", torrent_id=meta["subido"]["id"], url=url)
+            print(f"Torrent URL: {url}", flush=True)
         # El tracker firma el .torrent: el que se le da al cliente es el que se descarga aquí,
         # con la misma autenticación que la subida (eMuwarez da 403 sin ella).
         if content is None:

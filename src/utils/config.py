@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from src.utils import eventos
 from src.utils.console import console, log
 
 
@@ -27,6 +28,7 @@ def load_yaml_config(path: Path) -> dict:
         return config_data
     except Exception as e:
         log.error(f"[bold red]Error loading config.yaml: {e}[/bold red]")
+        eventos.resultado(False, "config_invalida")
         sys.exit(1)
 
 

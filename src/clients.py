@@ -44,6 +44,7 @@ class Clients:
         self.index_dir = Path(__file__).resolve().parent.parent / "data"
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.index_cache: Dict[str, Dict] = {}  # In-memory cache for indexes
+        self.cliente_info = {"cliente": "ninguno", "motivo": None, "ruta": None}  # resultado de la última adición, para el evento
 
     async def find_existing_torrent(self, meta: dict) -> Optional[Path]:
         """Search for an existing torrent in the client's storage directory or index."""
@@ -301,24 +302,29 @@ class Clients:
         """Add a torrent to the specified client. True only if it was added."""
         torrent_path = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{tracker}]{meta['clean_name']}.torrent"
         log.debug(f"Attempting to add torrent at {torrent_path} to client")
+        self.cliente_info = {"cliente": "ninguno", "motivo": None, "ruta": None}  # lo lee anadir_al_cliente para el evento
 
         if meta.get("no_seed", False):
             console.print("[bold red]--no_seed passed; torrent not added to client")
             console.print("[bold yellow]Add torrent manually to the client")
+            self.cliente_info["motivo"] = "no_seed"
             return False
 
         if not torrent_path.exists():
             log.debug(f"Torrent file not found at {torrent_path}")
+            self.cliente_info["motivo"] = "sin_torrent"
             return False
 
         torrent = Torrent.read(torrent_path)
         torrent_client = self._get_torrent_client(meta)
         if not torrent_client or torrent_client == "none":
             log.debug("No valid torrent client specified; skipping addition")
+            self.cliente_info["motivo"] = "sin_cliente"
             return False
 
         client = self.config["TORRENT_CLIENTS"][torrent_client]
         client_type = client["torrent_client"].lower()
+        self.cliente_info["cliente"] = client_type
         local_path, remote_path = await self.remote_path_map(meta)
 
         log.debug(f"Adding torrent to {client_type}")
@@ -337,12 +343,14 @@ class Clients:
         if meta.get("solo_cliente") is not None and client_type != "qbit":
             # Solo con qBittorrent se añade parado y se arranca tras comprobarlo: los demás arrancarían sin más.
             console.print(f"[red]--solo-cliente solo funciona con qBittorrent (este cliente es {client_type})")
+            self.cliente_info["motivo"] = "solo_cliente_no_qbit"
             return False
         client_method = client_methods.get(client_type)
         if client_method:
             # Solo qBittorrent dice si lo ha añadido: los demás no cuentan como añadidos.
             return bool(await client_method(path, torrent_path, torrent, meta, local_path, remote_path, client, tracker))
         console.print(f"[bold red]Unsupported torrent client: {client_type}")
+        self.cliente_info["motivo"] = "cliente_no_soportado"
         return False
 
     async def remote_path_map(self, meta: dict) -> Tuple[str, str]:
@@ -443,12 +451,14 @@ class Clients:
             qbt_client.auth_log_in()
         except qbittorrentapi.LoginFailed:
             console.print("[bold red]INCORRECT QBIT LOGIN CREDENTIALS")
+            self.cliente_info["motivo"] = "login"
             return False
 
         solo_cliente = meta.get("solo_cliente") is not None
         if solo_cliente and qbt_client.torrents_info(torrent_hashes=torrent.infohash):
             # Recién añadido, un 100 % solo puede salir de comprobarlo; uno que ya estaba trae el suyo de antes.
             console.print("[red]--solo-cliente: el torrent ya está en qBittorrent; no se toca")
+            self.cliente_info["motivo"] = "ya_estaba"
             return False
         auto_management = self._check_auto_management(path_str, client.get("automatic_management_paths", ""))
         respuesta = qbt_client.torrents_add(
@@ -464,6 +474,7 @@ class Clients:
         if solo_cliente and not _add_aceptado(respuesta):
             # «Fails.»: ya estaba (alguien lo añadió entre medias) y no entró parado; no se toca.
             console.print(f"[red]--solo-cliente: qBittorrent no lo ha añadido ({respuesta}); no se toca")
+            self.cliente_info["motivo"] = "no_aceptado"
             return False
 
         await self._wait_for_torrent(qbt_client, torrent.infohash, arrancar=not solo_cliente)
@@ -473,11 +484,14 @@ class Clients:
             estado = info[0].get("state", "") if info else ""
             if not (estado in ESTADOS_COMPROBANDO or estado.startswith(("stopped", "paused"))):
                 console.print(f"[red]--solo-cliente: el torrent de qBittorrent no está parado ({estado}); no se toca")
+                self.cliente_info["motivo"] = "no_parado"
                 return False
         self._apply_qbit_tags(qbt_client, torrent.infohash, client, meta, tracker)
         if solo_cliente and not await self._arrancar_si_completo(qbt_client, torrent.infohash):
+            self.cliente_info["motivo"] = "no_arrancado"
             return False
         console.print(f"Added to: {path_str}")
+        self.cliente_info["ruta"] = path_str
         return True
 
     async def _add_to_deluge(
