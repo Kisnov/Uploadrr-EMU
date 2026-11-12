@@ -286,6 +286,29 @@ def test_upload_ok_downloads_signed_torrent(tracker, emu, upload_meta, signed_to
     assert len(tracker.calls("POST", UPLOAD)) == 1
 
 
+def test_upload_sends_the_form_fields_of_a_movie(tracker, emu, upload_meta, signed_torrent):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload({**upload_meta, "resolution": "720p", "type": "REMUX"})) is True
+
+    (fields, files), = tracker.bodies
+    assert (fields["name"], fields["category_id"], fields["type_id"], fields["resolution_id"]) == (NAME, "1", "2", "5")
+    assert fields["tmdb"] == "1" and "season_number" not in fields and "episode_number" not in fields
+    assert files["torrent"] == signed_torrent
+
+
+def test_upload_sends_season_and_episode_of_an_episode(tracker, emu, upload_meta, signed_torrent):
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+    serve_download(tracker, signed_torrent)
+
+    assert run(emu.upload({**upload_meta, "category": "TV", "season_int": 2, "episode_int": 7})) is True
+
+    (fields, _), = tracker.bodies
+    assert (fields["category_id"], fields["type_id"], fields["resolution_id"]) == ("2", "4", "3")
+    assert (fields["season_number"], fields["episode_number"]) == ("2", "7")
+
+
 def test_upload_retries_server_errors(tracker, emu, upload_meta, signed_torrent):
     answers = iter([(502, b"bad gateway"), (520, b"cloudflare"), (200, {"success": True, "data": download_url(tracker)})])
     tracker.routes[("POST", UPLOAD)] = lambda q: next(answers)
