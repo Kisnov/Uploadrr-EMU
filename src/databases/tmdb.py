@@ -167,6 +167,8 @@ class TMDbHandler:
                 return result
             except httpx.HTTPStatusError as e:
                 await self._handle_tmdb_error(e, meta, attempt, max_retries)
+                if meta.get("tmdb_not_found"):
+                    return meta
             except Exception as e:
                 log.error(f"Unexpected error in attempt {attempt + 1}: {str(e)}", exc_info=True)
                 if attempt == 0 and not meta.get("tmdb_manual"):  # con -tmdb el id es de esa categoría

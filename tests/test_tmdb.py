@@ -42,7 +42,10 @@ def test_un_404_desatendido_no_pregunta(tmdb, monkeypatch):
     def preguntar(*_a, **_k):
         raise AssertionError("no hay teclado")
 
+    pedidas = []
+
     async def get(endpoint, params):
+        pedidas.append(endpoint)
         peticion = httpx.Request("GET", "https://api.themoviedb.org/3" + endpoint)
         raise httpx.HTTPStatusError("404", request=peticion, response=httpx.Response(404, request=peticion))
 
@@ -51,3 +54,4 @@ def test_un_404_desatendido_no_pregunta(tmdb, monkeypatch):
     meta = asyncio.run(tmdb.tmdb_other_meta({"category": "MOVIE", "tmdb": "603", "tmdb_manual": "603", "unattended": True}))
 
     assert meta["tmdb_not_found"] is True
+    assert pedidas == ["/movie/603"]  # un id que no existe no se vuelve a pedir

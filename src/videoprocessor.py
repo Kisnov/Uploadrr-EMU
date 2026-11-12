@@ -375,6 +375,8 @@ class VideoProcessor:
                 return meta
 
             meta = await (self.IMDb.imdb_other_meta(meta) if int(meta["tmdb"]) == 0 else self.TMDb.tmdb_other_meta(meta))
+            if meta.get("tmdb_not_found"):
+                return meta
             meta["tvmaze_id"], meta["imdb_id"], meta["tvdb_id"] = await search_tvmaze(
                 meta["filename"], meta["search_year"], meta.get("imdb_id", "0"), meta.get("tvdb_id", 0)
             )

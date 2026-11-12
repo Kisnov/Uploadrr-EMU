@@ -145,7 +145,7 @@ class TorrentMaker:
                     "--piece-size",
                     str(2**piece_size),
                     "--created-by",
-                    "Created by Uploadrr",
+                    CREADO_POR,
                     "--no-cross-seed",
                     "-o",
                     str(output_path),
