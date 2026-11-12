@@ -222,7 +222,7 @@ def config_de_prueba() -> dict:
 class Flujo:
     def __init__(self, monkeypatch, tracker: FakeTracker, capsys):
         # Siempre con la misma longitud: Rich parte las líneas a 80 columnas y, con otra ruta, se partirían en otro sitio.
-        self.raiz = Path(tempfile.mkdtemp(prefix="emu-"))
+        self.raiz = Path(tempfile.mkdtemp(prefix="emu-", dir="/tmp"))
         self.base = self.raiz / "app"
         self.base.mkdir()
         self.contenido = self.raiz / "biblioteca"
