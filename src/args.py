@@ -33,6 +33,7 @@ GLOBAL_ARGS: Set[str] = {
     "qbit_tag",
     "qbit_cat",
     "rtorrent_label",
+    "eventos",  # un solo fichero de eventos por ejecución
     # Structural
     "trackers",  # default global; per-item would require complex tracker override logic
 }
@@ -441,6 +442,7 @@ def build_parser(config: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument(
         "-sc", "--solo-cliente", dest="solo_cliente", type=int, help="EMU torrent id already uploaded: only re-add it to the client"
     )
+    parser.add_argument("--eventos", dest="eventos", help="Append JSON Lines events to this file (see contrato_eventos.json)")
     parser.add_argument("-k", "--keywords", nargs="*", help="Comma-separated keywords")
     parser.add_argument("-reg", "--region", nargs="*", help="Region (for discs)")
     parser.add_argument("-mt", "--manual-title", dest="manual_name", nargs="*", help="Override generated name")
