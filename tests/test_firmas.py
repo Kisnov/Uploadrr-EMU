@@ -55,8 +55,8 @@ def test_la_config_de_ejemplo_lleva_la_firma_del_fork():
     config = yaml.safe_load(Path("data/backup/example_config.yaml").read_text(encoding="utf-8"))
     sigs = config["SIGNATURES"]
     assert sigs["use_global_sigs"] == "default"
-    assert "uploadrr-signature.webp" in sigs["signature"]
-    assert "uploadrr-signature.webp" in sigs["pr_signature"]
+    assert "emuwarr-firma-animada.webp" in sigs["signature"]
+    assert "emuwarr-firma-animada.webp" in sigs["pr_signature"]
 
 
 def test_true_usa_solo_la_global(fichero):
