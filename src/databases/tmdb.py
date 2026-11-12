@@ -13,6 +13,7 @@ from rich.prompt import Prompt
 
 from src.args import parse_tmdb_id
 from src.progress import ProgressManager
+from src.utils import eventos
 from src.utils.console import console, log
 
 from .anilist import AniListHandler
@@ -340,6 +341,8 @@ class TMDbHandler:
             log.error(f"Failed to find TMDb entry: {str(e)}")
             if meta.get("mode", "discord") == "cli":
                 console.print("[bold red]Unable to find TMDb entry. Exiting.")
+                eventos.fase("analisis", "fallida")
+                eventos.resultado(False, "tmdb")
                 sys.exit(1)
             else:
                 console.print("[bold red]Unable to find TMDb entry")

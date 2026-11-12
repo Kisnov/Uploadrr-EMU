@@ -55,6 +55,16 @@ or report their errors unless they break an eMuwarez upload.
   `screenshots` is marked only if no main screenshot is left without a URL (or none were needed); `torrent` when
   `BASE.torrent` exists and decodes, or with `nohash`. `BASE.torrent` is reused only if `torrent` is marked and it
   decodes; otherwise it is deleted and rebuilt. `Torrent URL:` stays the only mark of "uploaded to the tracker".
+- `--eventos RUTA` (global: after the path, like `-tk`; not in `meta`): appends one JSON object per line (UTF-8, flushed per
+  line) to `RUTA`, next to the text lines, which stay unchanged for at least one version. Without it nothing is written. A
+  write failure is logged once and never aborts. Every event has `v` (1), `ts` (ISO UTC) and `ev`, and never a secret.
+  Events: `inicio`, `fase` (`clave`, `estado`, `pct`), `paso_hecho`, `subido` (`torrent_id`, `url`), `cliente`, `aviso`
+  (`pack_incompleto`), `resultado`. Each item ends with exactly one `resultado` as its last line (`ok`, `codigo`, optional
+  `detalle`); the exit code does not change. No `resultado` at the end means the process died mid-run (a signal, a kill), and
+  an `ok: true` may come without a `subido` when the tracker gave no link: `subido`, when present, is authoritative. `subido` is also saved first as `meta["subido"] = {id, url}` (informative: a
+  `--resume` inherits it, nothing in this repo acts on it). The schema is `contrato_eventos.json` (the app copies it and
+  its presence means `--eventos` is supported); `src/utils/eventos.py` emits, `tests/golden/*.jsonl` and
+  `tests/test_eventos.py` pin it. A new event, field or code goes into the schema, the goldens and the app together.
 - The `.torrent` is hashed with mkbrr when it is on `PATH` (the app image installs a pinned one), torf otherwise.
   The mkbrr result must list exactly the files torf would pick, or it is rebuilt with torf. When mkbrr warns of
   an incomplete season pack, `print` writes `Incomplete season pack: season N, missing episodes A, B`.

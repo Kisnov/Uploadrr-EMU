@@ -1,0 +1,27 @@
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "inicio", "uuid": "Peli.de.Prueba.2020.1080p.WEB-DL.DD5.1.H.264-GRP.mkv", "modo": "subida", "reanuda": false}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "analisis", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "analisis", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "duplicados", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "duplicados", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "capturas", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 16}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 33}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 50}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 66}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 83}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "avance", "pct": 100}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida_capturas", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "paso_hecho", "paso": "screenshots"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "capturas", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "torrent", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "torrent", "estado": "avance", "pct": 100}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "paso_hecho", "paso": "torrent"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "torrent", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "subido", "torrent_id": 42, "url": "https://emu-warez.com/torrents/42"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "subida", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "cliente", "estado": "empieza"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "fase", "clave": "cliente", "estado": "hecha"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "cliente", "ok": true, "cliente": "qbit", "ruta": "/tmp/emu-00000000/biblioteca/"}
+{"v": 1, "ts": "1970-01-01T00:00:00.000Z", "ev": "resultado", "ok": true, "codigo": "subido"}

@@ -20,6 +20,7 @@ from torf import TorfError, Torrent
 from src.cleanrr import running_subprocesses
 from src.exceptions import StaleTorrentError
 from src.progress import ProgressManager
+from src.utils import eventos
 from src.utils.console import log
 from src.utils.meta import marcar_paso_hecho
 
@@ -326,6 +327,7 @@ class TorrentMaker:
                 if found and found[-1] != last:
                     last = found[-1]
                     progress.update(f"Hashing with mkbrr: {int(last):.1f}%")
+                    eventos.avance("torrent", int(last))
             returncode = await process.wait()
         finally:
             if process.returncode is None:
@@ -336,6 +338,15 @@ class TorrentMaker:
         if warning:
             # Línea fija para quien lanza esto: la app la convierte en aviso.
             print(warning, flush=True)
+            season = re.search(r"season (\d+)", warning)
+            eventos.emitir(
+                "aviso",
+                codigo="pack_incompleto",
+                datos={
+                    "temporada": int(season.group(1)) if season else None,
+                    "faltan": [int(n) for n in re.findall(r"\d+", warning.partition("missing episodes")[2])],
+                },
+            )
         return returncode
 
     @staticmethod
@@ -487,6 +498,7 @@ class TorrentMaker:
         self.start_time = time.time()  # Initialize start_time if not set
 
         progress.update(f"Hashing with torf: {percentage:.1f}% ({pieces_done}/{pieces_total} pieces)")
+        eventos.avance("torrent", percentage)
 
         if pieces_done >= pieces_total:
             log.debug(f"Hashed in {elapsed_time:.2f} seconds")

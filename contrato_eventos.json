@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "descripcion": "Eventos JSON Lines que escribe `upload.py --eventos RUTA` (una línea por evento, UTF-8). Sin secretos.",
+  "comunes": {
+    "v": {"tipo": "integer", "valor": 1},
+    "ts": {"tipo": "string"},
+    "ev": {"tipo": "string"}
+  },
+  "valores": {
+    "modo": ["subida", "solo_cliente"],
+    "clave": ["analisis", "duplicados", "capturas", "subida_capturas", "torrent", "subida", "cliente"],
+    "estado": ["empieza", "avance", "hecha", "fallida"],
+    "paso": ["screenshots", "torrent"],
+    "motivo": [
+      "login", "ya_estaba", "no_aceptado", "no_parado", "no_arrancado", "no_confirmado", "no_seed", "sin_torrent",
+      "sin_cliente", "solo_cliente_no_qbit", "cliente_no_soportado", "sin_emu", "no_coincide", "error"
+    ],
+    "codigo_aviso": ["pack_incompleto"],
+    "codigo_resultado": [
+      "subido", "cliente_ok", "duplicado", "busqueda_caida", "rechazado", "tmdb", "sin_video", "cliente_fallido", "excepcion",
+      "grupo_prohibido", "contenido_prohibido", "tracker_invalido", "checks_fallidos", "cancelado", "torrent_viejo", "tmp_sucio",
+      "error_prep", "args_invalidos", "salida_inesperada", "sin_rutas", "sin_trackers", "sin_config", "config_invalida", "interrumpido"
+    ]
+  },
+  "eventos": {
+    "inicio": {
+      "requeridos": {
+        "uuid": {"tipo": "string"},
+        "modo": {"tipo": "string", "valores": "modo"},
+        "reanuda": {"tipo": "boolean"}
+      },
+      "opcionales": {}
+    },
+    "fase": {
+      "requeridos": {
+        "clave": {"tipo": "string", "valores": "clave"},
+        "estado": {"tipo": "string", "valores": "estado"}
+      },
+      "opcionales": {"pct": {"tipo": "integer", "min": 0, "max": 100}}
+    },
+    "paso_hecho": {
+      "requeridos": {"paso": {"tipo": "string", "valores": "paso"}},
+      "opcionales": {}
+    },
+    "subido": {
+      "requeridos": {"torrent_id": {"tipo": "integer"}, "url": {"tipo": "string"}},
+      "opcionales": {}
+    },
+    "cliente": {
+      "requeridos": {"ok": {"tipo": "boolean"}, "cliente": {"tipo": "string"}},
+      "opcionales": {"ruta": {"tipo": "string"}, "motivo": {"tipo": "string", "valores": "motivo"}}
+    },
+    "aviso": {
+      "requeridos": {
+        "codigo": {"tipo": "string", "valores": "codigo_aviso"},
+        "datos": {"tipo": "object"}
+      },
+      "opcionales": {},
+      "datos_por_codigo": {
+        "pack_incompleto": {
+          "temporada": {"tipo": ["integer", "null"]},
+          "faltan": {"tipo": "array", "items": "integer"}
+        }
+      }
+    },
+    "resultado": {
+      "requeridos": {
+        "ok": {"tipo": "boolean"},
+        "codigo": {"tipo": "string", "valores": "codigo_resultado"}
+      },
+      "opcionales": {"detalle": {"tipo": "string"}}
+    }
+  }
+}

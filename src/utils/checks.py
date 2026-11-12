@@ -7,6 +7,7 @@ from rich.prompt import Confirm
 from src.progress import ProgressManager
 from src.trackers.COMMON import COMMON
 from src.trackers.UNIT3D import DupeSearchError
+from src.utils import eventos
 from src.utils.console import console
 
 
@@ -18,6 +19,7 @@ async def pre_upload_checks(
     tracker_upload_ok = {tracker: True for tracker in trackers}
     progress = ProgressManager.get_instance()
     progress.update("Pre-Upload Checks..")
+    eventos.fase("duplicados", "empieza")
 
     if meta.get("skip_dupe_check", False):
         console.print("[yellow]Skipping dupe check..")
@@ -63,6 +65,7 @@ async def pre_upload_checks(
                 tracker_upload_ok[tracker] = False
                 continue
 
+    eventos.fase("duplicados", "hecha" if any(tracker_upload_ok.values()) else "fallida")
     return tracker_upload_ok
 
 

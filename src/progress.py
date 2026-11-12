@@ -6,6 +6,8 @@ from rich.live import Live
 from rich.spinner import Spinner
 from rich.text import Text
 
+from src.utils import eventos
+
 
 class ProgressManager:
     _instance: Optional["ProgressManager"] = None
@@ -68,15 +70,18 @@ class ProgressManager:
         self.total_screenshots = total_screenshots
         self.uploaded_screenshots = 0
         self.update(f"Uploading screenshots: 0/{total_screenshots}")
+        eventos.fase("subida_capturas", "empieza")
 
     def screen_up(self, count: int = 1) -> None:
         """Increment the count of uploaded screenshots and update the display."""
         self.uploaded_screenshots += count
         self.update(f"Uploading screenshots: {self.uploaded_screenshots}/{self.total_screenshots}")
+        eventos.avance("subida_capturas", 100 * self.uploaded_screenshots / max(self.total_screenshots, 1))
 
     def screen_done(self) -> None:
         """Finalize the upload progress display."""
         self.update("All screenshots uploaded")
+        eventos.fase("subida_capturas", "hecha")
 
     @contextmanager
     def pause_for_interaction(self):

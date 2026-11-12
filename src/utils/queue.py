@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from rich.progress import Progress, TimeRemainingColumn
 
+from src.utils import eventos
 from src.utils.console import console
 
 
@@ -28,10 +29,12 @@ def expand_auto_queue(argv: List[str]) -> List[str]:
         if arg in ("-aq", "--auto-queue"):
             if i + 1 >= len(argv):
                 console.print("[red]--auto-queue requires a directory[/red]")
+                eventos.resultado(False, "args_invalidos")
                 sys.exit(1)
             dir_path = Path(argv[i + 1])
             if not dir_path.is_dir():
                 console.print(f"[red]--auto-queue directory not found: {dir_path}[/red]")
+                eventos.resultado(False, "args_invalidos")
                 sys.exit(1)
             for entry in dir_path.iterdir():
                 if not entry.name.startswith(".") and entry.exists():

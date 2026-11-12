@@ -16,6 +16,7 @@ from src.databases import AniListHandler, IMDbHandler, PornDbHandler, TMDbHandle
 from src.discparse import DiscParse
 from src.mediainfo import MediaInfoHandler
 from src.progress import ProgressManager
+from src.utils import eventos
 from src.utils.console import console
 
 from .utils.loads import get_distributor, get_region, load_json
@@ -289,6 +290,8 @@ class VideoProcessor:
         if not video_files:
             console.print(f"[red]No video files found in {videoloc}")
             if mode == "cli":
+                eventos.fase("analisis", "fallida")
+                eventos.resultado(False, "sin_video")
                 sys.exit(1)
             return None, []
 

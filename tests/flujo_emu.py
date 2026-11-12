@@ -259,6 +259,28 @@ class Flujo:
         # Rich escribe a la derecha de cada línea de log el fichero y la línea que la emitió: se mueve con cada edición.
         return "\n".join(re.sub(r"\s+\w+\.py:\d+$", "", linea) for linea in salida.split("\n"))
 
+    @property
+    def ruta_eventos(self) -> Path:
+        return self.raiz / "eventos.jsonl"
+
+    def eventos(self) -> list[dict]:
+        """Los eventos que escribió la ejecución, tal cual."""
+        return [json.loads(linea) for linea in self.ruta_eventos.read_text(encoding="utf-8").splitlines()]
+
+    def eventos_normalizados(self) -> str:
+        """Los eventos como líneas JSON sin lo que cambia entre ejecuciones (ts, rutas temporales, puerto del tracker)."""
+        def limpiar(valor):
+            if isinstance(valor, str):
+                return re.sub(r"emu-\w{8}", "emu-00000000", valor.replace(self.tracker.url, DOMINIO))
+            if isinstance(valor, dict):
+                return {k: limpiar(v) for k, v in valor.items()}
+            if isinstance(valor, list):
+                return [limpiar(v) for v in valor]
+            return valor
+
+        lineas = [{**evento, "ts": "1970-01-01T00:00:00.000Z"} for evento in self.eventos()]
+        return "".join(json.dumps(limpiar(e), ensure_ascii=False) + "\n" for e in lineas)
+
     def crear_video(self, nombre: str) -> Path:
         """Un «mkv» (los bytes no importan: mediainfo y ffmpeg están sustituidos) y su salida real de mediainfo."""
         ruta = self.contenido / f"{nombre}.mkv"

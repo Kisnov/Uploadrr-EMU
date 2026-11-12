@@ -9,6 +9,7 @@ from src.manual import ManualPackager
 from src.prep import Prep
 from src.progress import ProgressManager
 from src.trackers.COMMON import COMMON
+from src.utils import eventos
 from src.utils.console import console, log, redactor
 from src.utils.descgen import DescGenerator
 
@@ -134,7 +135,9 @@ async def upload_to_tracker(
     """Generic tracker upload method after pre-checks."""
     console.print(f"Uploading to {tracker_name} {'[dim red](DEBUG)' if debug else ''}")
 
+    eventos.fase("subida", "empieza")
     result = await tracker_instance.upload(meta)
+    eventos.fase("subida", "hecha" if result is True else "fallida")
     if result is True:
         if client:
             # El torrent ya está en el tracker: si falla el cliente no es una
@@ -151,9 +154,17 @@ async def upload_to_tracker(
 
 async def anadir_al_cliente(client: Clients, meta: Dict, tracker_name: str) -> bool:
     """add_to_client sin dejar escapar errores: True solo si el torrent quedó añadido."""
+    eventos.fase("cliente", "empieza")
     try:
-        return await client.add_to_client(meta, tracker_name)
+        anadido = await client.add_to_client(meta, tracker_name)
+        info = getattr(client, "cliente_info", None) or {}
+        motivo = None if anadido else info.get("motivo") or "no_confirmado"
+        eventos.fase("cliente", "hecha" if anadido else "fallida")
+        eventos.cliente(bool(anadido), info.get("cliente", "ninguno"), ruta=info.get("ruta") if anadido else None, motivo=motivo)
+        return anadido
     except Exception as e:
+        eventos.fase("cliente", "fallida")
+        eventos.cliente(False, (getattr(client, "cliente_info", None) or {}).get("cliente", "ninguno"), motivo="error")
         # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
         # Va por print, así que hay que taparla a mano: el error de conexión lleva la clave de qui.
         motivo = redactor.redact(" ".join(str(e).split()))
