@@ -160,6 +160,28 @@ def test_search_page_limit(tracker, emu, meta, monkeypatch):
     assert len(tracker.requests) == 3
 
 
+def test_search_timeout_raises(tracker, emu, meta):
+    emu.timeout = httpx.Timeout(0.2)
+
+    def search(query):
+        time.sleep(0.4)
+        return 200, {"data": [], "links": {"next": None}}
+
+    tracker.routes[("GET", SEARCH)] = search
+    with pytest.raises(DupeSearchError):
+        run(emu.search_existing(meta))
+
+
+def test_search_connection_refused_raises(emu, meta):
+    with socket.socket() as libre:
+        libre.bind(("127.0.0.1", 0))
+        puerto = libre.getsockname()[1]
+    emu.search_url = f"http://localhost:{puerto}{SEARCH}"  # nadie escucha ahí
+    with pytest.raises(DupeSearchError) as error:
+        run(emu.search_existing(meta))
+    assert TOKEN not in str(error.value)
+
+
 @pytest.fixture
 def sleeps(monkeypatch):
     """Las esperas que se piden, sin esperar."""
@@ -542,6 +564,23 @@ def test_upload_ok_but_torrent_never_downloads(tracker, emu, upload_meta, capsys
     assert not saved_torrent(upload_meta).exists()
     assert "Torrent upload succeeded, but failed to download the torrent file" in capsys.readouterr().out
     assert len(tracker.calls("GET", "/torrent/download/42.rsskey")) == 4
+
+
+def test_upload_ok_but_download_times_out_counts_as_uploaded(tracker, emu, upload_meta, capsys):
+    emu.timeout = httpx.Timeout(0.2)
+    tracker.routes[("POST", UPLOAD)] = lambda q: (200, {"success": True, "data": download_url(tracker)})
+
+    def download(query):
+        time.sleep(0.4)
+        return 200, b"d4:infode"
+
+    tracker.routes[("GET", "/torrent/download/42.rsskey")] = download
+
+    assert run(emu.upload(upload_meta)) is True  # ya está en el tracker: reintentarlo lo duplicaría
+    assert not saved_torrent(upload_meta).exists()
+    out = capsys.readouterr().out
+    assert "Torrent upload succeeded, but failed to download the torrent file: ReadTimeout" in out
+    assert TOKEN not in out
 
 
 # --solo-cliente: el torrent ya está subido y solo se vuelve a añadir al cliente
