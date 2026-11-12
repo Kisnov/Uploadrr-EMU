@@ -3,6 +3,7 @@
 Sin la opción todo son no-ops. Un evento nunca lleva secretos (ni claves, ni URLs con ellas, ni valores de config)."""
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -28,7 +29,8 @@ def ruta_de_argv(argv: List[str]) -> Optional[str]:
 
 def configurar(ruta: Optional[str]) -> None:
     global _ruta, _avisado, _resultado
-    _ruta, _avisado, _resultado = ruta or None, False, False
+    # Absoluta: el programa cambia de directorio a mitad (mediainfo, capturas, torrent).
+    _ruta, _avisado, _resultado = (os.path.abspath(ruta) if ruta else None), False, False
     _pct.clear()
 
 

@@ -3,6 +3,7 @@
 Regenerar los .jsonl: igual que los .txt (ver test_transcripcion_dorada.py)."""
 
 import json
+import os
 import sys
 from types import SimpleNamespace
 
@@ -294,3 +295,17 @@ def test_el_aviso_de_pack_incompleto(monkeypatch, tmp_path):
     (linea,) = [json.loads(x) for x in fichero.read_text(encoding="utf-8").splitlines() if '"aviso"' in x]
     validar(linea)
     assert linea["datos"] == {"temporada": 3, "faltan": [4, 7]}
+
+
+def test_una_ruta_relativa_no_se_parte_al_cambiar_de_directorio(tmp_path, monkeypatch):
+    (tmp_path / "otra").mkdir()
+    monkeypatch.chdir(tmp_path)
+    eventos.configurar("e.jsonl")
+    try:
+        eventos.inicio("x", "subida", False)
+        os.chdir(tmp_path / "otra")  # como hace mediainfo a mitad de la ejecución
+        eventos.resultado(False, "excepcion")
+    finally:
+        eventos.configurar(None)
+    assert len((tmp_path / "e.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+    assert not (tmp_path / "otra" / "e.jsonl").exists()

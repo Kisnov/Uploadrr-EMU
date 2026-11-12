@@ -164,7 +164,7 @@ async def anadir_al_cliente(client: Clients, meta: Dict, tracker_name: str) -> b
         return anadido
     except Exception as e:
         eventos.fase("cliente", "fallida")
-        eventos.cliente(False, "ninguno", motivo="error")
+        eventos.cliente(False, (getattr(client, "cliente_info", None) or {}).get("cliente", "ninguno"), motivo="error")
         # Línea fija, en una sola línea: emuwarez-uploadrr la lee para no dar el cliente por bueno.
         # Va por print, así que hay que taparla a mano: el error de conexión lleva la clave de qui.
         motivo = redactor.redact(" ".join(str(e).split()))

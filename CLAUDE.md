@@ -60,7 +60,8 @@ or report their errors unless they break an eMuwarez upload.
   write failure is logged once and never aborts. Every event has `v` (1), `ts` (ISO UTC) and `ev`, and never a secret.
   Events: `inicio`, `fase` (`clave`, `estado`, `pct`), `paso_hecho`, `subido` (`torrent_id`, `url`), `cliente`, `aviso`
   (`pack_incompleto`), `resultado`. Each item ends with exactly one `resultado` as its last line (`ok`, `codigo`, optional
-  `detalle`); the exit code does not change. `subido` is also saved first as `meta["subido"] = {id, url}` (informative: a
+  `detalle`); the exit code does not change. No `resultado` at the end means the process died mid-run (a signal, a kill), and
+  an `ok: true` may come without a `subido` when the tracker gave no link: `subido`, when present, is authoritative. `subido` is also saved first as `meta["subido"] = {id, url}` (informative: a
   `--resume` inherits it, nothing in this repo acts on it). The schema is `contrato_eventos.json` (the app copies it and
   its presence means `--eventos` is supported); `src/utils/eventos.py` emits, `tests/golden/*.jsonl` and
   `tests/test_eventos.py` pin it. A new event, field or code goes into the schema, the goldens and the app together.
