@@ -45,9 +45,9 @@ SCREENS:
 SIGNATURES:
   use_global_sigs: default # Firma propia de eMuwarez Uploadrr (icono holográfico animado), no la de marca de Uploadrr. Valores: default (la del tracker si tiene, si no la global), true (solo la global), false (solo la del tracker), null (ninguna)
   ### These signatures below are for GLOBAL or used as fallback if using default  >>> to adjust per tracker, simply add the same keys below tracker of choice ###
-  signature: "\n[center][img=400]https://i.ibb.co/5gt00Zv4/uploadrr-signature.webp[/img][/center]"
+  signature: "\n[center][img=400]https://i.ibb.co/3yXzn45j/emuwarr-firma-animada.webp[/img][/center]"
   anon_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
-  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][img=400]https://i.ibb.co/5gt00Zv4/uploadrr-signature.webp[/img][/center]"
+  pr_signature: "\n[center][size=6][b]Personal Release[/b][/size][/center]\n[center][img=400]https://i.ibb.co/3yXzn45j/emuwarr-firma-animada.webp[/img][/center]"
   anon_pr_signature: "\n[center][url=https://codeberg.org/CvT/Uploadrr][img=40]https://i.ibb.co/n0jF73x/hacker.png[/img][/url][/center]"
 
 AUTO:
