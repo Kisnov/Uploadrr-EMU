@@ -298,6 +298,7 @@ class Unit3d:
                 console.print("[yellow]Torrent upload succeeded, but failed to download the torrent file: no hay enlace[/yellow]")
                 return True
 
+        url = None
         torrent_id = re.search(r"/(\d+)\.", raw_url)
         if torrent_id:
             # Línea fija para quien lanza esto: la ficha del torrent subido.
@@ -314,18 +315,18 @@ class Unit3d:
                 console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
                 return True
         try:
-            await self._guardar_torrent(meta, content)
+            await self._guardar_torrent(meta, content, url)
         except Exception as e:
             console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
             return True
         console.print("[bold green]Torrent uploaded successfully!")
         return True
 
-    async def _guardar_torrent(self, meta: Dict[str, Any], content: bytes) -> Path:
-        """Guarda el .torrent firmado como [TRACKER]<clean_name>.torrent, con el comentario que se ve en el cliente."""
+    async def _guardar_torrent(self, meta: Dict[str, Any], content: bytes, url: Optional[str]) -> Path:
+        """Guarda el .torrent firmado como [TRACKER]<clean_name>.torrent, con el comentario y la ficha que se ven en el cliente."""
         new_torrent = Path(meta["base_dir"]) / "tmp" / meta["uuid"] / f"[{self.tracker}]{meta['clean_name']}.torrent"
         new_torrent.write_bytes(content)
-        await edit_torrent(torrent_path=new_torrent, comment=COMENTARIO_TORRENT)
+        await edit_torrent(torrent_path=new_torrent, comment=f"{COMENTARIO_TORRENT}\n{url}" if url else COMENTARIO_TORRENT)
         return new_torrent
 
     async def descargar_subido(self, meta: Dict[str, Any], torrent_id: int) -> Optional[Path]:
@@ -354,7 +355,7 @@ class Unit3d:
             console.print(f"[red]{self.tracker}: no se pudo descargar el .torrent {torrent_id}: {error}")
             return None
         try:
-            return await self._guardar_torrent(meta, content)
+            return await self._guardar_torrent(meta, content, f"{self.domain}/torrents/{torrent_id}")
         except Exception as e:
             console.print(f"[red]{self.tracker}: no se pudo guardar el .torrent {torrent_id}: {e}")
             return None
