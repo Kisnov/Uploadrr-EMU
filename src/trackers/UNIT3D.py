@@ -298,6 +298,7 @@ class Unit3d:
                 console.print("[yellow]Torrent upload succeeded, but failed to download the torrent file: no hay enlace[/yellow]")
                 return True
 
+        url = None
         torrent_id = re.search(r"/(\d+)\.", raw_url)
         if torrent_id:
             # Línea fija para quien lanza esto: la ficha del torrent subido.
@@ -314,7 +315,7 @@ class Unit3d:
                 console.print(f"[yellow]Torrent upload succeeded, but failed to download the torrent file: {error}[/yellow]")
                 return True
         try:
-            await self._guardar_torrent(meta, content, (meta.get("subido") or {}).get("url"))
+            await self._guardar_torrent(meta, content, url)
         except Exception as e:
             console.print(f"[red]Torrent upload succeeded, but failed to save the torrent file: {e}[/red]")
             return True
