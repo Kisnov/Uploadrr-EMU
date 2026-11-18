@@ -9,6 +9,11 @@
 [![Lint: ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
 [![Licencia: GPL-3.0](https://img.shields.io/github/license/Kisnov/Uploadrr-EMU)](LICENSE)
 
+> [!IMPORTANT]
+> **Este repositorio está archivado.** Uploadrr-EMU vive ahora en la carpeta
+> [`uploadrr-emu/`](https://github.com/Kisnov/eMuwarr/tree/dev/uploadrr-emu) de
+> [Kisnov/eMuwarr](https://github.com/Kisnov/eMuwarr), con todo su historial. Los issues y los PR van allí.
+
 Derivado de [Uploadrr](https://codeberg.org/CvT/Uploadrr) y dedicado a subir a **eMuwarez**,
 un tracker UNIT3D (clave `EMU`). Prepara la subida (mediainfo, capturas, descripción, `.torrent`), busca duplicados,
 sube y añade el torrent firmado a qBittorrent para sembrarlo.
